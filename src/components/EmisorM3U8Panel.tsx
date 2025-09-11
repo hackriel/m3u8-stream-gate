@@ -76,17 +76,14 @@ export default function EmisorM3U8Panel() {
   };
 
   // Construye la URL de vista previa a partir del RTMP + sufijo.
-  // Convierte rtmp:// a http:// para vista previa en navegador
+  // Ejemplo del usuario: rtmp://fluestabiliz.giize.com/costaSTAR007 + "/video.m3u8"
+  // Resultado: rtmp://fluestabiliz.giize.com/costaSTAR007/video.m3u8
+  // Nota: si tu servidor expone HLS por HTTP(S), puedes ingresar ya el esquema correcto.
   const previewFromRTMP = () => {
     if (!rtmp) return "";
-    if (rtmp.endsWith(".m3u8")) {
-      // Si ya viene completo, convertir rtmp:// a http://
-      return rtmp.replace(/^rtmp:\/\//, "http://");
-    }
+    if (rtmp.endsWith(".m3u8")) return rtmp; // ya viene completo
     const joiner = rtmp.endsWith("/") || previewSuffix.startsWith("/") ? "" : "/";
-    const fullUrl = `${rtmp}${joiner}${previewSuffix}`;
-    // Convertir rtmp:// a http:// para vista previa
-    return fullUrl.replace(/^rtmp:\/\//, "http://");
+    return `${rtmp}${joiner}${previewSuffix}`;
   };
 
   // --- Control de preview local (HLS.js / nativo) ---
