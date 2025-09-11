@@ -22,6 +22,7 @@ export default function EmisorM3U8Panel() {
   // Inputs con persistencia en localStorage (permanente)
   const [m3u8, setM3u8] = useState(() => localStorage.getItem("emisor_m3u8") || "");
   const [userAgent, setUserAgent] = useState(() => localStorage.getItem("emisor_user_agent") || "");
+  const [videoBitrate, setVideoBitrate] = useState(() => localStorage.getItem("emisor_video_bitrate") || "2000");
   const [rtmp, setRtmp] = useState(() => localStorage.getItem("emisor_rtmp") || "");
   const [previewSuffix, setPreviewSuffix] = useState(() => localStorage.getItem("emisor_preview_suffix") || "/video.m3u8");
 
@@ -46,6 +47,10 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     localStorage.setItem("emisor_user_agent", userAgent);
   }, [userAgent]);
+  
+  useEffect(() => {
+    localStorage.setItem("emisor_video_bitrate", videoBitrate);
+  }, [videoBitrate]);
   
   useEffect(() => {
     localStorage.setItem("emisor_rtmp", rtmp);
@@ -431,7 +436,8 @@ export default function EmisorM3U8Panel() {
         body: JSON.stringify({ 
           source_m3u8: m3u8, 
           target_rtmp: rtmp, 
-          user_agent: userAgent || null 
+          user_agent: userAgent || null,
+          video_bitrate: videoBitrate || "2000"
         }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -506,12 +512,14 @@ export default function EmisorM3U8Panel() {
     // Limpiar campos
     setM3u8("");
     setUserAgent("");
+    setVideoBitrate("2000");
     setRtmp("");
     setPreviewSuffix("/video.m3u8");
     
     // Limpiar localStorage de todos los datos
     localStorage.removeItem("emisor_m3u8");
     localStorage.removeItem("emisor_user_agent");
+    localStorage.removeItem("emisor_video_bitrate");
     localStorage.removeItem("emisor_rtmp");
     localStorage.removeItem("emisor_preview_suffix");
     
@@ -583,6 +591,20 @@ export default function EmisorM3U8Panel() {
               onChange={(e) => setUserAgent(e.target.value)}
               className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
             />
+
+            <label className="block text-sm mb-2 text-muted-foreground">Bitrate de Video (kbps)</label>
+            <input
+              type="number"
+              placeholder="2000"
+              value={videoBitrate}
+              onChange={(e) => setVideoBitrate(e.target.value)}
+              className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+              min="100"
+              max="10000"
+            />
+            <p className="text-xs text-muted-foreground mb-4">
+              Configura el bitrate de salida del video para comprimir la transmisión (100-10000 kbps)
+            </p>
 
             <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
             <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
@@ -804,7 +826,7 @@ export default function EmisorM3U8Panel() {
               <pre className="whitespace-pre-wrap text-foreground/90 text-[11px] leading-5 mt-3 bg-background/50 p-3 rounded-lg overflow-x-auto">
 {`ffmpeg \\
   -user_agent "${userAgent || 'Mozilla/5.0'}" -i "${m3u8 || 'https://origen/playlist.m3u8'}" \\
-  -c:v copy -c:a aac -b:a 128k -f flv "${rtmp || 'rtmp://host/app/stream'}"`}
+  -c:v libx264 -b:v ${videoBitrate || '2000'}k -c:a aac -b:a 128k -f flv "${rtmp || 'rtmp://host/app/stream'}"`}
               </pre>
               <p className="text-muted-foreground text-[11px] mt-2">
                 ⚙️ Tu endpoint /api/emit debe ejecutar algo como lo anterior y gestionar procesos/errores.
