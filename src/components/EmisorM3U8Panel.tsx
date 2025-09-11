@@ -19,66 +19,68 @@ export default function EmisorM3U8Panel() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<any>(null);
 
-  // Inputs con persistencia en sessionStorage
-  const [m3u8, setM3u8] = useState(() => sessionStorage.getItem("emisor_m3u8") || "");
-  const [userAgent, setUserAgent] = useState(() => sessionStorage.getItem("emisor_user_agent") || "");
-  const [rtmp, setRtmp] = useState(() => sessionStorage.getItem("emisor_rtmp") || "");
-  const [previewSuffix, setPreviewSuffix] = useState(() => sessionStorage.getItem("emisor_preview_suffix") || "/video.m3u8");
+  // Inputs con persistencia en localStorage (permanente)
+  const [m3u8, setM3u8] = useState(() => localStorage.getItem("emisor_m3u8") || "");
+  const [userAgent, setUserAgent] = useState(() => localStorage.getItem("emisor_user_agent") || "");
+  const [rtmp, setRtmp] = useState(() => localStorage.getItem("emisor_rtmp") || "");
+  const [previewSuffix, setPreviewSuffix] = useState(() => localStorage.getItem("emisor_preview_suffix") || "/video.m3u8");
 
-  // Estado con persistencia
-  const [isEmitiendo, setIsEmitiendo] = useState(() => sessionStorage.getItem("emisor_is_emitting") === "true");
-  const [elapsed, setElapsed] = useState(() => parseInt(sessionStorage.getItem("emisor_elapsed") || "0"));
-  const [startTime, setStartTime] = useState(() => parseInt(sessionStorage.getItem("emisor_start_time") || "0"));
+  // Estado con persistencia permanente
+  const [isEmitiendo, setIsEmitiendo] = useState(() => localStorage.getItem("emisor_is_emitting") === "true");
+  const [elapsed, setElapsed] = useState(() => parseInt(localStorage.getItem("emisor_elapsed") || "0"));
+  const [startTime, setStartTime] = useState(() => parseInt(localStorage.getItem("emisor_start_time") || "0"));
   const [showDiagram, setShowDiagram] = useState(false);
   const [healthPoints, setHealthPoints] = useState<Array<{ t: number; up: number }>>([]);
   const [emitStatus, setEmitStatus] = useState<"idle" | "starting" | "running" | "stopping" | "error">(() => 
-    (sessionStorage.getItem("emisor_status") as any) || "idle"
+    (localStorage.getItem("emisor_status") as any) || "idle"
   );
-  const [emitMsg, setEmitMsg] = useState(() => sessionStorage.getItem("emisor_msg") || "");
+  const [emitMsg, setEmitMsg] = useState(() => localStorage.getItem("emisor_msg") || "");
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Persistir datos en sessionStorage cuando cambien
+  // Persistir datos en localStorage cuando cambien (permanente)
   useEffect(() => {
-    sessionStorage.setItem("emisor_m3u8", m3u8);
+    localStorage.setItem("emisor_m3u8", m3u8);
   }, [m3u8]);
   
   useEffect(() => {
-    sessionStorage.setItem("emisor_user_agent", userAgent);
+    localStorage.setItem("emisor_user_agent", userAgent);
   }, [userAgent]);
   
   useEffect(() => {
-    sessionStorage.setItem("emisor_rtmp", rtmp);
+    localStorage.setItem("emisor_rtmp", rtmp);
   }, [rtmp]);
   
   useEffect(() => {
-    sessionStorage.setItem("emisor_preview_suffix", previewSuffix);
+    localStorage.setItem("emisor_preview_suffix", previewSuffix);
   }, [previewSuffix]);
   
   useEffect(() => {
-    sessionStorage.setItem("emisor_is_emitting", isEmitiendo.toString());
+    localStorage.setItem("emisor_is_emitting", isEmitiendo.toString());
   }, [isEmitiendo]);
   
   useEffect(() => {
-    sessionStorage.setItem("emisor_elapsed", elapsed.toString());
+    localStorage.setItem("emisor_elapsed", elapsed.toString());
   }, [elapsed]);
   
   useEffect(() => {
-    sessionStorage.setItem("emisor_start_time", startTime.toString());
+    localStorage.setItem("emisor_start_time", startTime.toString());
   }, [startTime]);
   
   useEffect(() => {
-    sessionStorage.setItem("emisor_status", emitStatus);
+    localStorage.setItem("emisor_status", emitStatus);
   }, [emitStatus]);
   
   useEffect(() => {
-    sessionStorage.setItem("emisor_msg", emitMsg);
+    localStorage.setItem("emisor_msg", emitMsg);
   }, [emitMsg]);
 
-  // Restaurar sesión al cargar
+  // Restaurar sesión al cargar (permanente)
   useEffect(() => {
-    const savedIsEmitting = sessionStorage.getItem("emisor_is_emitting") === "true";
-    const savedStartTime = parseInt(sessionStorage.getItem("emisor_start_time") || "0");
+    const savedIsEmitting = localStorage.getItem("emisor_is_emitting") === "true";
+    const savedStartTime = parseInt(localStorage.getItem("emisor_start_time") || "0");
+    
+    console.log("🔄 Restaurando sesión:", { savedIsEmitting, savedStartTime });
     
     if (savedIsEmitting && savedStartTime > 0) {
       // Calcular tiempo transcurrido desde que se guardó
@@ -89,12 +91,14 @@ export default function EmisorM3U8Panel() {
       // Restaurar estado completo
       setIsEmitiendo(true);
       setEmitStatus("running");
-      setEmitMsg("Emisión restaurada desde sesión");
+      setEmitMsg("Emisión restaurada desde sesión persistente");
+      
+      console.log("✅ Estado de emisión restaurado, elapsed:", calculatedElapsed);
       
       // Restaurar reproductor si hay datos guardados - usar estado actual
       setTimeout(() => {
-        const currentRtmp = sessionStorage.getItem("emisor_rtmp") || "";
-        const currentSuffix = sessionStorage.getItem("emisor_preview_suffix") || "/video.m3u8";
+        const currentRtmp = localStorage.getItem("emisor_rtmp") || "";
+        const currentSuffix = localStorage.getItem("emisor_preview_suffix") || "/video.m3u8";
         
         if (currentRtmp) {
           let previewUrl = currentRtmp;
@@ -115,7 +119,9 @@ export default function EmisorM3U8Panel() {
           console.log("🔄 Restaurando reproductor con URL:", previewUrl);
           loadPreview(previewUrl);
         }
-      }, 500); // Pequeño delay para asegurar que el DOM esté listo
+      }, 1000); // Delay para asegurar que el DOM esté listo
+    } else {
+      console.log("ℹ️ No hay sesión activa para restaurar");
     }
   }, []);
 
@@ -391,12 +397,12 @@ export default function EmisorM3U8Panel() {
     setEmitStatus("idle");
     setEmitMsg("");
     
-    // Limpiar sessionStorage
-    sessionStorage.removeItem("emisor_is_emitting");
-    sessionStorage.removeItem("emisor_elapsed");
-    sessionStorage.removeItem("emisor_start_time");
-    sessionStorage.removeItem("emisor_status");
-    sessionStorage.removeItem("emisor_msg");
+    // Limpiar localStorage de emisión pero mantener datos de entrada
+    localStorage.removeItem("emisor_is_emitting");
+    localStorage.removeItem("emisor_elapsed");
+    localStorage.removeItem("emisor_start_time");
+    localStorage.removeItem("emisor_status");
+    localStorage.removeItem("emisor_msg");
   }
 
   function onBorrar() {
@@ -411,11 +417,11 @@ export default function EmisorM3U8Panel() {
     setRtmp("");
     setPreviewSuffix("/video.m3u8");
     
-    // Limpiar toda la sessionStorage relacionada
-    sessionStorage.removeItem("emisor_m3u8");
-    sessionStorage.removeItem("emisor_user_agent");
-    sessionStorage.removeItem("emisor_rtmp");
-    sessionStorage.removeItem("emisor_preview_suffix");
+    // Limpiar localStorage de todos los datos
+    localStorage.removeItem("emisor_m3u8");
+    localStorage.removeItem("emisor_user_agent");
+    localStorage.removeItem("emisor_rtmp");
+    localStorage.removeItem("emisor_preview_suffix");
     
     // Limpiar el reproductor
     try {
