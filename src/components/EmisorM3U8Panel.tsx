@@ -227,34 +227,48 @@ export default function EmisorM3U8Panel() {
     if (canPlayNative && /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent)) {
       console.log("🍎 Usando reproducción nativa de Safari");
       video.src = url;
+      video.crossOrigin = "anonymous";
       try {
         await video.play();
       } catch (e) {
         console.error("Error en reproducción nativa:", e);
       }
     } else {
-      // Usar HLS.js para otros navegadores
+      // Usar HLS.js para otros navegadores con configuración optimizada para live streaming
       try {
         const Hls = (await import("hls.js")).default;
         if (Hls.isSupported()) {
-          console.log("🚀 Usando HLS.js");
+          console.log("🚀 Usando HLS.js para live streaming");
           const hls = new Hls({
             debug: false,
             enableWorker: true,
             lowLatencyMode: true,
-            backBufferLength: 90,
-            maxBufferLength: 30,
-            maxMaxBufferLength: 120,
-            liveSyncDurationCount: 3,
-            liveMaxLatencyDurationCount: 10,
+            
+            // Configuración específica para live streaming
+            liveSyncDurationCount: 2,
+            liveMaxLatencyDurationCount: 5,
             liveDurationInfinity: true,
-            highBufferWatchdogPeriod: 2,
-            nudgeOffset: 0.1,
-            nudgeMaxRetry: 3,
+            
+            // Buffer configuration para live
+            maxBufferLength: 10,
+            maxMaxBufferLength: 20,
+            backBufferLength: 30,
+            
+            // Fragment loading
             maxFragLookUpTolerance: 0.25,
+            fragLoadingTimeOut: 10000,
+            manifestLoadingTimeOut: 10000,
+            
+            // Retry configuration
+            fragLoadingMaxRetry: 4,
+            manifestLoadingMaxRetry: 4,
+            levelLoadingMaxRetry: 4,
+            
+            // CORS and headers
             xhrSetup: (xhr: XMLHttpRequest, url: string) => {
               try {
                 xhr.setRequestHeader("Cache-Control", "no-cache");
+                xhr.setRequestHeader("Pragma", "no-cache");
                 if (userAgent) {
                   xhr.setRequestHeader("X-Requested-User-Agent", userAgent);
                 }
@@ -262,59 +276,137 @@ export default function EmisorM3U8Panel() {
                 console.error("Error setting headers:", e);
               }
             },
+            
+            // Auto start load
+            autoStartLoad: true,
+            startPosition: -1, // Para live streams, empezar desde el final
           });
           
           hlsRef.current = hls;
           
-          // Event listeners mejorados
+          // Event listeners mejorados para live streaming
           hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-            console.log("📺 HLS media attached");
+            console.log("📺 HLS media attached, loading source...");
             hls.loadSource(url);
           });
           
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            console.log("📄 HLS manifest parsed");
-            video.play().catch(e => console.error("Error auto-playing:", e));
+          hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+            console.log("📄 HLS manifest parsed:", data);
+            console.log("Levels available:", data.levels?.length || 0);
+            
+            // Para live streams, intentar reproducir automáticamente
+            const isLive = data.levels && data.levels.length > 0 && data.levels[0].details?.live;
+            if (isLive) {
+              console.log("🔴 Live stream detected, starting playback");
+              video.play().then(() => {
+                console.log("✅ Auto-play successful");
+              }).catch(e => {
+                console.warn("⚠️ Auto-play failed, user interaction required:", e);
+              });
+            } else {
+              console.log("📹 VOD/Unknown stream type, attempting playback");
+              video.play().catch(e => console.error("Error playing stream:", e));
+            }
+          });
+          
+          hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+            console.log(`📊 Quality switched to level ${data.level}`);
+          });
+          
+          hls.on(Hls.Events.FRAG_LOADED, (event, data) => {
+            console.log("📦 Fragment loaded:", data.frag.sn);
           });
           
           hls.on(Hls.Events.ERROR, (event: any, data: any) => {
-            console.error("❌ HLS Error:", data);
+            console.error("❌ HLS Error:", {
+              type: data.type,
+              details: data.details,
+              fatal: data.fatal,
+              response: data.response,
+              url: data.url
+            });
+            
             if (data.fatal) {
               switch (data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
-                  console.log("🔄 Recovering from network error");
-                  hls.startLoad();
+                  console.log("🔄 Recovering from network error...");
+                  setTimeout(() => {
+                    hls.startLoad();
+                  }, 1000);
                   break;
+                  
                 case Hls.ErrorTypes.MEDIA_ERROR:
-                  console.log("🔄 Recovering from media error");
+                  console.log("🔄 Recovering from media error...");
                   hls.recoverMediaError();
                   break;
+                  
                 default:
-                  console.log("💥 Fatal error, trying fallback");
+                  console.log("💥 Fatal error, destroying and trying fallback");
                   hls.destroy();
                   hlsRef.current = null;
-                  // Fallback a reproducción directa
+                  
+                  // Fallback: intentar reproducción directa
+                  console.log("🆘 Trying direct video fallback");
                   video.src = url;
-                  video.play().catch(() => {});
+                  video.crossOrigin = "anonymous";
+                  video.load();
+                  
+                  setTimeout(() => {
+                    video.play().catch(e => {
+                      console.error("❌ Direct playback also failed:", e);
+                    });
+                  }, 1000);
+                  break;
+              }
+            } else {
+              // Errores no fatales
+              switch (data.details) {
+                case Hls.ErrorDetails.FRAG_LOAD_TIMEOUT:
+                case Hls.ErrorDetails.FRAG_LOAD_ERROR:
+                  console.log("⚠️ Fragment error, will retry");
+                  break;
+                  
+                case Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT:
+                case Hls.ErrorDetails.MANIFEST_LOAD_ERROR:
+                  console.log("⚠️ Manifest error, will retry");
                   break;
               }
             }
           });
           
-          hls.on(Hls.Events.FRAG_BUFFERED, () => {
-            console.log("📦 Fragment buffered");
-          });
+          // Event listeners para el elemento video
+          video.addEventListener('loadstart', () => console.log("🎬 Video load started"));
+          video.addEventListener('loadedmetadata', () => console.log("📊 Video metadata loaded"));
+          video.addEventListener('canplay', () => console.log("▶️ Video can start playing"));
+          video.addEventListener('playing', () => console.log("🎵 Video is playing"));
+          video.addEventListener('waiting', () => console.log("⏳ Video is buffering"));
+          video.addEventListener('error', (e) => console.error("🎥 Video element error:", e));
           
           hls.attachMedia(video);
-        } else {
-          console.log("⚠️ HLS.js not supported, usando fallback");
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          console.log("📱 HLS.js not supported, trying native HLS");
           video.src = url;
-          video.play().catch(e => console.error("Error en fallback:", e));
+          video.crossOrigin = "anonymous";
+          await video.play();
+        } else {
+          console.log("⚠️ No HLS support detected, trying direct URL");
+          video.src = url;
+          video.crossOrigin = "anonymous";
+          await video.play();
         }
       } catch (e) {
-        console.error("Error loading HLS.js:", e);
-        video.src = url;
-        video.play().catch(e => console.error("Error en fallback final:", e));
+        console.error("❌ Error loading HLS.js or setting up player:", e);
+        
+        // Último recurso: reproducción directa
+        console.log("🆘 Last resort: direct video element");
+        try {
+          video.src = url;
+          video.crossOrigin = "anonymous";
+          video.load();
+          await video.play();
+        } catch (playError) {
+          console.error("❌ All playback methods failed:", playError);
+        }
       }
     }
   }
@@ -573,10 +665,30 @@ export default function EmisorM3U8Panel() {
                 onError={() => { /* El recolector de salud detectará caída */ }}
               />
             </div>
-            <div className="mt-3 text-sm flex items-center gap-3">
+            <div className="mt-3 text-sm flex items-center gap-3 flex-wrap">
               <div className="flex items-center gap-2">
                 <span className={`inline-flex h-2.5 w-2.5 rounded-full ${isEmitiendo ? "bg-status-live" : "bg-status-idle"} animate-pulse`}></span>
                 <span>Estado: <strong>{isEmitiendo ? "🔴 EN VIVO" : "⚫ Detenido"}</strong></span>
+              </div>
+              
+              {/* Botón para probar reproducción manual */}
+              <button
+                onClick={() => {
+                  const testUrl = previewFromRTMP();
+                  if (testUrl) {
+                    console.log("🧪 Probando reproducción manual de:", testUrl);
+                    loadPreview(testUrl);
+                  } else {
+                    console.warn("⚠️ No hay URL de preview disponible");
+                  }
+                }}
+                className="px-3 py-1 rounded-lg bg-secondary hover:bg-secondary/90 text-secondary-foreground text-xs transition-all duration-200"
+              >
+                🔄 Probar reproducción
+              </button>
+              
+              <div className="text-xs text-muted-foreground">
+                URL: <code className="bg-card px-1 rounded text-[10px]">{previewFromRTMP() || "No configurada"}</code>
               </div>
             </div>
           </div>
