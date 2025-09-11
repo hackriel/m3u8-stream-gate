@@ -22,7 +22,7 @@ let emissionStatus = 'idle'; // idle, starting, running, stopping, error
 // Endpoint para iniciar emisión
 app.post('/api/emit', (req, res) => {
   try {
-    const { source_m3u8, target_rtmp, user_agent } = req.body;
+    const { source_m3u8, target_rtmp, user_agent, video_bitrate } = req.body;
 
     // Validaciones
     if (!source_m3u8 || !target_rtmp) {
@@ -39,14 +39,22 @@ app.post('/api/emit', (req, res) => {
     }
 
     emissionStatus = 'starting';
-    console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent });
+    console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, video_bitrate });
+
+    // Configurar bitrate (default 1500k si no se especifica)
+    const bitrateValue = video_bitrate || '1500';
 
     // Construir comando ffmpeg
     const ffmpegArgs = [
       '-re', // Leer input a su velocidad nativa
       '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       '-i', source_m3u8,
-      '-c:v', 'copy', // Copiar video sin recodificar
+      '-vf', 'scale=-2:720', // Escalar a 720p manteniendo aspect ratio
+      '-c:v', 'libx264', // Recodificar video con libx264
+      '-b:v', `${bitrateValue}k`, // Bitrate de video especificado
+      '-maxrate', `${parseInt(bitrateValue) * 1.2}k`, // Maxrate 20% más alto
+      '-bufsize', `${parseInt(bitrateValue) * 2}k`, // Buffer size 2x el bitrate
+      '-preset', 'veryfast', // Preset rápido para streaming en vivo
       '-c:a', 'aac',  // Recodificar audio a AAC
       '-b:a', '128k', // Bitrate de audio
       '-f', 'flv',    // Formato de salida FLV para RTMP
