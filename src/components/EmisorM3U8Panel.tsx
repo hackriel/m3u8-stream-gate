@@ -19,21 +19,83 @@ export default function EmisorM3U8Panel() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<any>(null);
 
-  // Inputs
-  const [m3u8, setM3u8] = useState("");
-  const [userAgent, setUserAgent] = useState("");
-  const [rtmp, setRtmp] = useState(""); // ej: rtmp://fluestabiliz.giize.com/costaSTAR007
-  const [previewSuffix, setPreviewSuffix] = useState("/video.m3u8"); // ej: /video.m3u8
+  // Inputs con persistencia en sessionStorage
+  const [m3u8, setM3u8] = useState(() => sessionStorage.getItem("emisor_m3u8") || "");
+  const [userAgent, setUserAgent] = useState(() => sessionStorage.getItem("emisor_user_agent") || "");
+  const [rtmp, setRtmp] = useState(() => sessionStorage.getItem("emisor_rtmp") || "");
+  const [previewSuffix, setPreviewSuffix] = useState(() => sessionStorage.getItem("emisor_preview_suffix") || "/video.m3u8");
 
-  // Estado
-  const [isEmitiendo, setIsEmitiendo] = useState(false);
-  const [elapsed, setElapsed] = useState(0); // segundos
+  // Estado con persistencia
+  const [isEmitiendo, setIsEmitiendo] = useState(() => sessionStorage.getItem("emisor_is_emitting") === "true");
+  const [elapsed, setElapsed] = useState(() => parseInt(sessionStorage.getItem("emisor_elapsed") || "0"));
+  const [startTime, setStartTime] = useState(() => parseInt(sessionStorage.getItem("emisor_start_time") || "0"));
   const [showDiagram, setShowDiagram] = useState(false);
   const [healthPoints, setHealthPoints] = useState<Array<{ t: number; up: number }>>([]);
-  const [emitStatus, setEmitStatus] = useState<"idle" | "starting" | "running" | "stopping" | "error">("idle");
-  const [emitMsg, setEmitMsg] = useState("");
+  const [emitStatus, setEmitStatus] = useState<"idle" | "starting" | "running" | "stopping" | "error">(() => 
+    (sessionStorage.getItem("emisor_status") as any) || "idle"
+  );
+  const [emitMsg, setEmitMsg] = useState(() => sessionStorage.getItem("emisor_msg") || "");
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Persistir datos en sessionStorage cuando cambien
+  useEffect(() => {
+    sessionStorage.setItem("emisor_m3u8", m3u8);
+  }, [m3u8]);
+  
+  useEffect(() => {
+    sessionStorage.setItem("emisor_user_agent", userAgent);
+  }, [userAgent]);
+  
+  useEffect(() => {
+    sessionStorage.setItem("emisor_rtmp", rtmp);
+  }, [rtmp]);
+  
+  useEffect(() => {
+    sessionStorage.setItem("emisor_preview_suffix", previewSuffix);
+  }, [previewSuffix]);
+  
+  useEffect(() => {
+    sessionStorage.setItem("emisor_is_emitting", isEmitiendo.toString());
+  }, [isEmitiendo]);
+  
+  useEffect(() => {
+    sessionStorage.setItem("emisor_elapsed", elapsed.toString());
+  }, [elapsed]);
+  
+  useEffect(() => {
+    sessionStorage.setItem("emisor_start_time", startTime.toString());
+  }, [startTime]);
+  
+  useEffect(() => {
+    sessionStorage.setItem("emisor_status", emitStatus);
+  }, [emitStatus]);
+  
+  useEffect(() => {
+    sessionStorage.setItem("emisor_msg", emitMsg);
+  }, [emitMsg]);
+
+  // Restaurar sesión al cargar
+  useEffect(() => {
+    const savedIsEmitting = sessionStorage.getItem("emisor_is_emitting") === "true";
+    const savedStartTime = parseInt(sessionStorage.getItem("emisor_start_time") || "0");
+    
+    if (savedIsEmitting && savedStartTime > 0) {
+      // Calcular tiempo transcurrido desde que se guardó
+      const now = Math.floor(Date.now() / 1000);
+      const calculatedElapsed = now - savedStartTime;
+      setElapsed(calculatedElapsed > 0 ? calculatedElapsed : 0);
+      
+      // Restaurar reproductor si hay datos guardados
+      const savedRtmp = sessionStorage.getItem("emisor_rtmp");
+      if (savedRtmp) {
+        const previewUrl = savedRtmp.startsWith("rtmp://") 
+          ? savedRtmp.replace("rtmp://", "http://") + (sessionStorage.getItem("emisor_preview_suffix") || "/video.m3u8")
+          : savedRtmp + (sessionStorage.getItem("emisor_preview_suffix") || "/video.m3u8");
+        loadPreview(previewUrl);
+      }
+    }
+  }, []);
 
   // Cada 5s registramos un punto de salud (1 = up, 0 = down)
   useEffect(() => {
@@ -97,10 +159,12 @@ export default function EmisorM3U8Panel() {
     return `${baseUrl}${joiner}${previewSuffix}`;
   };
 
-  // --- Control de preview local (HLS.js / nativo) ---
+  // --- Control de preview local (HLS.js / nativo) mejorado ---
   async function loadPreview(url: string) {
     const video = videoRef.current;
     if (!video || !url) return;
+
+    console.log("🎥 Cargando preview URL:", url);
 
     // Limpia reproducción previa si existe
     try {
@@ -115,20 +179,41 @@ export default function EmisorM3U8Panel() {
       console.error("Error cleaning previous video:", e);
     }
 
+    // Verificar si es Safari y puede reproducir HLS nativamente
     const canPlayNative = video.canPlayType("application/vnd.apple.mpegurl");
-    if (canPlayNative) {
+    
+    if (canPlayNative && /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent)) {
+      console.log("🍎 Usando reproducción nativa de Safari");
       video.src = url;
-      video.play().catch(() => {});
+      try {
+        await video.play();
+      } catch (e) {
+        console.error("Error en reproducción nativa:", e);
+      }
     } else {
+      // Usar HLS.js para otros navegadores
       try {
         const Hls = (await import("hls.js")).default;
         if (Hls.isSupported()) {
+          console.log("🚀 Usando HLS.js");
           const hls = new Hls({
+            debug: false,
+            enableWorker: true,
             lowLatencyMode: true,
-            xhrSetup: (xhr: XMLHttpRequest) => {
+            backBufferLength: 90,
+            maxBufferLength: 30,
+            maxMaxBufferLength: 120,
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 10,
+            liveDurationInfinity: true,
+            highBufferWatchdogPeriod: 2,
+            nudgeOffset: 0.1,
+            nudgeMaxRetry: 3,
+            maxFragLookUpTolerance: 0.25,
+            xhrSetup: (xhr: XMLHttpRequest, url: string) => {
               try {
+                xhr.setRequestHeader("Cache-Control", "no-cache");
                 if (userAgent) {
-                  xhr.setRequestHeader("User-Agent", userAgent);
                   xhr.setRequestHeader("X-Requested-User-Agent", userAgent);
                 }
               } catch (e) {
@@ -136,34 +221,58 @@ export default function EmisorM3U8Panel() {
               }
             },
           });
+          
           hlsRef.current = hls;
-          hls.attachMedia(video);
+          
+          // Event listeners mejorados
           hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            console.log("📺 HLS media attached");
             hls.loadSource(url);
           });
-          hls.on(Hls.Events.ERROR, (evt: any, data: any) => {
-            if (data && data.fatal) {
+          
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            console.log("📄 HLS manifest parsed");
+            video.play().catch(e => console.error("Error auto-playing:", e));
+          });
+          
+          hls.on(Hls.Events.ERROR, (event: any, data: any) => {
+            console.error("❌ HLS Error:", data);
+            if (data.fatal) {
               switch (data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
+                  console.log("🔄 Recovering from network error");
                   hls.startLoad();
                   break;
                 case Hls.ErrorTypes.MEDIA_ERROR:
+                  console.log("🔄 Recovering from media error");
                   hls.recoverMediaError();
                   break;
                 default:
-                  // deja de intentar
+                  console.log("💥 Fatal error, trying fallback");
+                  hls.destroy();
+                  hlsRef.current = null;
+                  // Fallback a reproducción directa
+                  video.src = url;
+                  video.play().catch(() => {});
                   break;
               }
             }
           });
+          
+          hls.on(Hls.Events.FRAG_BUFFERED, () => {
+            console.log("📦 Fragment buffered");
+          });
+          
+          hls.attachMedia(video);
         } else {
+          console.log("⚠️ HLS.js not supported, usando fallback");
           video.src = url;
-          video.play().catch(() => {});
+          video.play().catch(e => console.error("Error en fallback:", e));
         }
       } catch (e) {
-        console.error("Error loading HLS:", e);
+        console.error("Error loading HLS.js:", e);
         video.src = url;
-        video.play().catch(() => {});
+        video.play().catch(e => console.error("Error en fallback final:", e));
       }
     }
   }
@@ -196,6 +305,7 @@ export default function EmisorM3U8Panel() {
       setEmitStatus("running");
       setEmitMsg(data?.message || "Emitiendo a RTMP");
       setElapsed(0);
+      setStartTime(Math.floor(Date.now() / 1000));
       setIsEmitiendo(true);
 
       // Cargar preview desde RTMP (ej: rtmp://.../stream/video.m3u8)
@@ -235,8 +345,16 @@ export default function EmisorM3U8Panel() {
 
     setIsEmitiendo(false);
     setElapsed(0);
+    setStartTime(0);
     setEmitStatus("idle");
     setEmitMsg("");
+    
+    // Limpiar sessionStorage
+    sessionStorage.removeItem("emisor_is_emitting");
+    sessionStorage.removeItem("emisor_elapsed");
+    sessionStorage.removeItem("emisor_start_time");
+    sessionStorage.removeItem("emisor_status");
+    sessionStorage.removeItem("emisor_msg");
   }
 
   function onBorrar() {
@@ -244,6 +362,13 @@ export default function EmisorM3U8Panel() {
     setUserAgent("");
     setRtmp("");
     setPreviewSuffix("/video.m3u8");
+    
+    // Limpiar toda la sessionStorage relacionada
+    sessionStorage.removeItem("emisor_m3u8");
+    sessionStorage.removeItem("emisor_user_agent");
+    sessionStorage.removeItem("emisor_rtmp");
+    sessionStorage.removeItem("emisor_preview_suffix");
+    
     stopEmit();
   }
 
