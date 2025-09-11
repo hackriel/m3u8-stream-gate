@@ -1,7 +1,11 @@
-const express = require('express');
-const cors = require('cors');
-const { spawn } = require('child_process');
-const path = require('path');
+import express from 'express';
+import cors from 'cors';
+import { spawn } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -206,4 +210,4 @@ app.listen(PORT, () => {
   console.log(`🔧 Asegúrate de tener FFmpeg instalado y accesible en PATH`);
 });
 
-module.exports = app;
+export default app;
