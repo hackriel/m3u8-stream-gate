@@ -86,14 +86,36 @@ export default function EmisorM3U8Panel() {
       const calculatedElapsed = now - savedStartTime;
       setElapsed(calculatedElapsed > 0 ? calculatedElapsed : 0);
       
-      // Restaurar reproductor si hay datos guardados
-      const savedRtmp = sessionStorage.getItem("emisor_rtmp");
-      if (savedRtmp) {
-        const previewUrl = savedRtmp.startsWith("rtmp://") 
-          ? savedRtmp.replace("rtmp://", "http://") + (sessionStorage.getItem("emisor_preview_suffix") || "/video.m3u8")
-          : savedRtmp + (sessionStorage.getItem("emisor_preview_suffix") || "/video.m3u8");
-        loadPreview(previewUrl);
-      }
+      // Restaurar estado completo
+      setIsEmitiendo(true);
+      setEmitStatus("running");
+      setEmitMsg("Emisión restaurada desde sesión");
+      
+      // Restaurar reproductor si hay datos guardados - usar estado actual
+      setTimeout(() => {
+        const currentRtmp = sessionStorage.getItem("emisor_rtmp") || "";
+        const currentSuffix = sessionStorage.getItem("emisor_preview_suffix") || "/video.m3u8";
+        
+        if (currentRtmp) {
+          let previewUrl = currentRtmp;
+          
+          // Si ya termina en .m3u8, convertir rtmp a http si es necesario
+          if (currentRtmp.endsWith(".m3u8")) {
+            previewUrl = currentRtmp.startsWith("rtmp://") ? currentRtmp.replace("rtmp://", "http://") : currentRtmp;
+          } else {
+            // Convertir rtmp:// a http:// para la vista previa
+            if (currentRtmp.startsWith("rtmp://")) {
+              previewUrl = currentRtmp.replace("rtmp://", "http://");
+            }
+            
+            const joiner = previewUrl.endsWith("/") || currentSuffix.startsWith("/") ? "" : "/";
+            previewUrl = `${previewUrl}${joiner}${currentSuffix}`;
+          }
+          
+          console.log("🔄 Restaurando reproductor con URL:", previewUrl);
+          loadPreview(previewUrl);
+        }
+      }, 500); // Pequeño delay para asegurar que el DOM esté listo
     }
   }, []);
 
@@ -162,7 +184,10 @@ export default function EmisorM3U8Panel() {
   // --- Control de preview local (HLS.js / nativo) mejorado ---
   async function loadPreview(url: string) {
     const video = videoRef.current;
-    if (!video || !url) return;
+    if (!video || !url) {
+      console.error("❌ No hay video ref o URL para cargar preview");
+      return;
+    }
 
     console.log("🎥 Cargando preview URL:", url);
 
@@ -177,6 +202,17 @@ export default function EmisorM3U8Panel() {
       video.load();
     } catch (e) {
       console.error("Error cleaning previous video:", e);
+    }
+
+    // Verificar si la URL es accesible antes de intentar cargar
+    try {
+      const testResponse = await fetch(url, { 
+        method: 'HEAD',
+        mode: 'no-cors' // Para evitar problemas de CORS en la verificación
+      });
+      console.log("✅ URL parece accesible, procediendo con carga");
+    } catch (e) {
+      console.warn("⚠️ No se pudo verificar URL, intentando cargar de todas formas:", e);
     }
 
     // Verificar si es Safari y puede reproducir HLS nativamente
@@ -310,7 +346,13 @@ export default function EmisorM3U8Panel() {
 
       // Cargar preview desde RTMP (ej: rtmp://.../stream/video.m3u8)
       const previewUrl = previewFromRTMP();
-      if (previewUrl) await loadPreview(previewUrl);
+      console.log("🔄 Iniciando preview con URL:", previewUrl);
+      if (previewUrl) {
+        // Delay para dar tiempo al servidor a empezar a emitir
+        setTimeout(() => {
+          loadPreview(previewUrl);
+        }, 2000);
+      }
     } catch (e: any) {
       setEmitStatus("error");
       setEmitMsg(`No se pudo iniciar la emisión: ${e.message}`);
@@ -358,6 +400,12 @@ export default function EmisorM3U8Panel() {
   }
 
   function onBorrar() {
+    // Primero detener emisión si está activa
+    if (isEmitiendo) {
+      stopEmit();
+    }
+    
+    // Limpiar campos
     setM3u8("");
     setUserAgent("");
     setRtmp("");
@@ -369,7 +417,23 @@ export default function EmisorM3U8Panel() {
     sessionStorage.removeItem("emisor_rtmp");
     sessionStorage.removeItem("emisor_preview_suffix");
     
-    stopEmit();
+    // Limpiar el reproductor
+    try {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
+    } catch (e) {
+      console.error("Error limpiando reproductor:", e);
+    }
+    
+    console.log("🧹 Campos limpiados, listo para nueva configuración");
   }
 
   const uptimeData = healthPoints.map((p) => ({
