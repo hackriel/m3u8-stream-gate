@@ -183,10 +183,10 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Catch-all handler: send back React's index.html file for any non-API routes
-app.get('*', (req, res) => {
+// Catch-all handler: send back React's index.html file for SPA routing
+app.get('/:path(.*)', (req, res) => {
   // Solo servir index.html si no es una ruta de API
-  if (!req.path.startsWith('/api/')) {
+  if (!req.params.path.startsWith('api/')) {
     res.sendFile(join(__dirname, 'dist', 'index.html'));
   } else {
     res.status(404).json({ error: 'API endpoint not found' });
