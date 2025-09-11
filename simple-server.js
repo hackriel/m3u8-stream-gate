@@ -47,19 +47,25 @@ app.post('/api/emit', (req, res) => {
     // Configurar bitrate (default 1500k si no se especifica)
     const bitrateValue = video_bitrate || '1500';
 
-    // Construir comando ffmpeg
+    // Construir comando ffmpeg optimizado para menor uso de CPU
     const ffmpegArgs = [
       '-re', // Leer input a su velocidad nativa
       '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       '-i', source_m3u8,
-      '-vf', 'scale=-2:720', // Escalar a 720p manteniendo aspect ratio
+      '-threads', '2', // Limitar threads para no sobrecargar CPU
+      '-vf', 'scale=-2:720:flags=fast_bilinear', // Escalado más eficiente
       '-c:v', 'libx264', // Recodificar video con libx264
+      '-preset', 'ultrafast', // Preset más rápido para menor uso CPU
+      '-tune', 'zerolatency', // Optimizar para streaming en vivo
+      '-profile:v', 'baseline', // Perfil más compatible y eficiente
       '-b:v', `${bitrateValue}k`, // Bitrate de video especificado
       '-maxrate', `${parseInt(bitrateValue) * 1.2}k`, // Maxrate 20% más alto
       '-bufsize', `${parseInt(bitrateValue) * 2}k`, // Buffer size 2x el bitrate
-      '-preset', 'veryfast', // Preset rápido para streaming en vivo
+      '-x264opts', 'keyint=60:min-keyint=60:scenecut=-1', // Optimizaciones x264
       '-c:a', 'aac',  // Recodificar audio a AAC
       '-b:a', '128k', // Bitrate de audio
+      '-ac', '2', // Forzar audio estéreo
+      '-ar', '44100', // Sample rate estándar
       '-f', 'flv',    // Formato de salida FLV para RTMP
       '-flvflags', 'no_duration_filesize',
       '-reconnect', '1',
