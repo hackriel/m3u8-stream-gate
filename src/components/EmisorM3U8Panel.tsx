@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -15,153 +16,141 @@ declare global {
   }
 }
 
+// Tipo para un proceso de emisión
+interface EmissionProcess {
+  m3u8: string;
+  userAgent: string;
+  rtmp: string;
+  previewSuffix: string;
+  isEmitiendo: boolean;
+  elapsed: number;
+  startTime: number;
+  emitStatus: "idle" | "starting" | "running" | "stopping" | "error";
+  emitMsg: string;
+  healthPoints: Array<{ t: number; up: number }>;
+}
+
 export default function EmisorM3U8Panel() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<any>(null);
-
-  // Inputs con persistencia en localStorage (permanente)
-  const [m3u8, setM3u8] = useState(() => localStorage.getItem("emisor_m3u8") || "");
-  const [userAgent, setUserAgent] = useState(() => localStorage.getItem("emisor_user_agent") || "");
-  const [videoBitrate, setVideoBitrate] = useState(() => localStorage.getItem("emisor_video_bitrate") || "1500");
-  const [rtmp, setRtmp] = useState(() => localStorage.getItem("emisor_rtmp") || "");
-  const [previewSuffix, setPreviewSuffix] = useState(() => localStorage.getItem("emisor_preview_suffix") || "/video.m3u8");
-
-  // Estado con persistencia permanente
-  const [isEmitiendo, setIsEmitiendo] = useState(() => localStorage.getItem("emisor_is_emitting") === "true");
-  const [elapsed, setElapsed] = useState(() => parseInt(localStorage.getItem("emisor_elapsed") || "0"));
-  const [startTime, setStartTime] = useState(() => parseInt(localStorage.getItem("emisor_start_time") || "0"));
+  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
+  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null)];
+  
+  const [activeTab, setActiveTab] = useState("0");
   const [showDiagram, setShowDiagram] = useState(false);
-  const [healthPoints, setHealthPoints] = useState<Array<{ t: number; up: number }>>([]);
-  const [emitStatus, setEmitStatus] = useState<"idle" | "starting" | "running" | "stopping" | "error">(() => 
-    (localStorage.getItem("emisor_status") as any) || "idle"
-  );
-  const [emitMsg, setEmitMsg] = useState(() => localStorage.getItem("emisor_msg") || "");
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Persistir datos en localStorage cuando cambien (permanente)
-  useEffect(() => {
-    localStorage.setItem("emisor_m3u8", m3u8);
-  }, [m3u8]);
-  
-  useEffect(() => {
-    localStorage.setItem("emisor_user_agent", userAgent);
-  }, [userAgent]);
-  
-  useEffect(() => {
-    localStorage.setItem("emisor_video_bitrate", videoBitrate);
-  }, [videoBitrate]);
-  
-  useEffect(() => {
-    localStorage.setItem("emisor_rtmp", rtmp);
-  }, [rtmp]);
-  
-  useEffect(() => {
-    localStorage.setItem("emisor_preview_suffix", previewSuffix);
-  }, [previewSuffix]);
-  
-  useEffect(() => {
-    localStorage.setItem("emisor_is_emitting", isEmitiendo.toString());
-  }, [isEmitiendo]);
-  
-  useEffect(() => {
-    localStorage.setItem("emisor_elapsed", elapsed.toString());
-  }, [elapsed]);
-  
-  useEffect(() => {
-    localStorage.setItem("emisor_start_time", startTime.toString());
-  }, [startTime]);
-  
-  useEffect(() => {
-    localStorage.setItem("emisor_status", emitStatus);
-  }, [emitStatus]);
-  
-  useEffect(() => {
-    localStorage.setItem("emisor_msg", emitMsg);
-  }, [emitMsg]);
-
-  // Restaurar sesión al cargar (permanente)
-  useEffect(() => {
-    const savedIsEmitting = localStorage.getItem("emisor_is_emitting") === "true";
-    const savedStartTime = parseInt(localStorage.getItem("emisor_start_time") || "0");
-    
-    console.log("🔄 Restaurando sesión:", { savedIsEmitting, savedStartTime });
-    
-    if (savedIsEmitting && savedStartTime > 0) {
-      // Calcular tiempo transcurrido desde que se guardó
-      const now = Math.floor(Date.now() / 1000);
-      const calculatedElapsed = now - savedStartTime;
-      setElapsed(calculatedElapsed > 0 ? calculatedElapsed : 0);
-      
-      // Restaurar estado completo
-      setIsEmitiendo(true);
-      setEmitStatus("running");
-      setEmitMsg("Emisión restaurada desde sesión persistente");
-      
-      console.log("✅ Estado de emisión restaurado, elapsed:", calculatedElapsed);
-      
-      // Restaurar reproductor si hay datos guardados - usar estado actual
-      setTimeout(() => {
-        const currentRtmp = localStorage.getItem("emisor_rtmp") || "";
-        const currentSuffix = localStorage.getItem("emisor_preview_suffix") || "/video.m3u8";
-        
-        if (currentRtmp) {
-          let previewUrl = currentRtmp;
-          
-          // Si ya termina en .m3u8, convertir rtmp a http si es necesario
-          if (currentRtmp.endsWith(".m3u8")) {
-            previewUrl = currentRtmp.startsWith("rtmp://") ? currentRtmp.replace("rtmp://", "http://") : currentRtmp;
-          } else {
-            // Convertir rtmp:// a http:// para la vista previa
-            if (currentRtmp.startsWith("rtmp://")) {
-              previewUrl = currentRtmp.replace("rtmp://", "http://");
-            }
-            
-            const joiner = previewUrl.endsWith("/") || currentSuffix.startsWith("/") ? "" : "/";
-            previewUrl = `${previewUrl}${joiner}${currentSuffix}`;
-          }
-          
-          console.log("🔄 Restaurando reproductor con URL:", previewUrl);
-          loadPreview(previewUrl);
-        }
-      }, 1000); // Delay para asegurar que el DOM esté listo
-    } else {
-      console.log("ℹ️ No hay sesión activa para restaurar");
+  // Estado para 3 procesos independientes
+  const [processes, setProcesses] = useState<EmissionProcess[]>(() => {
+    const savedProcesses = [];
+    for (let i = 0; i < 3; i++) {
+      savedProcesses.push({
+        m3u8: localStorage.getItem(`emisor_m3u8_${i}`) || "",
+        userAgent: localStorage.getItem(`emisor_user_agent_${i}`) || "",
+        rtmp: localStorage.getItem(`emisor_rtmp_${i}`) || "",
+        previewSuffix: localStorage.getItem(`emisor_preview_suffix_${i}`) || "/video.m3u8",
+        isEmitiendo: localStorage.getItem(`emisor_is_emitting_${i}`) === "true",
+        elapsed: parseInt(localStorage.getItem(`emisor_elapsed_${i}`) || "0"),
+        startTime: parseInt(localStorage.getItem(`emisor_start_time_${i}`) || "0"),
+        emitStatus: (localStorage.getItem(`emisor_status_${i}`) as any) || "idle",
+        emitMsg: localStorage.getItem(`emisor_msg_${i}`) || "",
+        healthPoints: []
+      });
     }
+    return savedProcesses;
+  });
+
+  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
+
+  // Persistir datos en localStorage cuando cambien
+  useEffect(() => {
+    processes.forEach((process, index) => {
+      localStorage.setItem(`emisor_m3u8_${index}`, process.m3u8);
+      localStorage.setItem(`emisor_user_agent_${index}`, process.userAgent);
+      localStorage.setItem(`emisor_rtmp_${index}`, process.rtmp);
+      localStorage.setItem(`emisor_preview_suffix_${index}`, process.previewSuffix);
+      localStorage.setItem(`emisor_is_emitting_${index}`, process.isEmitiendo.toString());
+      localStorage.setItem(`emisor_elapsed_${index}`, process.elapsed.toString());
+      localStorage.setItem(`emisor_start_time_${index}`, process.startTime.toString());
+      localStorage.setItem(`emisor_status_${index}`, process.emitStatus);
+      localStorage.setItem(`emisor_msg_${index}`, process.emitMsg);
+    });
+  }, [processes]);
+
+  // Función para actualizar un proceso específico
+  const updateProcess = (index: number, updates: Partial<EmissionProcess>) => {
+    setProcesses(prev => prev.map((process, i) => 
+      i === index ? { ...process, ...updates } : process
+    ));
+  };
+
+  // Restaurar sesiones al cargar
+  useEffect(() => {
+    processes.forEach((process, index) => {
+      if (process.isEmitiendo && process.startTime > 0) {
+        const now = Math.floor(Date.now() / 1000);
+        const calculatedElapsed = now - process.startTime;
+        
+        updateProcess(index, {
+          elapsed: calculatedElapsed > 0 ? calculatedElapsed : 0,
+          emitStatus: "running",
+          emitMsg: "Emisión restaurada desde sesión persistente"
+        });
+        
+        console.log(`✅ Estado de emisión ${index + 1} restaurado, elapsed:`, calculatedElapsed);
+        
+        // Restaurar reproductor si hay datos guardados
+        setTimeout(() => {
+          if (process.rtmp) {
+            const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
+            console.log(`🔄 Restaurando reproductor ${index + 1} con URL:`, previewUrl);
+            loadPreview(previewUrl, index);
+          }
+        }, 1000 + (index * 500)); // Delay escalonado para evitar conflictos
+      }
+    });
   }, []);
 
-  // Cada 5s registramos un punto de salud (1 = up, 0 = down)
+  // Cada 5s registramos un punto de salud para cada proceso
   useEffect(() => {
     const id = setInterval(() => {
-      const video = videoRef.current;
-      const up = video && video.readyState >= 2 && video.networkState !== 3 ? 1 : 0;
-      setHealthPoints((prev) => [
-        ...prev.slice(-119),
-        { t: Math.floor(Date.now() / 1000), up },
-      ]);
+      processes.forEach((process, index) => {
+        const video = videoRefs[index].current;
+        const up = video && video.readyState >= 2 && video.networkState !== 3 ? 1 : 0;
+        updateProcess(index, {
+          healthPoints: [
+            ...process.healthPoints.slice(-119),
+            { t: Math.floor(Date.now() / 1000), up }
+          ]
+        });
+      });
     }, 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [processes]);
 
-  // Timer de reproducción
+  // Timer de reproducción para cada proceso
   useEffect(() => {
-    if (isEmitiendo) {
-      if (!timerRef.current) {
-        timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+    processes.forEach((process, index) => {
+      if (process.isEmitiendo) {
+        if (!timerRefs[index].current) {
+          timerRefs[index].current = setInterval(() => {
+            updateProcess(index, { elapsed: process.elapsed + 1 });
+          }, 1000);
+        }
+      } else {
+        if (timerRefs[index].current) {
+          clearInterval(timerRefs[index].current);
+          timerRefs[index].current = null;
+        }
       }
-    } else {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    }
+    });
+    
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      timerRefs.forEach(timerRef => {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+      });
     };
-  }, [isEmitiendo]);
+  }, [processes]);
 
   const formatSeconds = (s: number) => {
     const hh = String(Math.floor(s / 3600)).padStart(2, "0");
@@ -171,10 +160,7 @@ export default function EmisorM3U8Panel() {
   };
 
   // Construye la URL de vista previa a partir del RTMP + sufijo.
-  // Convierte automáticamente rtmp:// a http:// para compatibilidad con navegador
-  // Ejemplo: rtmp://fluestabiliz.giize.com/costaSTAR007 + "/video.m3u8"
-  // Resultado: http://fluestabiliz.giize.com/costaSTAR007/video.m3u8
-  const previewFromRTMP = () => {
+  const previewFromRTMP = (rtmp: string, previewSuffix: string) => {
     if (!rtmp) return "";
     
     let baseUrl = rtmp;
@@ -193,8 +179,8 @@ export default function EmisorM3U8Panel() {
   };
 
   // --- Control de preview local (HLS.js / nativo) mejorado ---
-  async function loadPreview(url: string) {
-    const video = videoRef.current;
+  async function loadPreview(url: string, processIndex: number) {
+    const video = videoRefs[processIndex].current;
     if (!video || !url) {
       console.error("❌ No hay video ref o URL para cargar preview");
       return;
@@ -204,9 +190,9 @@ export default function EmisorM3U8Panel() {
 
     // Limpia reproducción previa si existe
     try {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
+      if (hlsRefs[processIndex].current) {
+        hlsRefs[processIndex].current.destroy();
+        hlsRefs[processIndex].current = null;
       }
       video.pause();
       video.removeAttribute("src");
@@ -274,8 +260,9 @@ export default function EmisorM3U8Panel() {
               try {
                 xhr.setRequestHeader("Cache-Control", "no-cache");
                 xhr.setRequestHeader("Pragma", "no-cache");
-                if (userAgent) {
-                  xhr.setRequestHeader("X-Requested-User-Agent", userAgent);
+                const process = processes[processIndex];
+                if (process.userAgent) {
+                  xhr.setRequestHeader("X-Requested-User-Agent", process.userAgent);
                 }
               } catch (e) {
                 console.error("Error setting headers:", e);
@@ -287,7 +274,7 @@ export default function EmisorM3U8Panel() {
             startPosition: -1, // Para live streams, empezar desde el final
           });
           
-          hlsRef.current = hls;
+          hlsRefs[processIndex].current = hls;
           
           // Event listeners mejorados para live streaming
           hls.on(Hls.Events.MEDIA_ATTACHED, () => {
@@ -348,7 +335,7 @@ export default function EmisorM3U8Panel() {
                 default:
                   console.log("💥 Fatal error, destroying and trying fallback");
                   hls.destroy();
-                  hlsRef.current = null;
+                  hlsRefs[processIndex].current = null;
                   
                   // Fallback: intentar reproducción directa
                   console.log("🆘 Trying direct video fallback");
@@ -417,71 +404,87 @@ export default function EmisorM3U8Panel() {
   }
 
   // --- Acciones de emisión hacia RTMP (vía backend) ---
-  async function startEmitToRTMP() {
-    if (!m3u8 || !rtmp) {
-      setEmitStatus("error");
-      setEmitMsg("Falta M3U8 o RTMP");
+  async function startEmitToRTMP(processIndex: number) {
+    const process = processes[processIndex];
+    if (!process.m3u8 || !process.rtmp) {
+      updateProcess(processIndex, {
+        emitStatus: "error",
+        emitMsg: "Falta M3U8 o RTMP"
+      });
       return;
     }
-    setEmitStatus("starting");
-    setEmitMsg("Iniciando emisión en el servidor...");
+    
+    updateProcess(processIndex, {
+      emitStatus: "starting",
+      emitMsg: "Iniciando emisión en el servidor..."
+    });
 
     try {
       const resp = await fetch("/api/emit", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Requested-User-Agent": userAgent || navigator.userAgent,
+          "X-Requested-User-Agent": process.userAgent || navigator.userAgent,
         },
         body: JSON.stringify({ 
-          source_m3u8: m3u8, 
-          target_rtmp: rtmp, 
-          user_agent: userAgent || null,
-          video_bitrate: videoBitrate || "1500"
+          source_m3u8: process.m3u8, 
+          target_rtmp: process.rtmp, 
+          user_agent: process.userAgent || null,
+          process_id: processIndex.toString()
         }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json().catch(() => ({}));
-      setEmitStatus("running");
-      setEmitMsg(data?.message || "Emitiendo a RTMP");
-      setElapsed(0);
-      setStartTime(Math.floor(Date.now() / 1000));
-      setIsEmitiendo(true);
+      
+      updateProcess(processIndex, {
+        emitStatus: "running",
+        emitMsg: data?.message || "Emitiendo a RTMP",
+        elapsed: 0,
+        startTime: Math.floor(Date.now() / 1000),
+        isEmitiendo: true
+      });
 
-      // Cargar preview desde RTMP (ej: rtmp://.../stream/video.m3u8)
-      const previewUrl = previewFromRTMP();
-      console.log("🔄 Iniciando preview con URL:", previewUrl);
+      // Cargar preview desde RTMP
+      const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
+      console.log(`🔄 Iniciando preview ${processIndex + 1} con URL:`, previewUrl);
       if (previewUrl) {
-        // Delay para dar tiempo al servidor a empezar a emitir
         setTimeout(() => {
-          loadPreview(previewUrl);
+          loadPreview(previewUrl, processIndex);
         }, 2000);
       }
     } catch (e: any) {
-      setEmitStatus("error");
-      setEmitMsg(`No se pudo iniciar la emisión: ${e.message}`);
-      setIsEmitiendo(false);
+      updateProcess(processIndex, {
+        emitStatus: "error",
+        emitMsg: `No se pudo iniciar la emisión: ${e.message}`,
+        isEmitiendo: false
+      });
     }
   }
 
-  async function stopEmit() {
-    setEmitStatus("stopping");
-    setEmitMsg("Deteniendo emisión en el servidor...");
+  async function stopEmit(processIndex: number) {
+    updateProcess(processIndex, {
+      emitStatus: "stopping",
+      emitMsg: "Deteniendo emisión en el servidor..."
+    });
+    
     try {
-      const resp = await fetch("/api/emit/stop", { method: "POST" });
+      const resp = await fetch("/api/emit/stop", { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ process_id: processIndex.toString() })
+      });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       await resp.json().catch(() => ({}));
     } catch (e) {
       console.error("Error stopping emit:", e);
-      // aún así limpiamos el player local
     }
 
     try {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
+      if (hlsRefs[processIndex].current) {
+        hlsRefs[processIndex].current.destroy();
+        hlsRefs[processIndex].current = null;
       }
-      const video = videoRef.current;
+      const video = videoRefs[processIndex].current;
       if (video) {
         video.pause();
         video.removeAttribute("src");
@@ -489,47 +492,51 @@ export default function EmisorM3U8Panel() {
       }
     } catch {}
 
-    setIsEmitiendo(false);
-    setElapsed(0);
-    setStartTime(0);
-    setEmitStatus("idle");
-    setEmitMsg("");
+    updateProcess(processIndex, {
+      isEmitiendo: false,
+      elapsed: 0,
+      startTime: 0,
+      emitStatus: "idle",
+      emitMsg: ""
+    });
     
     // Limpiar localStorage de emisión pero mantener datos de entrada
-    localStorage.removeItem("emisor_is_emitting");
-    localStorage.removeItem("emisor_elapsed");
-    localStorage.removeItem("emisor_start_time");
-    localStorage.removeItem("emisor_status");
-    localStorage.removeItem("emisor_msg");
+    localStorage.removeItem(`emisor_is_emitting_${processIndex}`);
+    localStorage.removeItem(`emisor_elapsed_${processIndex}`);
+    localStorage.removeItem(`emisor_start_time_${processIndex}`);
+    localStorage.removeItem(`emisor_status_${processIndex}`);
+    localStorage.removeItem(`emisor_msg_${processIndex}`);
   }
 
-  function onBorrar() {
+  function onBorrar(processIndex: number) {
+    const process = processes[processIndex];
+    
     // Primero detener emisión si está activa
-    if (isEmitiendo) {
-      stopEmit();
+    if (process.isEmitiendo) {
+      stopEmit(processIndex);
     }
     
     // Limpiar campos
-    setM3u8("");
-    setUserAgent("");
-    setVideoBitrate("1500");
-    setRtmp("");
-    setPreviewSuffix("/video.m3u8");
+    updateProcess(processIndex, {
+      m3u8: "",
+      userAgent: "",
+      rtmp: "",
+      previewSuffix: "/video.m3u8"
+    });
     
     // Limpiar localStorage de todos los datos
-    localStorage.removeItem("emisor_m3u8");
-    localStorage.removeItem("emisor_user_agent");
-    localStorage.removeItem("emisor_video_bitrate");
-    localStorage.removeItem("emisor_rtmp");
-    localStorage.removeItem("emisor_preview_suffix");
+    localStorage.removeItem(`emisor_m3u8_${processIndex}`);
+    localStorage.removeItem(`emisor_user_agent_${processIndex}`);
+    localStorage.removeItem(`emisor_rtmp_${processIndex}`);
+    localStorage.removeItem(`emisor_preview_suffix_${processIndex}`);
     
     // Limpiar el reproductor
     try {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
+      if (hlsRefs[processIndex].current) {
+        hlsRefs[processIndex].current.destroy();
+        hlsRefs[processIndex].current = null;
       }
-      const video = videoRef.current;
+      const video = videoRefs[processIndex].current;
       if (video) {
         video.pause();
         video.removeAttribute("src");
@@ -539,16 +546,11 @@ export default function EmisorM3U8Panel() {
       console.error("Error limpiando reproductor:", e);
     }
     
-    console.log("🧹 Campos limpiados, listo para nueva configuración");
+    console.log(`🧹 Proceso ${processIndex + 1} limpiado, listo para nueva configuración`);
   }
 
-  const uptimeData = healthPoints.map((p) => ({
-    name: new Date(p.t * 1000).toLocaleTimeString(),
-    Estado: p.up ? 100 : 0,
-  }));
-
-  const getStatusColor = () => {
-    switch (emitStatus) {
+  const getStatusColor = (status: string) => {
+    switch (status) {
       case "starting": return "bg-warning";
       case "running": return "bg-status-live";
       case "stopping": return "bg-warning";
@@ -557,29 +559,27 @@ export default function EmisorM3U8Panel() {
     }
   };
 
-  return (
-    <div className="min-h-screen w-full bg-background text-foreground p-6">
-      <div className="max-w-6xl mx-auto">
-        <header className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-            Emisor M3U8 → RTMP – Panel
-          </h1>
-          <div className="text-sm text-muted-foreground">
-            Contador: <span className="font-mono text-primary">{formatSeconds(elapsed)}</span>
-          </div>
-        </header>
+  // Función para renderizar un tab de proceso
+  const renderProcessTab = (processIndex: number) => {
+    const process = processes[processIndex];
+    const uptimeData = process.healthPoints.map((p) => ({
+      name: new Date(p.t * 1000).toLocaleTimeString(),
+      Estado: p.up ? 100 : 0,
+    }));
 
+    return (
+      <div className="space-y-6">
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Panel de configuración */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <h2 className="text-lg font-medium mb-4 text-accent">Fuente y Cabeceras</h2>
+            <h2 className="text-lg font-medium mb-4 text-accent">Fuente y Cabeceras - Proceso {processIndex + 1}</h2>
 
             <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 (fuente)</label>
             <input
               type="url"
               placeholder="https://servidor/origen/playlist.m3u8"
-              value={m3u8}
-              onChange={(e) => setM3u8(e.target.value)}
+              value={process.m3u8}
+              onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
               className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
             />
 
@@ -587,88 +587,68 @@ export default function EmisorM3U8Panel() {
             <input
               type="text"
               placeholder="Mozilla/5.0 (Windows NT 10.0; Win64; x64) ..."
-              value={userAgent}
-              onChange={(e) => setUserAgent(e.target.value)}
+              value={process.userAgent}
+              onChange={(e) => updateProcess(processIndex, { userAgent: e.target.value })}
               className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
             />
-
-            <label className="block text-sm mb-2 text-muted-foreground">Bitrate de Video (kbps)</label>
-            <input
-              type="number"
-              placeholder="1500"
-              value={videoBitrate}
-              onChange={(e) => setVideoBitrate(e.target.value)}
-              className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-              min="500"
-              max="8000"
-            />
-            <p className="text-xs text-muted-foreground mb-4">
-              Configura el bitrate de salida del video - se comprimirá a 720p (500-8000 kbps)
-            </p>
 
             <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
             <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
             <input
               type="text"
               placeholder="rtmp://fluestabiliz.giize.com/costaSTAR007"
-              value={rtmp}
-              onChange={(e) => setRtmp(e.target.value)}
+              value={process.rtmp}
+              onChange={(e) => updateProcess(processIndex, { rtmp: e.target.value })}
               className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-2 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
             />
             <label className="block text-xs mb-2 text-muted-foreground">Sufijo de vista previa (HLS expuesto por tu servidor)</label>
             <div className="flex gap-2 items-center mb-4">
               <code className="bg-card px-2 py-2 rounded-xl border border-border text-xs whitespace-nowrap max-w-[60%] overflow-hidden text-ellipsis">
-                {rtmp || "rtmp://host/app/stream"}
+                {process.rtmp || "rtmp://host/app/stream"}
               </code>
               <span className="text-muted-foreground text-xs">+</span>
               <input
                 type="text"
-                value={previewSuffix}
-                onChange={(e) => setPreviewSuffix(e.target.value)}
+                value={process.previewSuffix}
+                onChange={(e) => updateProcess(processIndex, { previewSuffix: e.target.value })}
                 className="flex-1 bg-card border border-border rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-primary/50 text-sm transition-all duration-200"
               />
             </div>
             <p className="text-xs text-muted-foreground mb-4">
               Ej.: con <code className="bg-card px-1 rounded">rtmp://fluestabiliz.giize.com/costaSTAR007</code> y sufijo <code className="bg-card px-1 rounded">/video.m3u8</code> la vista previa será
               <br />
-              <span className="underline break-all text-primary">{previewFromRTMP() || "rtmp://fluestabiliz.giize.com/costaSTAR007/video.m3u8"}</span>
+              <span className="underline break-all text-primary">{previewFromRTMP(process.rtmp, process.previewSuffix) || "rtmp://fluestabiliz.giize.com/costaSTAR007/video.m3u8"}</span>
             </p>
 
             <div className="flex gap-3 items-center flex-wrap">
-              {!isEmitiendo ? (
+              {!process.isEmitiendo ? (
                 <button 
-                  onClick={startEmitToRTMP} 
+                  onClick={() => startEmitToRTMP(processIndex)} 
                   className="px-6 py-3 rounded-xl bg-primary hover:bg-primary/90 active:scale-[.98] transition-all duration-200 font-medium text-primary-foreground shadow-lg hover:shadow-xl"
                 >
                   🚀 Emitir a RTMP
                 </button>
               ) : (
                 <button 
-                  onClick={stopEmit} 
+                  onClick={() => stopEmit(processIndex)} 
                   className="px-6 py-3 rounded-xl bg-warning hover:bg-warning/90 active:scale-[.98] transition-all duration-200 font-medium text-warning-foreground shadow-lg hover:shadow-xl"
                 >
                   ⏹️ Detener emisión
                 </button>
               )}
               <button 
-                onClick={onBorrar} 
+                onClick={() => onBorrar(processIndex)} 
                 className="px-4 py-3 rounded-xl bg-destructive hover:bg-destructive/90 active:scale-[.98] transition-all duration-200 font-medium text-destructive-foreground shadow-lg hover:shadow-xl"
               >
                 🗑️ Borrar
               </button>
-              <button 
-                onClick={() => setShowDiagram(true)} 
-                className="ml-auto px-4 py-3 rounded-xl bg-secondary hover:bg-secondary/90 active:scale-[.98] transition-all duration-200 font-medium text-secondary-foreground shadow-lg hover:shadow-xl"
-              >
-                📊 Ver diagrama
-              </button>
             </div>
 
-            {emitStatus !== "idle" && (
+            {process.emitStatus !== "idle" && (
               <div className="mt-4 p-3 rounded-xl bg-card/50 border border-border">
                 <div className="flex items-center gap-2 text-sm">
-                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${getStatusColor()}`} />
-                  <span className="text-foreground">{emitMsg}</span>
+                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${getStatusColor(process.emitStatus)}`} />
+                  <span className="text-foreground">{process.emitMsg}</span>
                 </div>
               </div>
             )}
@@ -676,10 +656,10 @@ export default function EmisorM3U8Panel() {
 
           {/* Player */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-4 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <h2 className="text-lg font-medium mb-4 text-accent">Vista previa</h2>
+            <h2 className="text-lg font-medium mb-4 text-accent">Vista previa - Proceso {processIndex + 1}</h2>
             <div className="aspect-video w-full overflow-hidden rounded-xl bg-black border border-border shadow-inner">
               <video
-                ref={videoRef}
+                ref={videoRefs[processIndex]}
                 className="w-full h-full object-contain"
                 controls
                 playsInline
@@ -689,17 +669,16 @@ export default function EmisorM3U8Panel() {
             </div>
             <div className="mt-3 text-sm flex items-center gap-3 flex-wrap">
               <div className="flex items-center gap-2">
-                <span className={`inline-flex h-2.5 w-2.5 rounded-full ${isEmitiendo ? "bg-status-live" : "bg-status-idle"} animate-pulse`}></span>
-                <span>Estado: <strong>{isEmitiendo ? "🔴 EN VIVO" : "⚫ Detenido"}</strong></span>
+                <span className={`inline-flex h-2.5 w-2.5 rounded-full ${process.isEmitiendo ? "bg-status-live" : "bg-status-idle"} animate-pulse`}></span>
+                <span>Estado: <strong>{process.isEmitiendo ? "🔴 EN VIVO" : "⚫ Detenido"}</strong></span>
               </div>
               
-              {/* Botón para probar reproducción manual */}
               <button
                 onClick={() => {
-                  const testUrl = previewFromRTMP();
+                  const testUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
                   if (testUrl) {
-                    console.log("🧪 Probando reproducción manual de:", testUrl);
-                    loadPreview(testUrl);
+                    console.log(`🧪 Probando reproducción manual de proceso ${processIndex + 1}:`, testUrl);
+                    loadPreview(testUrl, processIndex);
                   } else {
                     console.warn("⚠️ No hay URL de preview disponible");
                   }
@@ -710,16 +689,23 @@ export default function EmisorM3U8Panel() {
               </button>
               
               <div className="text-xs text-muted-foreground">
-                URL: <code className="bg-card px-1 rounded text-[10px]">{previewFromRTMP() || "No configurada"}</code>
+                URL: <code className="bg-card px-1 rounded text-[10px]">{previewFromRTMP(process.rtmp, process.previewSuffix) || "No configurada"}</code>
+              </div>
+            </div>
+
+            <div className="mt-4 text-sm">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Tiempo emitiendo:</span>
+                <span className="font-mono text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
               </div>
             </div>
           </div>
         </section>
 
         {/* Tarjeta de salud rápida */}
-        <section className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 col-span-2 transition-all duration-300 hover:shadow-xl">
-            <h3 className="text-base font-medium mb-2 text-accent">Uptime reciente (~10 min)</h3>
+            <h3 className="text-base font-medium mb-2 text-accent">Uptime reciente (~10 min) - Proceso {processIndex + 1}</h3>
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={uptimeData} margin={{ left: 6, right: 16, top: 10, bottom: 0 }}>
@@ -748,71 +734,70 @@ export default function EmisorM3U8Panel() {
             </div>
           </div>
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <h3 className="text-base font-medium mb-4 text-accent">📈 Resumen</h3>
+            <h3 className="text-base font-medium mb-4 text-accent">📈 Resumen - Proceso {processIndex + 1}</h3>
             <ul className="space-y-3 text-sm">
               <li className="flex justify-between">
                 <span className="text-muted-foreground">Tiempo emitiendo:</span>
-                <span className="font-mono text-primary font-semibold">{formatSeconds(elapsed)}</span>
+                <span className="font-mono text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
               </li>
               <li className="flex justify-between">
                 <span className="text-muted-foreground">Puntos muestreados:</span>
-                <span className="text-foreground font-semibold">{healthPoints.length}</span>
+                <span className="text-foreground font-semibold">{process.healthPoints.length}</span>
               </li>
               <li className="flex justify-between">
                 <span className="text-muted-foreground">Último estado:</span>
-                <span className={`font-semibold ${healthPoints.at(-1)?.up ? "text-status-live" : "text-status-error"}`}>
-                  {healthPoints.at(-1)?.up ? "🟢 Arriba" : "🔴 Caído"}
+                <span className={`font-semibold ${process.healthPoints.at(-1)?.up ? "text-status-live" : "text-status-error"}`}>
+                  {process.healthPoints.at(-1)?.up ? "🟢 Arriba" : "🔴 Caído"}
                 </span>
               </li>
             </ul>
           </div>
         </section>
+      </div>
+    );
+  };
 
-        {/* Modal diagrama detallado */}
-        {showDiagram && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowDiagram(false)}>
-            <div className="bg-card rounded-2xl w-full max-w-4xl p-6 border border-border shadow-2xl" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-semibold text-primary">📊 Diagrama de caídas / uptime</h3>
-                <button 
-                  onClick={() => setShowDiagram(false)} 
-                  className="px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/90 text-secondary-foreground transition-all duration-200"
-                >
-                  ✖️ Cerrar
-                </button>
-              </div>
-              <p className="text-sm text-muted-foreground mb-4">
-                La línea muestra 100% cuando el reproductor está listo (readyState ≥ 2) y 0% cuando detectamos red/errores. Para ver caídas reales del servidor RTMP/HLS, expón un endpoint de health-check y gráfalo aquí.
-              </p>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={uptimeData} margin={{ left: 6, right: 16, top: 10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
-                    <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={50} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                    <Tooltip 
-                      formatter={(v) => [`${v}%`, "Estado"]} 
-                      contentStyle={{ 
-                        backgroundColor: "hsl(var(--card))", 
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "0.75rem",
-                        color: "hsl(var(--foreground))"
-                      }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="Estado" 
-                      dot={false} 
-                      strokeWidth={3} 
-                      stroke="hsl(var(--primary))"
-                      strokeLinecap="round"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+  return (
+    <div className="min-h-screen w-full bg-background text-foreground p-6">
+      <div className="max-w-6xl mx-auto">
+        <header className="mb-6 flex items-center justify-between">
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+            Emisor M3U8 → RTMP – Panel Multi-Proceso
+          </h1>
+          <div className="text-sm text-muted-foreground">
+            Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/3</span>
           </div>
-        )}
+        </header>
+
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-3 mb-6">
+            <TabsTrigger value="0" className="flex items-center gap-2">
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[0].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
+              Proceso 1
+            </TabsTrigger>
+            <TabsTrigger value="1" className="flex items-center gap-2">
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[1].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
+              Proceso 2
+            </TabsTrigger>
+            <TabsTrigger value="2" className="flex items-center gap-2">
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[2].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
+              Proceso 3
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="0">
+            {renderProcessTab(0)}
+          </TabsContent>
+
+          <TabsContent value="1">
+            {renderProcessTab(1)}
+          </TabsContent>
+
+          <TabsContent value="2">
+            {renderProcessTab(2)}
+          </TabsContent>
+        </Tabs>
+
 
         <footer className="mt-10 text-xs text-muted-foreground space-y-4">
           <div className="bg-card/30 border border-border rounded-xl p-4">
@@ -821,17 +806,15 @@ export default function EmisorM3U8Panel() {
             </p>
             <details className="bg-card/50 border border-border rounded-xl p-3 mt-3">
               <summary className="cursor-pointer font-medium text-foreground hover:text-primary transition-colors">
-                🔧 Ejemplo de comando ffmpeg (backend)
+                🔧 Ejemplo de comando ffmpeg (backend) - SIN COMPRESIÓN
               </summary>
               <pre className="whitespace-pre-wrap text-foreground/90 text-[11px] leading-5 mt-3 bg-background/50 p-3 rounded-lg overflow-x-auto">
 {`ffmpeg \\
-  -user_agent "${userAgent || 'Mozilla/5.0'}" -i "${m3u8 || 'https://origen/playlist.m3u8'}" \\
-  -vf scale=-2:720 -c:v libx264 -b:v ${videoBitrate || '1500'}k \\
-  -maxrate ${parseInt(videoBitrate || '1500') * 1.2}k -preset veryfast \\
-  -c:a aac -b:a 128k -f flv "${rtmp || 'rtmp://host/app/stream'}"`}
+  -user_agent "Mozilla/5.0" -i "https://origen/playlist.m3u8" \\
+  -c:v copy -c:a copy -f flv "rtmp://host/app/stream"`}
               </pre>
               <p className="text-muted-foreground text-[11px] mt-2">
-                ⚙️ Tu endpoint /api/emit debe ejecutar algo como lo anterior y gestionar procesos/errores.
+                ⚙️ Tu endpoint /api/emit debe ejecutar algo como lo anterior. Ahora envía el stream tal como llega, sin recodificación.
               </p>
             </details>
           </div>

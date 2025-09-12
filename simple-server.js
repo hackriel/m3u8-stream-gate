@@ -10,9 +10,9 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Variables globales para manejo de proceso ffmpeg
-let ffmpegProcess = null;
-let emissionStatus = 'idle'; // idle, starting, running, stopping, error
+// Variables globales para manejo de múltiples procesos ffmpeg
+const ffmpegProcesses = new Map(); // Map<processId, { process, status }>
+const emissionStatuses = new Map(); // Map<processId, status>
 
 // Middleware básico
 app.use(cors({
@@ -25,7 +25,7 @@ app.use(express.static(join(__dirname, 'dist')));
 // Endpoint para iniciar emisión
 app.post('/api/emit', (req, res) => {
   try {
-    const { source_m3u8, target_rtmp, user_agent, video_bitrate } = req.body;
+    const { source_m3u8, target_rtmp, user_agent, process_id = '0' } = req.body;
 
     // Validaciones
     if (!source_m3u8 || !target_rtmp) {
@@ -34,38 +34,24 @@ app.post('/api/emit', (req, res) => {
       });
     }
 
-    // Si ya hay un proceso corriendo, detenerlo primero
-    if (ffmpegProcess && !ffmpegProcess.killed) {
-      console.log('🛑 Deteniendo proceso ffmpeg existente...');
-      ffmpegProcess.kill('SIGTERM');
-      ffmpegProcess = null;
+    // Si ya hay un proceso corriendo para este ID, detenerlo primero
+    const existingProcess = ffmpegProcesses.get(process_id);
+    if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
+      console.log(`🛑 Deteniendo proceso ffmpeg existente para ID ${process_id}...`);
+      existingProcess.process.kill('SIGTERM');
+      ffmpegProcesses.delete(process_id);
     }
 
-    emissionStatus = 'starting';
-    console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, video_bitrate });
+    emissionStatuses.set(process_id, 'starting');
+    console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, process_id });
 
-    // Configurar bitrate (default 1500k si no se especifica)
-    const bitrateValue = video_bitrate || '1500';
-
-    // Construir comando ffmpeg optimizado para menor uso de CPU
+    // Construir comando ffmpeg SIN COMPRESIÓN - stream directo
     const ffmpegArgs = [
       '-re', // Leer input a su velocidad nativa
       '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       '-i', source_m3u8,
-      '-threads', '2', // Limitar threads para no sobrecargar CPU
-      '-vf', 'scale=-2:720:flags=fast_bilinear', // Escalado más eficiente
-      '-c:v', 'libx264', // Recodificar video con libx264
-      '-preset', 'ultrafast', // Preset más rápido para menor uso CPU
-      '-tune', 'zerolatency', // Optimizar para streaming en vivo
-      '-profile:v', 'baseline', // Perfil más compatible y eficiente
-      '-b:v', `${bitrateValue}k`, // Bitrate de video especificado
-      '-maxrate', `${parseInt(bitrateValue) * 1.2}k`, // Maxrate 20% más alto
-      '-bufsize', `${parseInt(bitrateValue) * 2}k`, // Buffer size 2x el bitrate
-      '-x264opts', 'keyint=60:min-keyint=60:scenecut=-1', // Optimizaciones x264
-      '-c:a', 'aac',  // Recodificar audio a AAC
-      '-b:a', '128k', // Bitrate de audio
-      '-ac', '2', // Forzar audio estéreo
-      '-ar', '44100', // Sample rate estándar
+      '-c:v', 'copy', // Copiar video sin recodificar
+      '-c:a', 'copy', // Copiar audio sin recodificar
       '-f', 'flv',    // Formato de salida FLV para RTMP
       '-flvflags', 'no_duration_filesize',
       '-reconnect', '1',
@@ -74,48 +60,52 @@ app.post('/api/emit', (req, res) => {
       target_rtmp
     ];
 
-    console.log('🔧 Comando ffmpeg:', 'ffmpeg', ffmpegArgs.join(' '));
+    console.log(`🔧 Comando ffmpeg para proceso ${process_id}:`, 'ffmpeg', ffmpegArgs.join(' '));
 
     // Ejecutar ffmpeg
-    ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+    ffmpegProcesses.set(process_id, { process: ffmpegProcess, status: 'starting' });
 
     // Manejar salida estándar
     ffmpegProcess.stdout.on('data', (data) => {
-      console.log('📺 FFmpeg stdout:', data.toString());
+      console.log(`📺 FFmpeg stdout [${process_id}]:`, data.toString());
     });
 
     // Manejar errores
     ffmpegProcess.stderr.on('data', (data) => {
       const output = data.toString();
-      console.log('📺 FFmpeg stderr:', output);
+      console.log(`📺 FFmpeg stderr [${process_id}]:`, output);
       
       // Detectar cuando ffmpeg está corriendo exitosamente
       if (output.includes('frame=') || output.includes('fps=')) {
-        if (emissionStatus === 'starting') {
-          emissionStatus = 'running';
-          console.log('✅ Emisión iniciada exitosamente');
+        const currentStatus = emissionStatuses.get(process_id);
+        if (currentStatus === 'starting') {
+          emissionStatuses.set(process_id, 'running');
+          console.log(`✅ Emisión ${process_id} iniciada exitosamente`);
         }
       }
     });
 
     // Manejar cierre del proceso
     ffmpegProcess.on('close', (code) => {
-      console.log(`🔚 FFmpeg terminó con código: ${code}`);
-      emissionStatus = code === 0 ? 'idle' : 'error';
-      ffmpegProcess = null;
+      console.log(`🔚 FFmpeg [${process_id}] terminó con código: ${code}`);
+      emissionStatuses.set(process_id, code === 0 ? 'idle' : 'error');
+      ffmpegProcesses.delete(process_id);
     });
 
     // Manejar error del proceso
     ffmpegProcess.on('error', (error) => {
-      console.error('❌ Error en FFmpeg:', error);
-      emissionStatus = 'error';
-      ffmpegProcess = null;
+      console.error(`❌ Error en FFmpeg [${process_id}]:`, error);
+      emissionStatuses.set(process_id, 'error');
+      ffmpegProcesses.delete(process_id);
     });
 
     // Simular delay de inicio
     setTimeout(() => {
-      if (emissionStatus === 'starting' && ffmpegProcess && !ffmpegProcess.killed) {
-        emissionStatus = 'running';
+      const currentStatus = emissionStatuses.get(process_id);
+      const processData = ffmpegProcesses.get(process_id);
+      if (currentStatus === 'starting' && processData && processData.process && !processData.process.killed) {
+        emissionStatuses.set(process_id, 'running');
       }
     }, 3000);
 
@@ -126,8 +116,8 @@ app.post('/api/emit', (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error en /api/emit:', error);
-    emissionStatus = 'error';
+    console.error(`❌ Error en /api/emit [${req.body.process_id || '0'}]:`, error);
+    emissionStatuses.set(req.body.process_id || '0', 'error');
     res.status(500).json({ 
       error: 'Error interno del servidor', 
       details: error.message 
@@ -138,34 +128,37 @@ app.post('/api/emit', (req, res) => {
 // Endpoint para detener emisión
 app.post('/api/emit/stop', (req, res) => {
   try {
-    console.log('🛑 Solicitada detención de emisión');
+    const { process_id = '0' } = req.body;
+    console.log(`🛑 Solicitada detención de emisión para proceso ${process_id}`);
     
-    if (ffmpegProcess && !ffmpegProcess.killed) {
-      emissionStatus = 'stopping';
+    const processData = ffmpegProcesses.get(process_id);
+    if (processData && processData.process && !processData.process.killed) {
+      emissionStatuses.set(process_id, 'stopping');
       
       // Intentar terminar graciosamente
-      ffmpegProcess.kill('SIGTERM');
+      processData.process.kill('SIGTERM');
       
       // Si no termina en 5 segundos, forzar terminación
       setTimeout(() => {
-        if (ffmpegProcess && !ffmpegProcess.killed) {
-          console.log('🔥 Forzando terminación de ffmpeg...');
-          ffmpegProcess.kill('SIGKILL');
+        const currentProcessData = ffmpegProcesses.get(process_id);
+        if (currentProcessData && currentProcessData.process && !currentProcessData.process.killed) {
+          console.log(`🔥 Forzando terminación de ffmpeg [${process_id}]...`);
+          currentProcessData.process.kill('SIGKILL');
         }
       }, 5000);
       
-      ffmpegProcess = null;
-      emissionStatus = 'idle';
+      ffmpegProcesses.delete(process_id);
+      emissionStatuses.set(process_id, 'idle');
       
       res.json({ 
         success: true, 
-        message: 'Emisión detenida correctamente' 
+        message: `Emisión ${process_id} detenida correctamente` 
       });
     } else {
-      emissionStatus = 'idle';
+      emissionStatuses.set(process_id, 'idle');
       res.json({ 
         success: true, 
-        message: 'No hay emisión activa' 
+        message: `No hay emisión activa para proceso ${process_id}` 
       });
     }
     
@@ -180,11 +173,34 @@ app.post('/api/emit/stop', (req, res) => {
 
 // Endpoint para verificar estado
 app.get('/api/status', (req, res) => {
-  res.json({
-    status: emissionStatus,
-    process_running: ffmpegProcess && !ffmpegProcess.killed,
-    timestamp: new Date().toISOString()
-  });
+  const { process_id } = req.query;
+  
+  if (process_id) {
+    // Estado de un proceso específico
+    const processData = ffmpegProcesses.get(process_id);
+    const status = emissionStatuses.get(process_id) || 'idle';
+    res.json({
+      process_id,
+      status,
+      process_running: processData && processData.process && !processData.process.killed,
+      timestamp: new Date().toISOString()
+    });
+  } else {
+    // Estado de todos los procesos
+    const allStatuses = {};
+    for (let i = 0; i < 3; i++) {
+      const id = i.toString();
+      const processData = ffmpegProcesses.get(id);
+      allStatuses[id] = {
+        status: emissionStatuses.get(id) || 'idle',
+        process_running: processData && processData.process && !processData.process.killed
+      };
+    }
+    res.json({
+      processes: allStatuses,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Endpoint de health check
@@ -200,19 +216,23 @@ app.get('/api/health', (req, res) => {
 // Manejo de cierre limpio
 process.on('SIGINT', () => {
   console.log('🔚 Cerrando servidor...');
-  if (ffmpegProcess && !ffmpegProcess.killed) {
-    console.log('🛑 Deteniendo ffmpeg...');
-    ffmpegProcess.kill('SIGTERM');
-  }
+  ffmpegProcesses.forEach((processData, processId) => {
+    if (processData.process && !processData.process.killed) {
+      console.log(`🛑 Deteniendo ffmpeg [${processId}]...`);
+      processData.process.kill('SIGTERM');
+    }
+  });
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   console.log('🔚 Recibida señal SIGTERM, cerrando servidor...');
-  if (ffmpegProcess && !ffmpegProcess.killed) {
-    console.log('🛑 Deteniendo ffmpeg...');
-    ffmpegProcess.kill('SIGTERM');
-  }
+  ffmpegProcesses.forEach((processData, processId) => {
+    if (processData.process && !processData.process.killed) {
+      console.log(`🛑 Deteniendo ffmpeg [${processId}]...`);
+      processData.process.kill('SIGTERM');
+    }
+  });
   process.exit(0);
 });
 
