@@ -1,11 +1,14 @@
 import express from 'express';
 import cors from 'cors';
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { promisify } from 'util';
+import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const execAsync = promisify(exec);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -211,6 +214,107 @@ app.get('/api/health', (req, res) => {
     memory: process.memoryUsage(),
     timestamp: new Date().toISOString()
   });
+});
+
+// Endpoint para obtener recursos del sistema en tiempo real
+app.get('/api/system-resources', async (req, res) => {
+  try {
+    const systemInfo = {
+      timestamp: new Date().toISOString(),
+      node: {
+        pid: process.pid,
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        cpu: process.cpuUsage()
+      },
+      system: {
+        platform: os.platform(),
+        arch: os.arch(),
+        cpus: os.cpus().length,
+        totalMemory: os.totalmem(),
+        freeMemory: os.freemem(),
+        loadAverage: os.loadavg()
+      },
+      processes: {
+        active_ffmpeg: ffmpegProcesses.size,
+        ffmpeg_processes: []
+      }
+    };
+
+    // Obtener información detallada de procesos ffmpeg
+    for (const [processId, processData] of ffmpegProcesses) {
+      if (processData.process && !processData.process.killed) {
+        systemInfo.processes.ffmpeg_processes.push({
+          id: processId,
+          pid: processData.process.pid,
+          status: emissionStatuses.get(processId) || 'unknown'
+        });
+      }
+    }
+
+    // Intentar obtener información adicional del sistema (Linux/Unix)
+    if (os.platform() !== 'win32') {
+      try {
+        // CPU usage del sistema
+        const cpuInfo = await execAsync("top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1");
+        systemInfo.system.cpuUsage = parseFloat(cpuInfo.stdout.trim()) || 0;
+
+        // Memoria en uso
+        const memInfo = await execAsync("free | grep Mem | awk '{printf \"%.1f\", ($3/$2) * 100.0}'");
+        systemInfo.system.memoryUsage = parseFloat(memInfo.stdout.trim()) || 0;
+
+        // Top procesos por CPU
+        const topProcesses = await execAsync("ps aux --sort=-%cpu | head -6 | tail -5");
+        systemInfo.processes.top_cpu = topProcesses.stdout.split('\n')
+          .filter(line => line.trim())
+          .map(line => {
+            const parts = line.trim().split(/\s+/);
+            return {
+              user: parts[0],
+              pid: parts[1],
+              cpu: parseFloat(parts[2]) || 0,
+              memory: parseFloat(parts[3]) || 0,
+              command: parts.slice(10).join(' ').substring(0, 50)
+            };
+          });
+
+        // Procesos ffmpeg específicos
+        const ffmpegPs = await execAsync("ps aux | grep ffmpeg | grep -v grep || echo ''");
+        systemInfo.processes.ffmpeg_details = ffmpegPs.stdout.split('\n')
+          .filter(line => line.trim() && line.includes('ffmpeg'))
+          .map(line => {
+            const parts = line.trim().split(/\s+/);
+            return {
+              pid: parts[1],
+              cpu: parseFloat(parts[2]) || 0,
+              memory: parseFloat(parts[3]) || 0,
+              command: parts.slice(10).join(' ').substring(0, 100)
+            };
+          });
+
+      } catch (sysError) {
+        console.log('⚠️ No se pudo obtener información detallada del sistema:', sysError.message);
+        systemInfo.system.cpuUsage = 0;
+        systemInfo.system.memoryUsage = (1 - os.freemem() / os.totalmem()) * 100;
+        systemInfo.processes.top_cpu = [];
+        systemInfo.processes.ffmpeg_details = [];
+      }
+    } else {
+      // Para Windows, información básica
+      systemInfo.system.cpuUsage = 0;
+      systemInfo.system.memoryUsage = (1 - os.freemem() / os.totalmem()) * 100;
+      systemInfo.processes.top_cpu = [];
+      systemInfo.processes.ffmpeg_details = [];
+    }
+
+    res.json(systemInfo);
+  } catch (error) {
+    console.error('❌ Error obteniendo recursos del sistema:', error);
+    res.status(500).json({ 
+      error: 'Error obteniendo recursos del sistema',
+      details: error.message 
+    });
+  }
 });
 
 // Manejo de cierre limpio

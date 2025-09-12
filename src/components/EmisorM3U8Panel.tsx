@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import SystemMonitor from "./SystemMonitor";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -820,6 +821,9 @@ export default function EmisorM3U8Panel() {
           </div>
         </footer>
       </div>
+
+      {/* Monitor de Sistema */}
+      <SystemMonitor />
     </div>
   );
 }
