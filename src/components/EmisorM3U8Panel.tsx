@@ -21,6 +21,7 @@ declare global {
 interface EmissionProcess {
   m3u8: string;
   userAgent: string;
+  referer: string;
   rtmp: string;
   previewSuffix: string;
   isEmitiendo: boolean;
@@ -32,19 +33,20 @@ interface EmissionProcess {
 }
 
 export default function EmisorM3U8Panel() {
-  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
-  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null)];
+  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
+  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
   const [showDiagram, setShowDiagram] = useState(false);
 
-  // Estado para 3 procesos independientes
+  // Estado para 4 procesos independientes
   const [processes, setProcesses] = useState<EmissionProcess[]>(() => {
     const savedProcesses = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       savedProcesses.push({
         m3u8: localStorage.getItem(`emisor_m3u8_${i}`) || "",
         userAgent: localStorage.getItem(`emisor_user_agent_${i}`) || "",
+        referer: localStorage.getItem(`emisor_referer_${i}`) || "",
         rtmp: localStorage.getItem(`emisor_rtmp_${i}`) || "",
         previewSuffix: localStorage.getItem(`emisor_preview_suffix_${i}`) || "/video.m3u8",
         isEmitiendo: localStorage.getItem(`emisor_is_emitting_${i}`) === "true",
@@ -58,13 +60,14 @@ export default function EmisorM3U8Panel() {
     return savedProcesses;
   });
 
-  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
+  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
 
   // Persistir datos en localStorage cuando cambien
   useEffect(() => {
     processes.forEach((process, index) => {
       localStorage.setItem(`emisor_m3u8_${index}`, process.m3u8);
       localStorage.setItem(`emisor_user_agent_${index}`, process.userAgent);
+      localStorage.setItem(`emisor_referer_${index}`, process.referer);
       localStorage.setItem(`emisor_rtmp_${index}`, process.rtmp);
       localStorage.setItem(`emisor_preview_suffix_${index}`, process.previewSuffix);
       localStorage.setItem(`emisor_is_emitting_${index}`, process.isEmitiendo.toString());
@@ -431,6 +434,7 @@ export default function EmisorM3U8Panel() {
           source_m3u8: process.m3u8, 
           target_rtmp: process.rtmp, 
           user_agent: process.userAgent || null,
+          referer: process.referer || null,
           process_id: processIndex.toString()
         }),
       });
@@ -521,6 +525,7 @@ export default function EmisorM3U8Panel() {
     updateProcess(processIndex, {
       m3u8: "",
       userAgent: "",
+      referer: "",
       rtmp: "",
       previewSuffix: "/video.m3u8"
     });
@@ -528,6 +533,7 @@ export default function EmisorM3U8Panel() {
     // Limpiar localStorage de todos los datos
     localStorage.removeItem(`emisor_m3u8_${processIndex}`);
     localStorage.removeItem(`emisor_user_agent_${processIndex}`);
+    localStorage.removeItem(`emisor_referer_${processIndex}`);
     localStorage.removeItem(`emisor_rtmp_${processIndex}`);
     localStorage.removeItem(`emisor_preview_suffix_${processIndex}`);
     
@@ -590,6 +596,15 @@ export default function EmisorM3U8Panel() {
               placeholder="Mozilla/5.0 (Windows NT 10.0; Win64; x64) ..."
               value={process.userAgent}
               onChange={(e) => updateProcess(processIndex, { userAgent: e.target.value })}
+              className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+            />
+
+            <label className="block text-sm mb-2 text-muted-foreground">Referer (HTTP Header)</label>
+            <input
+              type="text"
+              placeholder="https://bradmax.com"
+              value={process.referer}
+              onChange={(e) => updateProcess(processIndex, { referer: e.target.value })}
               className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
             />
 
@@ -766,12 +781,12 @@ export default function EmisorM3U8Panel() {
             Emisor M3U8 → RTMP – Panel Multi-Proceso
           </h1>
           <div className="text-sm text-muted-foreground">
-            Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/3</span>
+            Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/4</span>
           </div>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-6">
+          <TabsList className="grid w-full grid-cols-4 mb-6">
             <TabsTrigger value="0" className="flex items-center gap-2">
               <span className={`inline-flex h-2 w-2 rounded-full ${processes[0].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
               Proceso 1
@@ -783,6 +798,10 @@ export default function EmisorM3U8Panel() {
             <TabsTrigger value="2" className="flex items-center gap-2">
               <span className={`inline-flex h-2 w-2 rounded-full ${processes[2].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
               Proceso 3
+            </TabsTrigger>
+            <TabsTrigger value="3" className="flex items-center gap-2">
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[3].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
+              Proceso 4
             </TabsTrigger>
           </TabsList>
 
@@ -796,6 +815,10 @@ export default function EmisorM3U8Panel() {
 
           <TabsContent value="2">
             {renderProcessTab(2)}
+          </TabsContent>
+
+          <TabsContent value="3">
+            {renderProcessTab(3)}
           </TabsContent>
         </Tabs>
 

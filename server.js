@@ -25,7 +25,7 @@ const emissionStatuses = new Map(); // Map<processId, status>
 // Endpoint para iniciar emisión
 app.post('/api/emit', (req, res) => {
   try {
-    const { source_m3u8, target_rtmp, user_agent, process_id = '0' } = req.body;
+    const { source_m3u8, target_rtmp, user_agent, referer, process_id = '0' } = req.body;
 
     // Validaciones
     if (!source_m3u8 || !target_rtmp) {
@@ -43,12 +43,20 @@ app.post('/api/emit', (req, res) => {
     }
 
     emissionStatuses.set(process_id, 'starting');
-    console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, process_id });
+    console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, referer, process_id });
 
     // Construir comando ffmpeg SIN COMPRESIÓN - stream directo
     const ffmpegArgs = [
       '-re', // Leer input a su velocidad nativa
       '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    ];
+
+    // Agregar referer si se proporciona
+    if (referer) {
+      ffmpegArgs.push('-headers', `Referer: ${referer}`);
+    }
+
+    ffmpegArgs.push(
       '-i', source_m3u8,
       '-c:v', 'copy', // Copiar video sin recodificar
       '-c:a', 'copy', // Copiar audio sin recodificar
@@ -58,7 +66,7 @@ app.post('/api/emit', (req, res) => {
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
       target_rtmp
-    ];
+    );
 
     console.log(`🔧 Comando ffmpeg para proceso ${process_id}:`, 'ffmpeg', ffmpegArgs.join(' '));
 
