@@ -45,6 +45,17 @@ app.post('/api/emit', (req, res) => {
     emissionStatuses.set(process_id, 'starting');
     console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, referer, process_id });
 
+    // Detectar si es una URL de chunks específicos que requiere sesión previa
+    let finalUrl = source_m3u8;
+    const isChunksUrl = source_m3u8.includes('chunks.m3u8') && source_m3u8.includes('nimblesessionid');
+    
+    if (isChunksUrl) {
+      // Para URLs de chunks, usar el master playlist primero para establecer sesión
+      const masterUrl = source_m3u8.replace(/\/StreamTeletica\/stream\d+\/chunks\.m3u8.*/, '/playlist.m3u8');
+      console.log(`🔄 Detectada URL de chunks, usando master playlist: ${masterUrl}`);
+      finalUrl = masterUrl;
+    }
+
     // Construir comando ffmpeg optimizado para M3U8 - stream directo sin compresión
     const ffmpegArgs = [
       '-re', // Leer input a su velocidad nativa
@@ -52,7 +63,9 @@ app.post('/api/emit', (req, res) => {
       '-multiple_requests', '1', // Permitir múltiples requests HTTP
       '-reconnect', '1',
       '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '2'
+      '-reconnect_delay_max', '2',
+      '-http_persistent', '1', // Mantener conexión HTTP persistente para sesiones
+      '-live_start_index', '-1' // Empezar desde el último segmento disponible
     ];
 
     // Configurar headers para M3U8 (crítico para algunos streams)
@@ -72,7 +85,7 @@ app.post('/api/emit', (req, res) => {
     }
 
     ffmpegArgs.push(
-      '-i', source_m3u8,
+      '-i', finalUrl,
       '-c:v', 'copy', // Copiar video sin recodificar
       '-c:a', 'copy', // Copiar audio sin recodificar
       '-avoid_negative_ts', 'make_zero', // Evitar timestamps negativos
