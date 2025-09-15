@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 import os from 'os';
+import YTDlpWrap from 'yt-dlp-wrap';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,9 +19,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// Variables globales para manejo de múltiples procesos ffmpeg
-const ffmpegProcesses = new Map(); // Map<processId, { process, status }>
+// Variables globales para manejo de múltiples procesos de streaming
+const streamingProcesses = new Map(); // Map<processId, { ytdlp: process, ffmpeg: process, status }>
 const emissionStatuses = new Map(); // Map<processId, status>
+
+// Inicializar yt-dlp wrapper
+const ytDlpWrap = new YTDlpWrap();
 
 // Proxy M3U8 para agregar query parameters a los segmentos
 app.get('/proxy-m3u8/:processId', async (req, res) => {
@@ -116,8 +120,145 @@ app.get('/proxy-m3u8/:processId', async (req, res) => {
   }
 });
 
+// Método robusto usando yt-dlp + ffmpeg pipeline
+async function startRobustStream(source_m3u8, target_rtmp, user_agent, referer, process_id) {
+  return new Promise((resolve, reject) => {
+    console.log(`🚀 Iniciando stream robusto [${process_id}] con yt-dlp + ffmpeg pipeline`);
+    
+    // Configuración de yt-dlp para HLS con autenticación
+    const ytdlpArgs = [
+      '--quiet',
+      '--no-warnings',
+      '--format', 'best[ext=mp4]/best',
+      '--output', '-', // Output to stdout
+      '--user-agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      '--hls-use-mpegts', // Usar MPEGTS para HLS
+      '--hls-prefer-native', // Usar descargador nativo de HLS
+      '--retries', '10',
+      '--fragment-retries', '10',
+      '--live-from-start',
+      '--no-part'
+    ];
+
+    // Agregar referer si existe
+    if (referer) {
+      ytdlpArgs.push('--referer', referer);
+    }
+
+    // Agregar headers adicionales
+    ytdlpArgs.push(
+      '--add-header', `User-Agent:${user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}`,
+      '--add-header', 'Accept:application/vnd.apple.mpegurl,application/x-mpegurl,*/*',
+      '--add-header', 'Accept-Language:en-US,en;q=0.9,es;q=0.8',
+      '--add-header', 'Cache-Control:no-cache',
+      '--add-header', 'Connection:keep-alive'
+    );
+
+    ytdlpArgs.push(source_m3u8);
+
+    console.log(`🎯 Comando yt-dlp [${process_id}]:`, 'yt-dlp', ytdlpArgs.join(' '));
+
+    // Configuración de ffmpeg para recibir el stream de yt-dlp
+    const ffmpegArgs = [
+      '-re', // Leer a velocidad nativa
+      '-i', 'pipe:0', // Leer desde stdin (pipe de yt-dlp)
+      '-c:v', 'copy', // Copiar video sin recodificar
+      '-c:a', 'copy', // Copiar audio sin recodificar
+      '-f', 'flv', // Formato FLV para RTMP
+      '-flvflags', 'no_duration_filesize',
+      '-avoid_negative_ts', 'make_zero',
+      '-fflags', '+genpts',
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '2',
+      target_rtmp
+    ];
+
+    console.log(`🔧 Comando ffmpeg [${process_id}]:`, 'ffmpeg', ffmpegArgs.join(' '));
+
+    // Iniciar yt-dlp
+    const ytdlpProcess = spawn('yt-dlp', ytdlpArgs);
+    
+    // Iniciar ffmpeg y conectar con pipe
+    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+
+    // Conectar yt-dlp stdout con ffmpeg stdin
+    ytdlpProcess.stdout.pipe(ffmpegProcess.stdin);
+
+    // Guardar ambos procesos
+    streamingProcesses.set(process_id, {
+      ytdlp: ytdlpProcess,
+      ffmpeg: ffmpegProcess,
+      status: 'starting'
+    });
+
+    // Manejar salida de yt-dlp
+    ytdlpProcess.stderr.on('data', (data) => {
+      const output = data.toString();
+      console.log(`📺 yt-dlp stderr [${process_id}]:`, output);
+      
+      if (output.includes('[download]') || output.includes('Downloading')) {
+        const currentStatus = emissionStatuses.get(process_id);
+        if (currentStatus === 'starting') {
+          emissionStatuses.set(process_id, 'running');
+          console.log(`✅ Stream yt-dlp [${process_id}] iniciado exitosamente`);
+        }
+      }
+    });
+
+    // Manejar salida de ffmpeg
+    ffmpegProcess.stderr.on('data', (data) => {
+      const output = data.toString();
+      console.log(`📺 ffmpeg stderr [${process_id}]:`, output);
+      
+      if (output.includes('frame=') || output.includes('fps=')) {
+        const currentStatus = emissionStatuses.get(process_id);
+        if (currentStatus === 'starting') {
+          emissionStatuses.set(process_id, 'running');
+          console.log(`✅ Pipeline ffmpeg [${process_id}] iniciado exitosamente`);
+        }
+      }
+    });
+
+    // Manejar errores y cierre de yt-dlp
+    ytdlpProcess.on('error', (error) => {
+      console.error(`❌ Error en yt-dlp [${process_id}]:`, error);
+      emissionStatuses.set(process_id, 'error');
+      ffmpegProcess.kill('SIGTERM');
+      streamingProcesses.delete(process_id);
+      reject(error);
+    });
+
+    ytdlpProcess.on('close', (code) => {
+      console.log(`🔚 yt-dlp [${process_id}] terminó con código: ${code}`);
+      if (code !== 0) {
+        emissionStatuses.set(process_id, 'error');
+        ffmpegProcess.kill('SIGTERM');
+      }
+    });
+
+    // Manejar errores y cierre de ffmpeg
+    ffmpegProcess.on('error', (error) => {
+      console.error(`❌ Error en ffmpeg [${process_id}]:`, error);
+      emissionStatuses.set(process_id, 'error');
+      ytdlpProcess.kill('SIGTERM');
+      streamingProcesses.delete(process_id);
+      reject(error);
+    });
+
+    ffmpegProcess.on('close', (code) => {
+      console.log(`🔚 ffmpeg [${process_id}] terminó con código: ${code}`);
+      emissionStatuses.set(process_id, code === 0 ? 'idle' : 'error');
+      ytdlpProcess.kill('SIGTERM');
+      streamingProcesses.delete(process_id);
+    });
+
+    resolve({ ytdlpProcess, ffmpegProcess });
+  });
+}
+
 // Endpoint para iniciar emisión
-app.post('/api/emit', (req, res) => {
+app.post('/api/emit', async (req, res) => {
   try {
     const { source_m3u8, target_rtmp, user_agent, referer, process_id = '0' } = req.body;
 
@@ -129,117 +270,38 @@ app.post('/api/emit', (req, res) => {
     }
 
     // Si ya hay un proceso corriendo para este ID, detenerlo primero
-    const existingProcess = ffmpegProcesses.get(process_id);
-    if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
-      console.log(`🛑 Deteniendo proceso ffmpeg existente para ID ${process_id}...`);
-      existingProcess.process.kill('SIGTERM');
-      ffmpegProcesses.delete(process_id);
+    const existingProcess = streamingProcesses.get(process_id);
+    if (existingProcess) {
+      console.log(`🛑 Deteniendo procesos existentes para ID ${process_id}...`);
+      if (existingProcess.ytdlp && !existingProcess.ytdlp.killed) {
+        existingProcess.ytdlp.kill('SIGTERM');
+      }
+      if (existingProcess.ffmpeg && !existingProcess.ffmpeg.killed) {
+        existingProcess.ffmpeg.kill('SIGTERM');
+      }
+      streamingProcesses.delete(process_id);
     }
 
     emissionStatuses.set(process_id, 'starting');
-    console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, referer, process_id });
+    console.log('🚀 Iniciando emisión robusta:', { source_m3u8, target_rtmp, user_agent, referer, process_id });
 
-    // Usar directamente el M3U8 original - sin proxy
-    console.log(`🎯 Acceso directo M3U8: ${source_m3u8}`);
-    const finalUrl = source_m3u8;
+    // Iniciar stream robusto con yt-dlp + ffmpeg
+    await startRobustStream(source_m3u8, target_rtmp, user_agent, referer, process_id);
 
-    // Comando ffmpeg optimizado para HLS con autenticación directa
-    const ffmpegArgs = [
-      '-re', // Leer input a su velocidad nativa
-      '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-      '-multiple_requests', '1', // Permitir múltiples requests HTTP
-      '-reconnect', '1',
-      '-reconnect_streamed', '1', 
-      '-reconnect_delay_max', '2',
-      '-http_persistent', '0', // Desactivar para evitar problemas de sesión
-      '-live_start_index', '-1', // Empezar desde el último segmento disponible
-      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto' // Protocolos permitidos
-    ];
-
-    // Headers críticos para autenticación HLS
-    const headers = [];
-    headers.push(`User-Agent: ${user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}`);
-    headers.push(`Accept: application/vnd.apple.mpegurl, application/x-mpegurl, */*`);
-    headers.push(`Accept-Language: en-US,en;q=0.9,es;q=0.8`);
-    headers.push(`Accept-Encoding: gzip, deflate, br`);
-    headers.push(`Cache-Control: no-cache`);
-    headers.push(`Pragma: no-cache`);
-    headers.push(`Connection: keep-alive`);
-    
-    if (referer) {
-      headers.push(`Referer: ${referer}`);
-    }
-    
-    // Agregar headers de autenticación si están en la URL
-    ffmpegArgs.push('-headers', headers.join('\r\n'));
-
-    ffmpegArgs.push(
-      '-i', finalUrl,
-      '-c:v', 'copy', // Copiar video sin recodificar
-      '-c:a', 'copy', // Copiar audio sin recodificar
-      '-avoid_negative_ts', 'make_zero', // Evitar timestamps negativos
-      '-fflags', '+genpts+discardcorrupt', // Generar PTS y descartar corrupto
-      '-f', 'flv',    // Formato de salida FLV para RTMP
-      '-flvflags', 'no_duration_filesize',
-      '-timeout', '30000000', // 30 segundos timeout
-      '-rw_timeout', '30000000', // Read/write timeout  
-      '-http_persistent', '1', // Mantener conexión HTTP persistente
-      '-seekable', '0', // No es seekable (stream live)
-      target_rtmp
-    );
-
-    console.log(`🔧 Comando ffmpeg para proceso ${process_id}:`, 'ffmpeg', ffmpegArgs.join(' '));
-
-    // Ejecutar ffmpeg
-    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
-    ffmpegProcesses.set(process_id, { process: ffmpegProcess, status: 'starting' });
-
-    // Manejar salida estándar
-    ffmpegProcess.stdout.on('data', (data) => {
-      console.log(`📺 FFmpeg stdout [${process_id}]:`, data.toString());
-    });
-
-    // Manejar errores
-    ffmpegProcess.stderr.on('data', (data) => {
-      const output = data.toString();
-      console.log(`📺 FFmpeg stderr [${process_id}]:`, output);
-      
-      // Detectar cuando ffmpeg está corriendo exitosamente
-      if (output.includes('frame=') || output.includes('fps=')) {
-        const currentStatus = emissionStatuses.get(process_id);
-        if (currentStatus === 'starting') {
-          emissionStatuses.set(process_id, 'running');
-          console.log(`✅ Emisión ${process_id} iniciada exitosamente`);
-        }
-      }
-    });
-
-    // Manejar cierre del proceso
-    ffmpegProcess.on('close', (code) => {
-      console.log(`🔚 FFmpeg [${process_id}] terminó con código: ${code}`);
-      emissionStatuses.set(process_id, code === 0 ? 'idle' : 'error');
-      ffmpegProcesses.delete(process_id);
-    });
-
-    // Manejar error del proceso
-    ffmpegProcess.on('error', (error) => {
-      console.error(`❌ Error en FFmpeg [${process_id}]:`, error);
-      emissionStatuses.set(process_id, 'error');
-      ffmpegProcesses.delete(process_id);
-    });
-
-    // Simular delay de inicio
+    // Simular delay de inicio para permitir que los procesos se estabilicen
     setTimeout(() => {
       const currentStatus = emissionStatuses.get(process_id);
-      const processData = ffmpegProcesses.get(process_id);
-      if (currentStatus === 'starting' && processData && processData.process && !processData.process.killed) {
+      const processData = streamingProcesses.get(process_id);
+      if (currentStatus === 'starting' && processData) {
         emissionStatuses.set(process_id, 'running');
+        console.log(`✅ Pipeline completo [${process_id}] está corriendo`);
       }
-    }, 3000);
+    }, 5000);
 
     res.json({ 
       success: true, 
-      message: 'Emisión iniciada correctamente',
+      message: 'Emisión robusta iniciada correctamente',
+      method: 'yt-dlp + ffmpeg pipeline',
       status: 'starting'
     });
 
@@ -259,23 +321,34 @@ app.post('/api/emit/stop', (req, res) => {
     const { process_id = '0' } = req.body;
     console.log(`🛑 Solicitada detención de emisión para proceso ${process_id}`);
     
-    const processData = ffmpegProcesses.get(process_id);
-    if (processData && processData.process && !processData.process.killed) {
+    const processData = streamingProcesses.get(process_id);
+    if (processData) {
       emissionStatuses.set(process_id, 'stopping');
       
-      // Intentar terminar graciosamente
-      processData.process.kill('SIGTERM');
+      // Intentar terminar graciosamente ambos procesos
+      if (processData.ytdlp && !processData.ytdlp.killed) {
+        processData.ytdlp.kill('SIGTERM');
+      }
+      if (processData.ffmpeg && !processData.ffmpeg.killed) {
+        processData.ffmpeg.kill('SIGTERM');
+      }
       
-      // Si no termina en 5 segundos, forzar terminación
+      // Si no terminan en 5 segundos, forzar terminación
       setTimeout(() => {
-        const currentProcessData = ffmpegProcesses.get(process_id);
-        if (currentProcessData && currentProcessData.process && !currentProcessData.process.killed) {
-          console.log(`🔥 Forzando terminación de ffmpeg [${process_id}]...`);
-          currentProcessData.process.kill('SIGKILL');
+        const currentProcessData = streamingProcesses.get(process_id);
+        if (currentProcessData) {
+          if (currentProcessData.ytdlp && !currentProcessData.ytdlp.killed) {
+            console.log(`🔥 Forzando terminación de yt-dlp [${process_id}]...`);
+            currentProcessData.ytdlp.kill('SIGKILL');
+          }
+          if (currentProcessData.ffmpeg && !currentProcessData.ffmpeg.killed) {
+            console.log(`🔥 Forzando terminación de ffmpeg [${process_id}]...`);
+            currentProcessData.ffmpeg.kill('SIGKILL');
+          }
         }
       }, 5000);
       
-      ffmpegProcesses.delete(process_id);
+      streamingProcesses.delete(process_id);
       emissionStatuses.set(process_id, 'idle');
       
       res.json({ 
@@ -305,12 +378,16 @@ app.get('/api/status', (req, res) => {
   
   if (process_id) {
     // Estado de un proceso específico
-    const processData = ffmpegProcesses.get(process_id);
+    const processData = streamingProcesses.get(process_id);
     const status = emissionStatuses.get(process_id) || 'idle';
     res.json({
       process_id,
       status,
-      process_running: processData && processData.process && !processData.process.killed,
+      ytdlp_running: processData && processData.ytdlp && !processData.ytdlp.killed,
+      ffmpeg_running: processData && processData.ffmpeg && !processData.ffmpeg.killed,
+      pipeline_running: processData && 
+        processData.ytdlp && !processData.ytdlp.killed &&
+        processData.ffmpeg && !processData.ffmpeg.killed,
       timestamp: new Date().toISOString()
     });
   } else {
@@ -318,10 +395,14 @@ app.get('/api/status', (req, res) => {
     const allStatuses = {};
     for (let i = 0; i < 3; i++) {
       const id = i.toString();
-      const processData = ffmpegProcesses.get(id);
+      const processData = streamingProcesses.get(id);
       allStatuses[id] = {
         status: emissionStatuses.get(id) || 'idle',
-        process_running: processData && processData.process && !processData.process.killed
+        ytdlp_running: processData && processData.ytdlp && !processData.ytdlp.killed,
+        ffmpeg_running: processData && processData.ffmpeg && !processData.ffmpeg.killed,
+        pipeline_running: processData && 
+          processData.ytdlp && !processData.ytdlp.killed &&
+          processData.ffmpeg && !processData.ffmpeg.killed
       };
     }
     res.json({
@@ -361,20 +442,29 @@ app.get('/api/system-resources', async (req, res) => {
         loadAverage: os.loadavg()
       },
       processes: {
-        active_ffmpeg: ffmpegProcesses.size,
-        ffmpeg_processes: []
+        active_streaming: streamingProcesses.size,
+        streaming_processes: []
       }
     };
 
-    // Obtener información detallada de procesos ffmpeg
-    for (const [processId, processData] of ffmpegProcesses) {
-      if (processData.process && !processData.process.killed) {
-        systemInfo.processes.ffmpeg_processes.push({
-          id: processId,
-          pid: processData.process.pid,
-          status: emissionStatuses.get(processId) || 'unknown'
-        });
+    // Obtener información detallada de procesos de streaming
+    for (const [processId, processData] of streamingProcesses) {
+      const processInfo = {
+        id: processId,
+        status: emissionStatuses.get(processId) || 'unknown',
+        ytdlp: null,
+        ffmpeg: null
+      };
+      
+      if (processData.ytdlp && !processData.ytdlp.killed) {
+        processInfo.ytdlp = { pid: processData.ytdlp.pid };
       }
+      
+      if (processData.ffmpeg && !processData.ffmpeg.killed) {
+        processInfo.ffmpeg = { pid: processData.ffmpeg.pid };
+      }
+      
+      systemInfo.processes.streaming_processes.push(processInfo);
     }
 
     // Intentar obtener información adicional del sistema (Linux/Unix)
@@ -403,17 +493,18 @@ app.get('/api/system-resources', async (req, res) => {
             };
           });
 
-        // Procesos ffmpeg específicos
-        const ffmpegPs = await execAsync("ps aux | grep ffmpeg | grep -v grep || echo ''");
-        systemInfo.processes.ffmpeg_details = ffmpegPs.stdout.split('\n')
-          .filter(line => line.trim() && line.includes('ffmpeg'))
+        // Procesos ffmpeg y yt-dlp específicos
+        const streamingPs = await execAsync("ps aux | grep -E '(ffmpeg|yt-dlp)' | grep -v grep || echo ''");
+        systemInfo.processes.streaming_details = streamingPs.stdout.split('\n')
+          .filter(line => line.trim() && (line.includes('ffmpeg') || line.includes('yt-dlp')))
           .map(line => {
             const parts = line.trim().split(/\s+/);
             return {
               pid: parts[1],
               cpu: parseFloat(parts[2]) || 0,
               memory: parseFloat(parts[3]) || 0,
-              command: parts.slice(10).join(' ').substring(0, 100)
+              command: parts.slice(10).join(' ').substring(0, 100),
+              type: line.includes('yt-dlp') ? 'yt-dlp' : 'ffmpeg'
             };
           });
 
@@ -422,14 +513,14 @@ app.get('/api/system-resources', async (req, res) => {
         systemInfo.system.cpuUsage = 0;
         systemInfo.system.memoryUsage = (1 - os.freemem() / os.totalmem()) * 100;
         systemInfo.processes.top_cpu = [];
-        systemInfo.processes.ffmpeg_details = [];
+        systemInfo.processes.streaming_details = [];
       }
     } else {
       // Para Windows, información básica
       systemInfo.system.cpuUsage = 0;
       systemInfo.system.memoryUsage = (1 - os.freemem() / os.totalmem()) * 100;
       systemInfo.processes.top_cpu = [];
-      systemInfo.processes.ffmpeg_details = [];
+      systemInfo.processes.streaming_details = [];
     }
 
     res.json(systemInfo);
@@ -450,10 +541,14 @@ app.get('*', (req, res) => {
 // Manejo de cierre limpio
 process.on('SIGINT', () => {
   console.log('🔚 Cerrando servidor...');
-  ffmpegProcesses.forEach((processData, processId) => {
-    if (processData.process && !processData.process.killed) {
+  streamingProcesses.forEach((processData, processId) => {
+    if (processData.ytdlp && !processData.ytdlp.killed) {
+      console.log(`🛑 Deteniendo yt-dlp [${processId}]...`);
+      processData.ytdlp.kill('SIGTERM');
+    }
+    if (processData.ffmpeg && !processData.ffmpeg.killed) {
       console.log(`🛑 Deteniendo ffmpeg [${processId}]...`);
-      processData.process.kill('SIGTERM');
+      processData.ffmpeg.kill('SIGTERM');
     }
   });
   process.exit(0);
@@ -461,10 +556,14 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   console.log('🔚 Recibida señal SIGTERM, cerrando servidor...');
-  ffmpegProcesses.forEach((processData, processId) => {
-    if (processData.process && !processData.process.killed) {
+  streamingProcesses.forEach((processData, processId) => {
+    if (processData.ytdlp && !processData.ytdlp.killed) {
+      console.log(`🛑 Deteniendo yt-dlp [${processId}]...`);
+      processData.ytdlp.kill('SIGTERM');
+    }
+    if (processData.ffmpeg && !processData.ffmpeg.killed) {
       console.log(`🛑 Deteniendo ffmpeg [${processId}]...`);
-      processData.process.kill('SIGTERM');
+      processData.ffmpeg.kill('SIGTERM');
     }
   });
   process.exit(0);
