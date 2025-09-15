@@ -64,6 +64,8 @@ app.post('/api/emit', (req, res) => {
     headers.push(`Accept: */*`);
     headers.push(`Accept-Language: en-US,en;q=0.9`);
     headers.push(`Connection: keep-alive`);
+    headers.push(`Cache-Control: no-cache`);
+    headers.push(`Pragma: no-cache`);
     
     if (headers.length > 0) {
       ffmpegArgs.push('-headers', headers.join('\r\n'));
@@ -78,7 +80,9 @@ app.post('/api/emit', (req, res) => {
       '-f', 'flv',    // Formato de salida FLV para RTMP
       '-flvflags', 'no_duration_filesize',
       '-timeout', '30000000', // 30 segundos timeout
-      '-rw_timeout', '30000000', // Read/write timeout
+      '-rw_timeout', '30000000', // Read/write timeout  
+      '-http_persistent', '1', // Mantener conexión HTTP persistente
+      '-seekable', '0', // No es seekable (stream live)
       target_rtmp
     );
 
