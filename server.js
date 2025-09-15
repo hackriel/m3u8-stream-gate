@@ -5,7 +5,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 import os from 'os';
-import YTDlpWrap from 'yt-dlp-wrap';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,9 +21,6 @@ app.use(express.static(path.join(__dirname, 'dist')));
 // Variables globales para manejo de múltiples procesos de streaming
 const streamingProcesses = new Map(); // Map<processId, { ytdlp: process, ffmpeg: process, status }>
 const emissionStatuses = new Map(); // Map<processId, status>
-
-// Inicializar yt-dlp wrapper
-const ytDlpWrap = new YTDlpWrap();
 
 // Proxy M3U8 para agregar query parameters a los segmentos
 app.get('/proxy-m3u8/:processId', async (req, res) => {

@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { promisify } from 'util';
 import os from 'os';
-import YTDlpWrap from 'yt-dlp-wrap';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,9 +16,6 @@ const PORT = process.env.PORT || 3001;
 // Variables para el proceso de streaming robusto
 const streamingProcesses = new Map(); // Map<processId, { ytdlp: process, ffmpeg: process }>
 const emissionStatuses = new Map(); // Map<processId, status>
-
-// Inicializar yt-dlp wrapper
-const ytDlpWrap = new YTDlpWrap();
 
 // Middleware básico
 app.use(cors({
