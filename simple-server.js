@@ -51,7 +51,11 @@ app.post('/api/emit', (req, res) => {
     // Construir comando ffmpeg optimizado para M3U8 - stream directo sin compresión
     const ffmpegArgs = [
       '-re', // Leer input a su velocidad nativa
-      '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      '-multiple_requests', '1', // Permitir múltiples requests HTTP
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '2'
     ];
 
     // Configurar headers para M3U8 (crítico para algunos streams)
@@ -59,7 +63,10 @@ app.post('/api/emit', (req, res) => {
     if (referer) {
       headers.push(`Referer: ${referer}`);
     }
-    headers.push(`User-Agent: ${user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}`);
+    headers.push(`User-Agent: ${user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}`);
+    headers.push(`Accept: */*`);
+    headers.push(`Accept-Language: en-US,en;q=0.9`);
+    headers.push(`Connection: keep-alive`);
     
     if (headers.length > 0) {
       ffmpegArgs.push('-headers', headers.join('\r\n'));
@@ -70,13 +77,11 @@ app.post('/api/emit', (req, res) => {
       '-c:v', 'copy', // Copiar video sin recodificar
       '-c:a', 'copy', // Copiar audio sin recodificar
       '-avoid_negative_ts', 'make_zero', // Evitar timestamps negativos
-      '-fflags', '+genpts', // Generar PTS si faltan
+      '-fflags', '+genpts+discardcorrupt', // Generar PTS y descartar corrupto
       '-f', 'flv',    // Formato de salida FLV para RTMP
       '-flvflags', 'no_duration_filesize',
-      '-reconnect', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
-      '-timeout', '10000000', // 10 segundos timeout
+      '-timeout', '30000000', // 30 segundos timeout
+      '-rw_timeout', '30000000', // Read/write timeout
       target_rtmp
     );
 
