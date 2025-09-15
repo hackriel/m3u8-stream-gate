@@ -25,6 +25,100 @@ app.use(cors({
 app.use(express.json());
 app.use(express.static(join(__dirname, 'dist')));
 
+// Proxy M3U8 para agregar query parameters a los segmentos
+app.get('/proxy-m3u8/:processId', async (req, res) => {
+  try {
+    const { processId } = req.params;
+    const originalUrl = req.query.url;
+    const userAgent = req.query.user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+    const referer = req.query.referer;
+
+    if (!originalUrl) {
+      return res.status(400).send('URL parameter is required');
+    }
+
+    console.log(`🔄 Proxy M3U8 [${processId}]: ${originalUrl}`);
+
+    // Headers para la petición
+    const headers = {
+      'User-Agent': userAgent,
+      'Accept': 'application/vnd.apple.mpegurl, application/x-mpegurl, application/octet-stream',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Connection': 'keep-alive',
+      'Cache-Control': 'no-cache'
+    };
+
+    if (referer) {
+      headers['Referer'] = referer;
+    }
+
+    // Descargar el M3U8 original
+    const response = await fetch(originalUrl, { headers });
+    
+    if (!response.ok) {
+      console.error(`❌ Error descargando M3U8 [${processId}]: ${response.status} ${response.statusText}`);
+      return res.status(response.status).send(`Error downloading M3U8: ${response.statusText}`);
+    }
+
+    let m3u8Content = await response.text();
+    console.log(`✅ M3U8 descargado [${processId}], modificando segmentos...`);
+
+    // Extraer query parameters del URL original
+    const originalUrlObj = new URL(originalUrl);
+    const queryParams = originalUrlObj.searchParams.toString();
+
+    if (queryParams) {
+      // Modificar cada línea que sea una URL de segmento
+      const lines = m3u8Content.split('\n');
+      const modifiedLines = lines.map(line => {
+        const trimmedLine = line.trim();
+        
+        // Si es una URL de segmento (.ts, .m4s, etc.) y no es un comentario
+        if (trimmedLine && 
+            !trimmedLine.startsWith('#') && 
+            (trimmedLine.includes('.ts') || trimmedLine.includes('.m4s') || trimmedLine.includes('.mp4'))) {
+          
+          try {
+            // Si es una URL relativa, hacerla absoluta
+            let segmentUrl;
+            if (trimmedLine.startsWith('http')) {
+              segmentUrl = new URL(trimmedLine);
+            } else {
+              // URL relativa - usar la base del M3U8 original
+              const baseUrl = originalUrl.substring(0, originalUrl.lastIndexOf('/') + 1);
+              segmentUrl = new URL(trimmedLine, baseUrl);
+            }
+            
+            // Agregar los query parameters
+            originalUrlObj.searchParams.forEach((value, key) => {
+              segmentUrl.searchParams.set(key, value);
+            });
+            
+            console.log(`🔧 Segmento modificado [${processId}]: ${segmentUrl.toString()}`);
+            return segmentUrl.toString();
+          } catch (error) {
+            console.warn(`⚠️ No se pudo modificar segmento [${processId}]: ${trimmedLine}`, error.message);
+            return line; // Retornar original si hay error
+          }
+        }
+        
+        return line; // Retornar sin modificar si no es un segmento
+      });
+      
+      m3u8Content = modifiedLines.join('\n');
+    }
+
+    // Enviar el M3U8 modificado
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.send(m3u8Content);
+
+  } catch (error) {
+    console.error(`❌ Error en proxy M3U8: ${error.message}`);
+    res.status(500).send(`Proxy error: ${error.message}`);
+  }
+});
+
 // Endpoint para iniciar emisión
 app.post('/api/emit', (req, res) => {
   try {
@@ -48,8 +142,11 @@ app.post('/api/emit', (req, res) => {
     emissionStatuses.set(process_id, 'starting');
     console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, referer, process_id });
 
-    // Usar la URL tal como se proporciona
-    const finalUrl = source_m3u8;
+    // Crear URL del proxy para M3U8 con autenticación
+    const proxyUrl = `http://localhost:${PORT}/proxy-m3u8/${process_id}?url=${encodeURIComponent(source_m3u8)}&user_agent=${encodeURIComponent(user_agent || '')}&referer=${encodeURIComponent(referer || '')}`;
+    console.log(`🔄 Usando proxy M3U8: ${proxyUrl}`);
+    
+    const finalUrl = proxyUrl;
 
     // Construir comando ffmpeg optimizado para M3U8 - stream directo sin compresión
     const ffmpegArgs = [
