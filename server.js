@@ -45,26 +45,35 @@ app.post('/api/emit', (req, res) => {
     emissionStatuses.set(process_id, 'starting');
     console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, referer, process_id });
 
-    // Construir comando ffmpeg SIN COMPRESIÓN - stream directo
+    // Construir comando ffmpeg optimizado para M3U8 - stream directo sin compresión
     const ffmpegArgs = [
       '-re', // Leer input a su velocidad nativa
       '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     ];
 
-    // Agregar referer si se proporciona
+    // Configurar headers para M3U8 (crítico para algunos streams)
+    const headers = [];
     if (referer) {
-      ffmpegArgs.push('-headers', `Referer: ${referer}`);
+      headers.push(`Referer: ${referer}`);
+    }
+    headers.push(`User-Agent: ${user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}`);
+    
+    if (headers.length > 0) {
+      ffmpegArgs.push('-headers', headers.join('\r\n'));
     }
 
     ffmpegArgs.push(
       '-i', source_m3u8,
       '-c:v', 'copy', // Copiar video sin recodificar
       '-c:a', 'copy', // Copiar audio sin recodificar
+      '-avoid_negative_ts', 'make_zero', // Evitar timestamps negativos
+      '-fflags', '+genpts', // Generar PTS si faltan
       '-f', 'flv',    // Formato de salida FLV para RTMP
       '-flvflags', 'no_duration_filesize',
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
+      '-timeout', '10000000', // 10 segundos timeout
       target_rtmp
     );
 
