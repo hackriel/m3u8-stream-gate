@@ -48,19 +48,8 @@ app.post('/api/emit', (req, res) => {
     emissionStatuses.set(process_id, 'starting');
     console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, referer, process_id });
 
-    // Detectar si es una URL de chunks específicos que requiere sesión previa
-    let finalUrl = source_m3u8;
-    const isChunksUrl = source_m3u8.includes('chunks.m3u8') && source_m3u8.includes('nimblesessionid');
-    
-    if (isChunksUrl) {
-      // Para URLs de chunks, usar el master playlist preservando los parámetros de autenticación
-      const url = new URL(source_m3u8);
-      const pathParts = url.pathname.split('/');
-      // Cambiar stream#### por el path base y chunks.m3u8 por playlist.m3u8
-      const newPath = url.pathname.replace(/\/StreamTeletica\/stream\d+\/chunks\.m3u8/, '/playlist.m3u8');
-      finalUrl = `${url.protocol}//${url.host}${newPath}${url.search}`;
-      console.log(`🔄 Detectada URL de chunks, usando master playlist: ${finalUrl}`);
-    }
+    // Usar la URL tal como se proporciona
+    const finalUrl = source_m3u8;
 
     // Construir comando ffmpeg optimizado para M3U8 - stream directo sin compresión
     const ffmpegArgs = [
