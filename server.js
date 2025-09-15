@@ -139,39 +139,39 @@ app.post('/api/emit', (req, res) => {
     emissionStatuses.set(process_id, 'starting');
     console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, referer, process_id });
 
-    // Crear URL del proxy para M3U8 con autenticación
-    const proxyUrl = `http://localhost:${PORT}/proxy-m3u8/${process_id}?url=${encodeURIComponent(source_m3u8)}&user_agent=${encodeURIComponent(user_agent || '')}&referer=${encodeURIComponent(referer || '')}`;
-    console.log(`🔄 Usando proxy M3U8: ${proxyUrl}`);
-    
-    const finalUrl = proxyUrl;
+    // Usar directamente el M3U8 original - sin proxy
+    console.log(`🎯 Acceso directo M3U8: ${source_m3u8}`);
+    const finalUrl = source_m3u8;
 
-    // Construir comando ffmpeg optimizado para M3U8 - stream directo sin compresión
+    // Comando ffmpeg optimizado para HLS con autenticación directa
     const ffmpegArgs = [
       '-re', // Leer input a su velocidad nativa
       '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
       '-multiple_requests', '1', // Permitir múltiples requests HTTP
       '-reconnect', '1',
-      '-reconnect_streamed', '1',
+      '-reconnect_streamed', '1', 
       '-reconnect_delay_max', '2',
-      '-http_persistent', '1', // Mantener conexión HTTP persistente para sesiones
-      '-live_start_index', '-1' // Empezar desde el último segmento disponible
+      '-http_persistent', '0', // Desactivar para evitar problemas de sesión
+      '-live_start_index', '-1', // Empezar desde el último segmento disponible
+      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto' // Protocolos permitidos
     ];
 
-    // Configurar headers para M3U8 (crítico para algunos streams)
+    // Headers críticos para autenticación HLS
     const headers = [];
+    headers.push(`User-Agent: ${user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}`);
+    headers.push(`Accept: application/vnd.apple.mpegurl, application/x-mpegurl, */*`);
+    headers.push(`Accept-Language: en-US,en;q=0.9,es;q=0.8`);
+    headers.push(`Accept-Encoding: gzip, deflate, br`);
+    headers.push(`Cache-Control: no-cache`);
+    headers.push(`Pragma: no-cache`);
+    headers.push(`Connection: keep-alive`);
+    
     if (referer) {
       headers.push(`Referer: ${referer}`);
     }
-    headers.push(`User-Agent: ${user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}`);
-    headers.push(`Accept: */*`);
-    headers.push(`Accept-Language: en-US,en;q=0.9`);
-    headers.push(`Connection: keep-alive`);
-    headers.push(`Cache-Control: no-cache`);
-    headers.push(`Pragma: no-cache`);
     
-    if (headers.length > 0) {
-      ffmpegArgs.push('-headers', headers.join('\r\n'));
-    }
+    // Agregar headers de autenticación si están en la URL
+    ffmpegArgs.push('-headers', headers.join('\r\n'));
 
     ffmpegArgs.push(
       '-i', finalUrl,
