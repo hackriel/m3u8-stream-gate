@@ -529,9 +529,19 @@ app.get('/api/system-resources', async (req, res) => {
   }
 });
 
-// Servir archivos estáticos de React en producción
-app.get('*', (req, res) => {
+// Servir archivos estáticos de React en producción - colocarlo al final
+app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
+// Catch-all handler para SPA - debe ir después de todas las rutas API
+app.get('*', (req, res) => {
+  // Solo servir index.html si no es una ruta API
+  if (!req.path.startsWith('/api/')) {
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  } else {
+    res.status(404).json({ error: 'API endpoint not found' });
+  }
 });
 
 // Manejo de cierre limpio
