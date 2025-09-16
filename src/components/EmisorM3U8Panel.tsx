@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import SystemMonitor from "./SystemMonitor";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -21,7 +20,6 @@ declare global {
 interface EmissionProcess {
   m3u8: string;
   userAgent: string;
-  referer: string;
   rtmp: string;
   previewSuffix: string;
   isEmitiendo: boolean;
@@ -33,26 +31,19 @@ interface EmissionProcess {
 }
 
 export default function EmisorM3U8Panel() {
-  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
-  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
+  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
+  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
   const [showDiagram, setShowDiagram] = useState(false);
 
-  // Estado para extractor de URLs
-  const [extractorUrl, setExtractorUrl] = useState("");
-  const [extractedUrl, setExtractedUrl] = useState("");
-  const [extractorLoading, setExtractorLoading] = useState(false);
-  const [extractorError, setExtractorError] = useState("");
-
-  // Estado para 4 procesos independientes
+  // Estado para 3 procesos independientes
   const [processes, setProcesses] = useState<EmissionProcess[]>(() => {
     const savedProcesses = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       savedProcesses.push({
         m3u8: localStorage.getItem(`emisor_m3u8_${i}`) || "",
         userAgent: localStorage.getItem(`emisor_user_agent_${i}`) || "",
-        referer: localStorage.getItem(`emisor_referer_${i}`) || "",
         rtmp: localStorage.getItem(`emisor_rtmp_${i}`) || "",
         previewSuffix: localStorage.getItem(`emisor_preview_suffix_${i}`) || "/video.m3u8",
         isEmitiendo: localStorage.getItem(`emisor_is_emitting_${i}`) === "true",
@@ -66,14 +57,13 @@ export default function EmisorM3U8Panel() {
     return savedProcesses;
   });
 
-  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
+  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
 
   // Persistir datos en localStorage cuando cambien
   useEffect(() => {
     processes.forEach((process, index) => {
       localStorage.setItem(`emisor_m3u8_${index}`, process.m3u8);
       localStorage.setItem(`emisor_user_agent_${index}`, process.userAgent);
-      localStorage.setItem(`emisor_referer_${index}`, process.referer);
       localStorage.setItem(`emisor_rtmp_${index}`, process.rtmp);
       localStorage.setItem(`emisor_preview_suffix_${index}`, process.previewSuffix);
       localStorage.setItem(`emisor_is_emitting_${index}`, process.isEmitiendo.toString());
@@ -186,67 +176,6 @@ export default function EmisorM3U8Panel() {
     
     const joiner = baseUrl.endsWith("/") || previewSuffix.startsWith("/") ? "" : "/";
     return `${baseUrl}${joiner}${previewSuffix}`;
-  };
-
-  // Función para extraer URL de 1280x720 desde playlist maestro
-  const extractM3U8Url = async () => {
-    if (!extractorUrl) {
-      setExtractorError("Por favor ingresa una URL");
-      return;
-    }
-
-    setExtractorLoading(true);
-    setExtractorError("");
-    setExtractedUrl("");
-
-    try {
-      const response = await fetch(extractorUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Error ${response.status}: ${response.statusText}`);
-      }
-
-      const m3u8Content = await response.text();
-      
-      // Parsear el contenido M3U8 para encontrar la variante de 1280x720
-      const lines = m3u8Content.split('\n');
-      let found720pUrl = "";
-      
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        
-        // Buscar líneas #EXT-X-STREAM-INF que contengan RESOLUTION=1280x720
-        if (line.startsWith('#EXT-X-STREAM-INF') && line.includes('RESOLUTION=1280x720')) {
-          // La siguiente línea debería contener la URL
-          const nextLine = lines[i + 1]?.trim();
-          if (nextLine && !nextLine.startsWith('#')) {
-            // Si la URL es relativa, construir la URL absoluta
-            if (nextLine.startsWith('http')) {
-              found720pUrl = nextLine;
-            } else {
-              const baseUrl = extractorUrl.replace(/\/[^\/]*$/, '/');
-              found720pUrl = baseUrl + nextLine;
-            }
-            break;
-          }
-        }
-      }
-
-      if (found720pUrl) {
-        setExtractedUrl(found720pUrl);
-      } else {
-        setExtractorError("No se encontró una variante de 1280x720 en el playlist");
-      }
-
-    } catch (error) {
-      setExtractorError(`Error al procesar la URL: ${error instanceof Error ? error.message : 'Error desconocido'}`);
-    } finally {
-      setExtractorLoading(false);
-    }
   };
 
   // --- Control de preview local (HLS.js / nativo) mejorado ---
@@ -501,7 +430,6 @@ export default function EmisorM3U8Panel() {
           source_m3u8: process.m3u8, 
           target_rtmp: process.rtmp, 
           user_agent: process.userAgent || null,
-          referer: process.referer || null,
           process_id: processIndex.toString()
         }),
       });
@@ -592,7 +520,6 @@ export default function EmisorM3U8Panel() {
     updateProcess(processIndex, {
       m3u8: "",
       userAgent: "",
-      referer: "",
       rtmp: "",
       previewSuffix: "/video.m3u8"
     });
@@ -600,7 +527,6 @@ export default function EmisorM3U8Panel() {
     // Limpiar localStorage de todos los datos
     localStorage.removeItem(`emisor_m3u8_${processIndex}`);
     localStorage.removeItem(`emisor_user_agent_${processIndex}`);
-    localStorage.removeItem(`emisor_referer_${processIndex}`);
     localStorage.removeItem(`emisor_rtmp_${processIndex}`);
     localStorage.removeItem(`emisor_preview_suffix_${processIndex}`);
     
@@ -663,15 +589,6 @@ export default function EmisorM3U8Panel() {
               placeholder="Mozilla/5.0 (Windows NT 10.0; Win64; x64) ..."
               value={process.userAgent}
               onChange={(e) => updateProcess(processIndex, { userAgent: e.target.value })}
-              className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-            />
-
-            <label className="block text-sm mb-2 text-muted-foreground">Referer (HTTP Header)</label>
-            <input
-              type="text"
-              placeholder="https://bradmax.com"
-              value={process.referer}
-              onChange={(e) => updateProcess(processIndex, { referer: e.target.value })}
               className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
             />
 
@@ -848,12 +765,12 @@ export default function EmisorM3U8Panel() {
             Emisor M3U8 → RTMP – Panel Multi-Proceso
           </h1>
           <div className="text-sm text-muted-foreground">
-            Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/4</span>
+            Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/3</span>
           </div>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-5 mb-6">
+          <TabsList className="grid w-full grid-cols-3 mb-6">
             <TabsTrigger value="0" className="flex items-center gap-2">
               <span className={`inline-flex h-2 w-2 rounded-full ${processes[0].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
               Proceso 1
@@ -865,13 +782,6 @@ export default function EmisorM3U8Panel() {
             <TabsTrigger value="2" className="flex items-center gap-2">
               <span className={`inline-flex h-2 w-2 rounded-full ${processes[2].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
               Proceso 3
-            </TabsTrigger>
-            <TabsTrigger value="3" className="flex items-center gap-2">
-              <span className={`inline-flex h-2 w-2 rounded-full ${processes[3].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
-              Proceso 4
-            </TabsTrigger>
-            <TabsTrigger value="extractor" className="flex items-center gap-2">
-              🔍 Extractor
             </TabsTrigger>
           </TabsList>
 
@@ -885,82 +795,6 @@ export default function EmisorM3U8Panel() {
 
           <TabsContent value="2">
             {renderProcessTab(2)}
-          </TabsContent>
-
-          <TabsContent value="3">
-            {renderProcessTab(3)}
-          </TabsContent>
-
-          <TabsContent value="extractor">
-            <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-broadcast-border/50">
-              <h2 className="text-xl font-semibold mb-6 text-accent flex items-center gap-2">
-                🔍 Extractor de URL 1280x720
-              </h2>
-              
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-foreground">
-                    URL del Playlist Maestro M3U8:
-                  </label>
-                  <div className="flex gap-3">
-                    <input
-                      type="url"
-                      value={extractorUrl}
-                      onChange={(e) => setExtractorUrl(e.target.value)}
-                      placeholder="https://example.com/playlist.m3u8"
-                      className="flex-1 px-4 py-3 bg-background/50 border border-border rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
-                    />
-                    <button
-                      onClick={extractM3U8Url}
-                      disabled={extractorLoading || !extractorUrl}
-                      className="px-6 py-3 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground text-primary-foreground rounded-xl font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    >
-                      {extractorLoading ? "Procesando..." : "Extraer"}
-                    </button>
-                  </div>
-                </div>
-
-                {extractorError && (
-                  <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-xl">
-                    <p className="text-destructive text-sm">{extractorError}</p>
-                  </div>
-                )}
-
-                {extractedUrl && (
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium text-foreground">URL Extraída (1280x720):</h3>
-                    <div className="bg-background/50 border border-border rounded-xl p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <code className="text-sm text-foreground font-mono flex-1 break-all">
-                          {extractedUrl}
-                        </code>
-                        <button
-                          onClick={() => navigator.clipboard.writeText(extractedUrl)}
-                          className="px-3 py-2 bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-lg text-sm font-medium transition-colors"
-                          title="Copiar URL"
-                        >
-                          📋 Copiar
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <div className="text-sm text-muted-foreground">
-                      ✅ URL de resolución 1280x720 extraída exitosamente. Puedes copiarla y usarla en cualquiera de los procesos de emisión.
-                    </div>
-                  </div>
-                )}
-
-                <div className="bg-card/30 border border-border rounded-xl p-4">
-                  <h4 className="font-medium text-foreground mb-2">ℹ️ Cómo funciona:</h4>
-                  <ul className="text-sm text-muted-foreground space-y-1">
-                    <li>• Ingresa la URL del playlist maestro M3U8</li>
-                    <li>• El extractor descarga y analiza el contenido</li>
-                    <li>• Busca automáticamente la variante de resolución 1280x720</li>
-                    <li>• Te devuelve la URL específica que puedes usar directamente</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
           </TabsContent>
         </Tabs>
 
@@ -986,9 +820,6 @@ export default function EmisorM3U8Panel() {
           </div>
         </footer>
       </div>
-
-      {/* Monitor de Sistema */}
-      <SystemMonitor />
     </div>
   );
 }
