@@ -654,12 +654,12 @@ export default function EmisorM3U8Panel() {
                       onChange={(e) => updateProcess(processIndex, { videoBitrate: e.target.value })}
                       className="w-full bg-card border border-border rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-primary/50 text-sm"
                     >
-                      <option value="500k">500k (Calidad baja)</option>
-                      <option value="1000k">1000k (Calidad media)</option>
-                      <option value="1500k">1500k (Calidad buena)</option>
-                      <option value="2000k">2000k (Calidad alta)</option>
-                      <option value="3000k">3000k (Calidad muy alta)</option>
-                      <option value="4000k">4000k (Calidad máxima)</option>
+                      <option value="500k">500 kbps (Calidad baja)</option>
+                      <option value="1000k">1000 kbps (Calidad media)</option>
+                      <option value="1500k">1500 kbps (Calidad buena)</option>
+                      <option value="2000k">2000 kbps (Calidad alta)</option>
+                      <option value="3000k">3000 kbps (Calidad muy alta)</option>
+                      <option value="4000k">4000 kbps (Calidad máxima)</option>
                     </select>
                   </div>
                   
@@ -682,7 +682,7 @@ export default function EmisorM3U8Panel() {
               
               <p className="text-xs text-muted-foreground mt-2">
                 {process.customQuality 
-                  ? `🎥 Se aplicará recodificación con bitrate ${process.videoBitrate} y resolución ${process.videoResolution}` 
+                  ? `🎥 Se aplicará recodificación con bitrate ${process.videoBitrate.replace('k', ' kbps')} y resolución ${process.videoResolution}` 
                   : "📺 Se mantendrá la calidad original del stream (copy mode)"}
               </p>
             </div>
