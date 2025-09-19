@@ -22,7 +22,7 @@ const emissionStatuses = new Map(); // Map<processId, status>
 // Endpoint para iniciar emisión
 app.post('/api/emit', (req, res) => {
   try {
-    const { source_m3u8, target_rtmp, user_agent, process_id = '0' } = req.body;
+    const { source_m3u8, target_rtmp, user_agent, process_id = '0', custom_quality = false, video_bitrate = '2000k', video_resolution = '1920x1080' } = req.body;
 
     // Validaciones
     if (!source_m3u8 || !target_rtmp) {
@@ -40,24 +40,52 @@ app.post('/api/emit', (req, res) => {
     }
 
     emissionStatuses.set(process_id, 'starting');
-    console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, process_id });
+    console.log('🚀 Iniciando emisión:', { source_m3u8, target_rtmp, user_agent, process_id, custom_quality, video_bitrate, video_resolution });
 
-    // Construir comando ffmpeg SIN COMPRESIÓN - stream directo
-    const ffmpegArgs = [
-      '-re', // Leer input a su velocidad nativa
-      '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      '-i', source_m3u8,
-      '-c:v', 'copy', // Copiar video sin recodificar
-      '-c:a', 'copy', // Copiar audio sin recodificar
-      '-f', 'flv',    // Formato de salida FLV para RTMP
-      '-flvflags', 'no_duration_filesize',
-      '-reconnect', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
-      target_rtmp
-    ];
+    // Construir comando ffmpeg según configuración de calidad
+    let ffmpegArgs;
+    
+    if (custom_quality) {
+      // Comando con recodificación personalizada
+      ffmpegArgs = [
+        '-re', // Leer input a su velocidad nativa
+        '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        '-i', source_m3u8,
+        '-c:v', 'libx264', // Recodificar video
+        '-b:v', video_bitrate, // Bitrate personalizado
+        '-s', video_resolution, // Resolución personalizada
+        '-preset', 'fast', // Preset de codificación rápido
+        '-c:a', 'aac', // Recodificar audio a AAC
+        '-b:a', '128k', // Bitrate de audio
+        '-f', 'flv',    // Formato de salida FLV para RTMP
+        '-flvflags', 'no_duration_filesize',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        target_rtmp
+      ];
+    } else {
+      // Comando SIN COMPRESIÓN - stream directo (modo original)
+      ffmpegArgs = [
+        '-re', // Leer input a su velocidad nativa
+        '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        '-i', source_m3u8,
+        '-c:v', 'copy', // Copiar video sin recodificar
+        '-c:a', 'copy', // Copiar audio sin recodificar
+        '-f', 'flv',    // Formato de salida FLV para RTMP
+        '-flvflags', 'no_duration_filesize',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        target_rtmp
+      ];
+    }
 
     console.log(`🔧 Comando ffmpeg para proceso ${process_id}:`, 'ffmpeg', ffmpegArgs.join(' '));
+    console.log(`🎛️ Modo de calidad: ${custom_quality ? 'Personalizada' : 'Original'}`);
+    if (custom_quality) {
+      console.log(`📹 Configuración: ${video_resolution} @ ${video_bitrate}`);
+    }
 
     // Ejecutar ffmpeg
     const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);

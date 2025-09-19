@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -28,6 +29,9 @@ interface EmissionProcess {
   emitStatus: "idle" | "starting" | "running" | "stopping" | "error";
   emitMsg: string;
   healthPoints: Array<{ t: number; up: number }>;
+  customQuality: boolean;
+  videoBitrate: string;
+  videoResolution: string;
 }
 
 export default function EmisorM3U8Panel() {
@@ -51,7 +55,10 @@ export default function EmisorM3U8Panel() {
         startTime: parseInt(localStorage.getItem(`emisor_start_time_${i}`) || "0"),
         emitStatus: (localStorage.getItem(`emisor_status_${i}`) as any) || "idle",
         emitMsg: localStorage.getItem(`emisor_msg_${i}`) || "",
-        healthPoints: []
+        healthPoints: [],
+        customQuality: localStorage.getItem(`emisor_custom_quality_${i}`) === "true",
+        videoBitrate: localStorage.getItem(`emisor_video_bitrate_${i}`) || "2000k",
+        videoResolution: localStorage.getItem(`emisor_video_resolution_${i}`) || "1920x1080"
       });
     }
     return savedProcesses;
@@ -71,6 +78,9 @@ export default function EmisorM3U8Panel() {
       localStorage.setItem(`emisor_start_time_${index}`, process.startTime.toString());
       localStorage.setItem(`emisor_status_${index}`, process.emitStatus);
       localStorage.setItem(`emisor_msg_${index}`, process.emitMsg);
+      localStorage.setItem(`emisor_custom_quality_${index}`, process.customQuality.toString());
+      localStorage.setItem(`emisor_video_bitrate_${index}`, process.videoBitrate);
+      localStorage.setItem(`emisor_video_resolution_${index}`, process.videoResolution);
     });
   }, [processes]);
 
@@ -430,7 +440,10 @@ export default function EmisorM3U8Panel() {
           source_m3u8: process.m3u8, 
           target_rtmp: process.rtmp, 
           user_agent: process.userAgent || null,
-          process_id: processIndex.toString()
+          process_id: processIndex.toString(),
+          custom_quality: process.customQuality,
+          video_bitrate: process.videoBitrate,
+          video_resolution: process.videoResolution
         }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -619,6 +632,60 @@ export default function EmisorM3U8Panel() {
               <br />
               <span className="underline break-all text-primary">{previewFromRTMP(process.rtmp, process.previewSuffix) || "rtmp://fluestabiliz.giize.com/costaSTAR007/video.m3u8"}</span>
             </p>
+
+            {/* Controles de calidad personalizada */}
+            <div className="mb-4 p-4 rounded-xl bg-card/50 border border-border">
+              <div className="flex items-center gap-3 mb-3">
+                <Switch
+                  checked={process.customQuality}
+                  onCheckedChange={(checked) => updateProcess(processIndex, { customQuality: checked })}
+                />
+                <label className="text-sm font-medium text-foreground cursor-pointer" onClick={() => updateProcess(processIndex, { customQuality: !process.customQuality })}>
+                  🎛️ Configuración de calidad personalizada
+                </label>
+              </div>
+              
+              {process.customQuality && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                  <div>
+                    <label className="block text-xs mb-2 text-muted-foreground">Bitrate de video</label>
+                    <select
+                      value={process.videoBitrate}
+                      onChange={(e) => updateProcess(processIndex, { videoBitrate: e.target.value })}
+                      className="w-full bg-card border border-border rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+                    >
+                      <option value="500k">500k (Calidad baja)</option>
+                      <option value="1000k">1000k (Calidad media)</option>
+                      <option value="1500k">1500k (Calidad buena)</option>
+                      <option value="2000k">2000k (Calidad alta)</option>
+                      <option value="3000k">3000k (Calidad muy alta)</option>
+                      <option value="4000k">4000k (Calidad máxima)</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs mb-2 text-muted-foreground">Resolución de video</label>
+                    <select
+                      value={process.videoResolution}
+                      onChange={(e) => updateProcess(processIndex, { videoResolution: e.target.value })}
+                      className="w-full bg-card border border-border rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+                    >
+                      <option value="640x360">640x360 (360p)</option>
+                      <option value="854x480">854x480 (480p)</option>
+                      <option value="1280x720">1280x720 (720p)</option>
+                      <option value="1920x1080">1920x1080 (1080p)</option>
+                      <option value="2560x1440">2560x1440 (1440p)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+              
+              <p className="text-xs text-muted-foreground mt-2">
+                {process.customQuality 
+                  ? `🎥 Se aplicará recodificación con bitrate ${process.videoBitrate} y resolución ${process.videoResolution}` 
+                  : "📺 Se mantendrá la calidad original del stream (copy mode)"}
+              </p>
+            </div>
 
             <div className="flex gap-3 items-center flex-wrap">
               {!process.isEmitiendo ? (
