@@ -35,16 +35,16 @@ interface EmissionProcess {
 }
 
 export default function EmisorM3U8Panel() {
-  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
-  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null)];
+  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
+  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
   const [showDiagram, setShowDiagram] = useState(false);
 
-  // Estado para 3 procesos independientes
+  // Estado para 5 procesos independientes
   const [processes, setProcesses] = useState<EmissionProcess[]>(() => {
     const savedProcesses = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       savedProcesses.push({
         m3u8: localStorage.getItem(`emisor_m3u8_${i}`) || "",
         userAgent: localStorage.getItem(`emisor_user_agent_${i}`) || "",
@@ -64,7 +64,7 @@ export default function EmisorM3U8Panel() {
     return savedProcesses;
   });
 
-  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
+  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
 
   // Persistir datos en localStorage cuando cambien
   useEffect(() => {
@@ -832,12 +832,12 @@ export default function EmisorM3U8Panel() {
             Emisor M3U8 → RTMP – Panel Multi-Proceso
           </h1>
           <div className="text-sm text-muted-foreground">
-            Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/3</span>
+            Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/5</span>
           </div>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-6">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="0" className="flex items-center gap-2">
               <span className={`inline-flex h-2 w-2 rounded-full ${processes[0].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
               Proceso 1
@@ -849,6 +849,14 @@ export default function EmisorM3U8Panel() {
             <TabsTrigger value="2" className="flex items-center gap-2">
               <span className={`inline-flex h-2 w-2 rounded-full ${processes[2].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
               Proceso 3
+            </TabsTrigger>
+            <TabsTrigger value="3" className="flex items-center gap-2">
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[3].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
+              Proceso 4
+            </TabsTrigger>
+            <TabsTrigger value="4" className="flex items-center gap-2">
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[4].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
+              Proceso 5
             </TabsTrigger>
           </TabsList>
 
@@ -862,6 +870,14 @@ export default function EmisorM3U8Panel() {
 
           <TabsContent value="2">
             {renderProcessTab(2)}
+          </TabsContent>
+
+          <TabsContent value="3">
+            {renderProcessTab(3)}
+          </TabsContent>
+
+          <TabsContent value="4">
+            {renderProcessTab(4)}
           </TabsContent>
         </Tabs>
 
