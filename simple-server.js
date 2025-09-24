@@ -64,7 +64,7 @@ app.post('/api/emit', (req, res) => {
       console.log(`   User-Agent: ${user_agent || 'default'}`);
       console.log(`📄 Headers completos: ${headers.replace(/\r\n/g, ' | ')}`);
 
-      if (custom_quality) {
+      ffmpegArgs = [
         '-re', // Leer input a su velocidad nativa
         '-headers', headers,
         '-i', source_m3u8,
@@ -84,9 +84,18 @@ app.post('/api/emit', (req, res) => {
     } else {
       // Comando SIN COMPRESIÓN - stream directo (modo original)
       // Construir headers HTTP
+      console.log(`🔧 Configurando headers para proceso ${process_id} (sin compresión):`);
       let headers = `User-Agent: ${user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}`;
-      if (referer) headers += `\r\nReferer: ${referer}`;
-      if (origin) headers += `\r\nOrigin: ${origin}`;
+      if (referer) {
+        headers += `\r\nReferer: ${referer}`;
+        console.log(`   Referer: ${referer}`);
+      }
+      if (origin) {
+        headers += `\r\nOrigin: ${origin}`;
+        console.log(`   Origin: ${origin}`);
+      }
+      console.log(`   User-Agent: ${user_agent || 'default'}`);
+      console.log(`📄 Headers completos: ${headers.replace(/\r\n/g, ' | ')}`);
 
       ffmpegArgs = [
         '-re', // Leer input a su velocidad nativa
