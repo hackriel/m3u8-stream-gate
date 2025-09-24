@@ -66,6 +66,39 @@ export default function EmisorM3U8Panel() {
 
   const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
 
+  // Configuraciones automáticas por proveedor
+  const providerConfigs = {
+    'instantvideocloud.net': {
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+      description: 'Instant Video Cloud'
+    },
+    'cdnmedia.tv': {
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36', 
+      description: 'CDN Media TV'
+    },
+    'liveingesta': {
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+      description: 'Live Ingesta'
+    }
+  };
+
+  // Función para detectar proveedor y autocompletar campos
+  const detectProviderAndFill = (url: string, processIndex: number) => {
+    if (!url) return;
+    
+    for (const [domain, config] of Object.entries(providerConfigs)) {
+      if (url.includes(domain)) {
+        updateProcess(processIndex, {
+          userAgent: config.userAgent
+        });
+        
+        // Mostrar notificación
+        console.log(`✅ Proveedor detectado: ${config.description} - User Agent configurado automáticamente`);
+        break;
+      }
+    }
+  };
+
   // Persistir datos en localStorage cuando cambien
   useEffect(() => {
     processes.forEach((process, index) => {
@@ -592,7 +625,12 @@ export default function EmisorM3U8Panel() {
               type="url"
               placeholder="https://servidor/origen/playlist.m3u8"
               value={process.m3u8}
-              onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
+              onChange={(e) => {
+                const newUrl = e.target.value;
+                updateProcess(processIndex, { m3u8: newUrl });
+                // Detectar proveedor automáticamente al cambiar URL
+                detectProviderAndFill(newUrl, processIndex);
+              }}
               className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
             />
 
