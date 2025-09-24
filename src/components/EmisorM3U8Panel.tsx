@@ -21,8 +21,6 @@ declare global {
 interface EmissionProcess {
   m3u8: string;
   userAgent: string;
-  referer: string;
-  origin: string;
   rtmp: string;
   previewSuffix: string;
   isEmitiendo: boolean;
@@ -50,8 +48,6 @@ export default function EmisorM3U8Panel() {
       savedProcesses.push({
         m3u8: localStorage.getItem(`emisor_m3u8_${i}`) || "",
         userAgent: localStorage.getItem(`emisor_user_agent_${i}`) || "",
-        referer: localStorage.getItem(`emisor_referer_${i}`) || "",
-        origin: localStorage.getItem(`emisor_origin_${i}`) || "",
         rtmp: localStorage.getItem(`emisor_rtmp_${i}`) || "",
         previewSuffix: localStorage.getItem(`emisor_preview_suffix_${i}`) || "/video.m3u8",
         isEmitiendo: localStorage.getItem(`emisor_is_emitting_${i}`) === "true",
@@ -70,67 +66,11 @@ export default function EmisorM3U8Panel() {
 
   const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
 
-  // Configuraciones automáticas por proveedor
-  const providerConfigs = {
-    'instantvideocloud.net': {
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
-      referer: 'https://player.instantvideocloud.net/',
-      origin: 'https://player.instantvideocloud.net',
-      description: 'Instant Video Cloud'
-    },
-    'cdnmedia.tv': {
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
-      referer: 'https://player.instantvideocloud.net/',
-      origin: 'https://player.instantvideocloud.net',
-      description: 'CDN Media TV'
-    },
-    'liveingesta': {
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
-      referer: 'https://player.instantvideocloud.net/',
-      origin: 'https://player.instantvideocloud.net',
-      description: 'Live Ingesta'
-    }
-  };
-
-  // Función para detectar proveedor y autocompletar campos
-  const detectProviderAndFill = (url: string, processIndex: number) => {
-    if (!url) return;
-    
-    console.log(`🔍 Detectando proveedor para: ${url}`);
-    
-    for (const [domain, config] of Object.entries(providerConfigs)) {
-      if (url.includes(domain)) {
-        console.log(`✅ Proveedor detectado: ${config.description}`);
-        console.log(`📄 Configurando headers automáticamente:`);
-        console.log(`   User-Agent: ${config.userAgent}`);
-        console.log(`   Referer: ${config.referer}`);
-        console.log(`   Origin: ${config.origin}`);
-        
-        updateProcess(processIndex, {
-          userAgent: config.userAgent,
-          referer: config.referer,
-          origin: config.origin
-        });
-        
-        // Mostrar notificación visual también
-        setTimeout(() => {
-          updateProcess(processIndex, {
-            emitMsg: `✅ Headers configurados automáticamente para ${config.description}`
-          });
-        }, 100);
-        return;
-      }
-    }
-    console.log(`ℹ️ No se detectó proveedor conocido para esta URL`);
-  };
-
   // Persistir datos en localStorage cuando cambien
   useEffect(() => {
     processes.forEach((process, index) => {
       localStorage.setItem(`emisor_m3u8_${index}`, process.m3u8);
       localStorage.setItem(`emisor_user_agent_${index}`, process.userAgent);
-      localStorage.setItem(`emisor_referer_${index}`, process.referer);
-      localStorage.setItem(`emisor_origin_${index}`, process.origin);
       localStorage.setItem(`emisor_rtmp_${index}`, process.rtmp);
       localStorage.setItem(`emisor_preview_suffix_${index}`, process.previewSuffix);
       localStorage.setItem(`emisor_is_emitting_${index}`, process.isEmitiendo.toString());
@@ -490,13 +430,6 @@ export default function EmisorM3U8Panel() {
     });
 
     try {
-      console.log(`🚀 Iniciando emisión proceso ${processIndex}:`);
-      console.log(`   Origen: ${process.m3u8}`);
-      console.log(`   Destino: ${process.rtmp}`);
-      console.log(`   User-Agent: ${process.userAgent || 'default'}`);
-      console.log(`   Referer: ${process.referer || 'none'}`);
-      console.log(`   Origin: ${process.origin || 'none'}`);
-      
       const resp = await fetch("/api/emit", {
         method: "POST",
         headers: {
@@ -507,8 +440,6 @@ export default function EmisorM3U8Panel() {
           source_m3u8: process.m3u8, 
           target_rtmp: process.rtmp, 
           user_agent: process.userAgent || null,
-          referer: process.referer || null,
-          origin: process.origin || null,
           process_id: processIndex.toString(),
           custom_quality: process.customQuality,
           video_bitrate: process.videoBitrate,
@@ -517,7 +448,6 @@ export default function EmisorM3U8Panel() {
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json().catch(() => ({}));
-      console.log(`📺 Respuesta del servidor para proceso ${processIndex}:`, data);
       
       updateProcess(processIndex, {
         emitStatus: "running",
@@ -662,12 +592,7 @@ export default function EmisorM3U8Panel() {
               type="url"
               placeholder="https://servidor/origen/playlist.m3u8"
               value={process.m3u8}
-              onChange={(e) => {
-                const newUrl = e.target.value;
-                updateProcess(processIndex, { m3u8: newUrl });
-                // Detectar proveedor automáticamente al cambiar URL
-                detectProviderAndFill(newUrl, processIndex);
-              }}
+              onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
               className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
             />
 
