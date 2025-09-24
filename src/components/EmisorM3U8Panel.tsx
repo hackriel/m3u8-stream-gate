@@ -96,19 +96,32 @@ export default function EmisorM3U8Panel() {
   const detectProviderAndFill = (url: string, processIndex: number) => {
     if (!url) return;
     
+    console.log(`🔍 Detectando proveedor para: ${url}`);
+    
     for (const [domain, config] of Object.entries(providerConfigs)) {
       if (url.includes(domain)) {
+        console.log(`✅ Proveedor detectado: ${config.description}`);
+        console.log(`📄 Configurando headers automáticamente:`);
+        console.log(`   User-Agent: ${config.userAgent}`);
+        console.log(`   Referer: ${config.referer}`);
+        console.log(`   Origin: ${config.origin}`);
+        
         updateProcess(processIndex, {
           userAgent: config.userAgent,
           referer: config.referer,
           origin: config.origin
         });
         
-        // Mostrar notificación
-        console.log(`✅ Proveedor detectado: ${config.description} - User Agent configurado automáticamente`);
-        break;
+        // Mostrar notificación visual también
+        setTimeout(() => {
+          updateProcess(processIndex, {
+            emitMsg: `✅ Headers configurados automáticamente para ${config.description}`
+          });
+        }, 100);
+        return;
       }
     }
+    console.log(`ℹ️ No se detectó proveedor conocido para esta URL`);
   };
 
   // Persistir datos en localStorage cuando cambien
@@ -477,6 +490,13 @@ export default function EmisorM3U8Panel() {
     });
 
     try {
+      console.log(`🚀 Iniciando emisión proceso ${processIndex}:`);
+      console.log(`   Origen: ${process.m3u8}`);
+      console.log(`   Destino: ${process.rtmp}`);
+      console.log(`   User-Agent: ${process.userAgent || 'default'}`);
+      console.log(`   Referer: ${process.referer || 'none'}`);
+      console.log(`   Origin: ${process.origin || 'none'}`);
+      
       const resp = await fetch("/api/emit", {
         method: "POST",
         headers: {
@@ -497,6 +517,7 @@ export default function EmisorM3U8Panel() {
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json().catch(() => ({}));
+      console.log(`📺 Respuesta del servidor para proceso ${processIndex}:`, data);
       
       updateProcess(processIndex, {
         emitStatus: "running",
