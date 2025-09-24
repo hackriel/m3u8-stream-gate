@@ -50,9 +50,14 @@ app.post('/api/emit', (req, res) => {
     
     if (custom_quality) {
       // Comando con recodificación personalizada
+      // Construir headers HTTP
+      let headers = `User-Agent: ${user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}`;
+      if (referer) headers += `\r\nReferer: ${referer}`;
+      if (origin) headers += `\r\nOrigin: ${origin}`;
+
       ffmpegArgs = [
         '-re', // Leer input a su velocidad nativa
-        '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        '-headers', headers,
         '-i', source_m3u8,
         '-c:v', 'libx264', // Recodificar video
         '-b:v', video_bitrate, // Bitrate personalizado
@@ -69,9 +74,14 @@ app.post('/api/emit', (req, res) => {
       ];
     } else {
       // Comando SIN COMPRESIÓN - stream directo (modo original)
+      // Construir headers HTTP
+      let headers = `User-Agent: ${user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}`;
+      if (referer) headers += `\r\nReferer: ${referer}`;
+      if (origin) headers += `\r\nOrigin: ${origin}`;
+
       ffmpegArgs = [
         '-re', // Leer input a su velocidad nativa
-        '-user_agent', user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        '-headers', headers,
         '-i', source_m3u8,
         '-c:v', 'copy', // Copiar video sin recodificar
         '-c:a', 'copy', // Copiar audio sin recodificar

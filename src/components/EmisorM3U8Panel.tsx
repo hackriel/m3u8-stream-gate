@@ -21,6 +21,8 @@ declare global {
 interface EmissionProcess {
   m3u8: string;
   userAgent: string;
+  referer: string;
+  origin: string;
   rtmp: string;
   previewSuffix: string;
   isEmitiendo: boolean;
@@ -48,6 +50,8 @@ export default function EmisorM3U8Panel() {
       savedProcesses.push({
         m3u8: localStorage.getItem(`emisor_m3u8_${i}`) || "",
         userAgent: localStorage.getItem(`emisor_user_agent_${i}`) || "",
+        referer: localStorage.getItem(`emisor_referer_${i}`) || "",
+        origin: localStorage.getItem(`emisor_origin_${i}`) || "",
         rtmp: localStorage.getItem(`emisor_rtmp_${i}`) || "",
         previewSuffix: localStorage.getItem(`emisor_preview_suffix_${i}`) || "/video.m3u8",
         isEmitiendo: localStorage.getItem(`emisor_is_emitting_${i}`) === "true",
@@ -70,14 +74,20 @@ export default function EmisorM3U8Panel() {
   const providerConfigs = {
     'instantvideocloud.net': {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+      referer: 'https://player.instantvideocloud.net/',
+      origin: 'https://player.instantvideocloud.net',
       description: 'Instant Video Cloud'
     },
     'cdnmedia.tv': {
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36', 
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+      referer: 'https://player.instantvideocloud.net/',
+      origin: 'https://player.instantvideocloud.net',
       description: 'CDN Media TV'
     },
     'liveingesta': {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+      referer: 'https://player.instantvideocloud.net/',
+      origin: 'https://player.instantvideocloud.net',
       description: 'Live Ingesta'
     }
   };
@@ -89,7 +99,9 @@ export default function EmisorM3U8Panel() {
     for (const [domain, config] of Object.entries(providerConfigs)) {
       if (url.includes(domain)) {
         updateProcess(processIndex, {
-          userAgent: config.userAgent
+          userAgent: config.userAgent,
+          referer: config.referer,
+          origin: config.origin
         });
         
         // Mostrar notificación
@@ -104,6 +116,8 @@ export default function EmisorM3U8Panel() {
     processes.forEach((process, index) => {
       localStorage.setItem(`emisor_m3u8_${index}`, process.m3u8);
       localStorage.setItem(`emisor_user_agent_${index}`, process.userAgent);
+      localStorage.setItem(`emisor_referer_${index}`, process.referer);
+      localStorage.setItem(`emisor_origin_${index}`, process.origin);
       localStorage.setItem(`emisor_rtmp_${index}`, process.rtmp);
       localStorage.setItem(`emisor_preview_suffix_${index}`, process.previewSuffix);
       localStorage.setItem(`emisor_is_emitting_${index}`, process.isEmitiendo.toString());
@@ -473,6 +487,8 @@ export default function EmisorM3U8Panel() {
           source_m3u8: process.m3u8, 
           target_rtmp: process.rtmp, 
           user_agent: process.userAgent || null,
+          referer: process.referer || null,
+          origin: process.origin || null,
           process_id: processIndex.toString(),
           custom_quality: process.customQuality,
           video_bitrate: process.videoBitrate,
