@@ -20,7 +20,6 @@ declare global {
 // Tipo para un proceso de emisión
 interface EmissionProcess {
   m3u8: string;
-  userAgent: string;
   rtmp: string;
   previewSuffix: string;
   isEmitiendo: boolean;
@@ -32,6 +31,18 @@ interface EmissionProcess {
   customQuality: boolean;
   videoBitrate: string;
   videoResolution: string;
+  reconnectAttempts: number;
+  lastReconnectTime: number;
+}
+
+// Tipo para logs del servidor
+interface ServerLog {
+  id: string;
+  timestamp: number;
+  processId: string;
+  level: 'info' | 'warn' | 'error' | 'success';
+  message: string;
+  details?: any;
 }
 
 export default function EmisorM3U8Panel() {
@@ -39,7 +50,9 @@ export default function EmisorM3U8Panel() {
   const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
-  const [showDiagram, setShowDiagram] = useState(false);
+  const [serverLogs, setServerLogs] = useState<ServerLog[]>([]);
+  const [showLogs, setShowLogs] = useState(true);
+  const wsRef = useRef<WebSocket | null>(null);
 
   // Estado para 5 procesos independientes
   const [processes, setProcesses] = useState<EmissionProcess[]>(() => {
@@ -47,7 +60,6 @@ export default function EmisorM3U8Panel() {
     for (let i = 0; i < 5; i++) {
       savedProcesses.push({
         m3u8: localStorage.getItem(`emisor_m3u8_${i}`) || "",
-        userAgent: localStorage.getItem(`emisor_user_agent_${i}`) || "",
         rtmp: localStorage.getItem(`emisor_rtmp_${i}`) || "",
         previewSuffix: localStorage.getItem(`emisor_preview_suffix_${i}`) || "/video.m3u8",
         isEmitiendo: localStorage.getItem(`emisor_is_emitting_${i}`) === "true",
@@ -58,7 +70,9 @@ export default function EmisorM3U8Panel() {
         healthPoints: [],
         customQuality: localStorage.getItem(`emisor_custom_quality_${i}`) === "true",
         videoBitrate: localStorage.getItem(`emisor_video_bitrate_${i}`) || "2000k",
-        videoResolution: localStorage.getItem(`emisor_video_resolution_${i}`) || "1920x1080"
+        videoResolution: localStorage.getItem(`emisor_video_resolution_${i}`) || "1920x1080",
+        reconnectAttempts: 0,
+        lastReconnectTime: 0
       });
     }
     return savedProcesses;
@@ -66,11 +80,68 @@ export default function EmisorM3U8Panel() {
 
   const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
 
+  // WebSocket para logs en tiempo real
+  useEffect(() => {
+    const connectWebSocket = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      
+      try {
+        wsRef.current = new WebSocket(wsUrl);
+        
+        wsRef.current.onopen = () => {
+          addLog("system", "info", "Conectado al sistema de logs en tiempo real");
+        };
+        
+        wsRef.current.onmessage = (event) => {
+          try {
+            const logData = JSON.parse(event.data);
+            setServerLogs(prev => [...prev.slice(-49), logData]); // Mantener últimos 50 logs
+          } catch (e) {
+            console.warn("Error parsing WebSocket message:", e);
+          }
+        };
+        
+        wsRef.current.onclose = () => {
+          addLog("system", "warn", "Desconectado del sistema de logs. Reintentando...");
+          // Reconectar después de 3 segundos
+          setTimeout(connectWebSocket, 3000);
+        };
+        
+        wsRef.current.onerror = (error) => {
+          addLog("system", "error", "Error en WebSocket de logs");
+        };
+      } catch (e) {
+        addLog("system", "error", "No se pudo conectar al sistema de logs");
+      }
+    };
+    
+    connectWebSocket();
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, []);
+
+  // Función para agregar logs locales
+  const addLog = (processId: string, level: ServerLog['level'], message: string, details?: any) => {
+    const log: ServerLog = {
+      id: Date.now() + Math.random().toString(),
+      timestamp: Date.now(),
+      processId,
+      level,
+      message,
+      details
+    };
+    setServerLogs(prev => [...prev.slice(-49), log]);
+  };
+
   // Persistir datos en localStorage cuando cambien
   useEffect(() => {
     processes.forEach((process, index) => {
       localStorage.setItem(`emisor_m3u8_${index}`, process.m3u8);
-      localStorage.setItem(`emisor_user_agent_${index}`, process.userAgent);
       localStorage.setItem(`emisor_rtmp_${index}`, process.rtmp);
       localStorage.setItem(`emisor_preview_suffix_${index}`, process.previewSuffix);
       localStorage.setItem(`emisor_is_emitting_${index}`, process.isEmitiendo.toString());
@@ -118,12 +189,55 @@ export default function EmisorM3U8Panel() {
     });
   }, []);
 
-  // Cada 5s registramos un punto de salud para cada proceso
+  // Cada 5s registramos un punto de salud para cada proceso y verificamos reconexión
   useEffect(() => {
     const id = setInterval(() => {
       processes.forEach((process, index) => {
         const video = videoRefs[index].current;
         const up = video && video.readyState >= 2 && video.networkState !== 3 ? 1 : 0;
+        
+        // Si el proceso está activo pero el video está caído, intentar reconexión
+        if (process.isEmitiendo && up === 0 && process.emitStatus === 'running') {
+          const now = Date.now();
+          const timeSinceLastReconnect = now - process.lastReconnectTime;
+          
+          // Intentar reconexión cada 15 segundos, máximo 3 intentos seguidos
+          if (timeSinceLastReconnect > 15000 && process.reconnectAttempts < 3) {
+            addLog(index.toString(), "warn", `Intento de reconexión automática ${process.reconnectAttempts + 1}/3`);
+            
+            updateProcess(index, {
+              reconnectAttempts: process.reconnectAttempts + 1,
+              lastReconnectTime: now,
+              emitMsg: `Reconectando... (${process.reconnectAttempts + 1}/3)`
+            });
+            
+            // Reintentar carga del preview
+            const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
+            if (previewUrl) {
+              setTimeout(() => {
+                loadPreview(previewUrl, index);
+              }, 2000);
+            }
+            
+            // Verificar el estado del backend
+            checkProcessStatus(index);
+          } else if (process.reconnectAttempts >= 3) {
+            // Máximo de reintentos alcanzado
+            addLog(index.toString(), "error", "Máximo de reconexiones alcanzado. Stream posiblemente caído.");
+            updateProcess(index, {
+              emitStatus: "error",
+              emitMsg: "Stream caído - máximo de reconexiones alcanzado"
+            });
+          }
+        } else if (up === 1 && process.reconnectAttempts > 0) {
+          // Stream recuperado, resetear contador
+          updateProcess(index, {
+            reconnectAttempts: 0,
+            emitMsg: process.emitStatus === 'running' ? "Emitiendo correctamente" : process.emitMsg
+          });
+          addLog(index.toString(), "success", "Stream recuperado exitosamente");
+        }
+        
         updateProcess(index, {
           healthPoints: [
             ...process.healthPoints.slice(-119),
@@ -134,6 +248,26 @@ export default function EmisorM3U8Panel() {
     }, 5000);
     return () => clearInterval(id);
   }, [processes]);
+
+  // Función para verificar estado del proceso en el backend
+  const checkProcessStatus = async (processIndex: number) => {
+    try {
+      const resp = await fetch(`/api/status?process_id=${processIndex}`);
+      const data = await resp.json();
+      
+      if (!data.process_running && processes[processIndex].isEmitiendo) {
+        addLog(processIndex.toString(), "error", "Proceso FFmpeg no está corriendo en el servidor");
+        
+        // Intentar reiniciar el proceso automáticamente
+        setTimeout(() => {
+          addLog(processIndex.toString(), "info", "Intentando reiniciar proceso automáticamente...");
+          startEmitToRTMP(processIndex);
+        }, 5000);
+      }
+    } catch (e) {
+      addLog(processIndex.toString(), "error", "Error verificando estado del servidor");
+    }
+  };
 
   // Timer de reproducción para cada proceso
   useEffect(() => {
@@ -270,10 +404,6 @@ export default function EmisorM3U8Panel() {
               try {
                 xhr.setRequestHeader("Cache-Control", "no-cache");
                 xhr.setRequestHeader("Pragma", "no-cache");
-                const process = processes[processIndex];
-                if (process.userAgent) {
-                  xhr.setRequestHeader("X-Requested-User-Agent", process.userAgent);
-                }
               } catch (e) {
                 console.error("Error setting headers:", e);
               }
@@ -426,20 +556,22 @@ export default function EmisorM3U8Panel() {
     
     updateProcess(processIndex, {
       emitStatus: "starting",
-      emitMsg: "Iniciando emisión en el servidor..."
+      emitMsg: "Iniciando emisión en el servidor...",
+      reconnectAttempts: 0,
+      lastReconnectTime: 0
     });
+
+    addLog(processIndex.toString(), "info", `Iniciando emisión: ${process.m3u8} → ${process.rtmp}`);
 
     try {
       const resp = await fetch("/api/emit", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Requested-User-Agent": process.userAgent || navigator.userAgent,
         },
         body: JSON.stringify({ 
           source_m3u8: process.m3u8, 
           target_rtmp: process.rtmp, 
-          user_agent: process.userAgent || null,
           process_id: processIndex.toString(),
           custom_quality: process.customQuality,
           video_bitrate: process.videoBitrate,
@@ -532,14 +664,12 @@ export default function EmisorM3U8Panel() {
     // Limpiar campos
     updateProcess(processIndex, {
       m3u8: "",
-      userAgent: "",
       rtmp: "",
       previewSuffix: "/video.m3u8"
     });
     
     // Limpiar localStorage de todos los datos
     localStorage.removeItem(`emisor_m3u8_${processIndex}`);
-    localStorage.removeItem(`emisor_user_agent_${processIndex}`);
     localStorage.removeItem(`emisor_rtmp_${processIndex}`);
     localStorage.removeItem(`emisor_preview_suffix_${processIndex}`);
     
@@ -593,15 +723,6 @@ export default function EmisorM3U8Panel() {
               placeholder="https://servidor/origen/playlist.m3u8"
               value={process.m3u8}
               onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-              className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-            />
-
-            <label className="block text-sm mb-2 text-muted-foreground">User-Agent deseado</label>
-            <input
-              type="text"
-              placeholder="Mozilla/5.0 (Windows NT 10.0; Win64; x64) ..."
-              value={process.userAgent}
-              onChange={(e) => updateProcess(processIndex, { userAgent: e.target.value })}
               className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
             />
 
@@ -774,30 +895,45 @@ export default function EmisorM3U8Panel() {
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 col-span-2 transition-all duration-300 hover:shadow-xl">
             <h3 className="text-base font-medium mb-2 text-accent">Uptime reciente (~10 min) - Proceso {processIndex + 1}</h3>
             <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={uptimeData} margin={{ left: 6, right: 16, top: 10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} hide={false} />
-                  <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={40} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
-                  <Tooltip 
-                    formatter={(v) => [`${v}%`, "Estado"]} 
-                    contentStyle={{ 
-                      backgroundColor: "hsl(var(--card))", 
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "0.75rem",
-                      color: "hsl(var(--foreground))"
-                    }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="Estado" 
-                    dot={false} 
-                    strokeWidth={3} 
-                    stroke="hsl(var(--primary))"
-                    strokeLinecap="round"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {uptimeData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={uptimeData} margin={{ left: 6, right: 16, top: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+                    <XAxis 
+                      dataKey="name" 
+                      tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} 
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis 
+                      domain={[0, 100]} 
+                      tickFormatter={(v) => `${v}%`} 
+                      width={40} 
+                      tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} 
+                    />
+                    <Tooltip 
+                      formatter={(v) => [`${v}%`, "Estado"]} 
+                      contentStyle={{ 
+                        backgroundColor: "hsl(var(--card))", 
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "0.75rem",
+                        color: "hsl(var(--foreground))"
+                      }}
+                    />
+                    <Line 
+                      type="stepAfter" 
+                      dataKey="Estado" 
+                      dot={false} 
+                      strokeWidth={2} 
+                      stroke="hsl(var(--primary))"
+                      strokeLinecap="round"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full text-muted-foreground">
+                  <span className="text-sm">Recopilando datos de uptime...</span>
+                </div>
+              )}
             </div>
           </div>
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
@@ -818,6 +954,80 @@ export default function EmisorM3U8Panel() {
                 </span>
               </li>
             </ul>
+          </div>
+        </section>
+
+        {/* Panel de logs del servidor */}
+        <section className="mt-6">
+          <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b border-broadcast-border/30">
+              <h3 className="text-lg font-medium text-accent flex items-center gap-2">
+                <span className="text-xl">📋</span>
+                Logs del Servidor en Tiempo Real
+              </h3>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setServerLogs([])}
+                  className="px-3 py-1 rounded-lg bg-secondary hover:bg-secondary/90 text-secondary-foreground text-sm transition-all duration-200"
+                >
+                  🗑️ Limpiar
+                </button>
+                <button
+                  onClick={() => setShowLogs(!showLogs)}
+                  className="px-3 py-1 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-sm transition-all duration-200"
+                >
+                  {showLogs ? '📕 Ocultar' : '📖 Mostrar'}
+                </button>
+              </div>
+            </div>
+            
+            {showLogs && (
+              <div className="p-4">
+                <div className="bg-black/80 rounded-xl p-4 h-64 overflow-y-auto font-mono text-sm">
+                  {serverLogs.length === 0 ? (
+                    <div className="text-muted-foreground text-center py-8">
+                      Sin logs recientes. Los logs aparecerán aquí en tiempo real.
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {serverLogs.map((log) => (
+                        <div key={log.id} className="flex items-start gap-2 text-xs">
+                          <span className="text-muted-foreground shrink-0 w-20">
+                            {new Date(log.timestamp).toLocaleTimeString()}
+                          </span>
+                          <span className={`shrink-0 w-12 text-center px-1 rounded text-[10px] font-bold ${
+                            log.level === 'error' ? 'bg-red-900/50 text-red-300' :
+                            log.level === 'warn' ? 'bg-yellow-900/50 text-yellow-300' :
+                            log.level === 'success' ? 'bg-green-900/50 text-green-300' :
+                            'bg-blue-900/50 text-blue-300'
+                          }`}>
+                            {log.level.toUpperCase()}
+                          </span>
+                          <span className="text-cyan-400 shrink-0 w-8">
+                            P{log.processId}
+                          </span>
+                          <span className="text-gray-300 break-all">
+                            {log.message}
+                          </span>
+                          {log.details && (
+                            <span className="text-gray-500 text-[10px] break-all">
+                              {JSON.stringify(log.details)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground mt-2 flex items-center justify-between">
+                  <span>Logs: {serverLogs.length}/50 (se mantienen los últimos 50)</span>
+                  <span className="flex items-center gap-1">
+                    <span className={`inline-flex h-2 w-2 rounded-full ${wsRef.current?.readyState === WebSocket.OPEN ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
+                    {wsRef.current?.readyState === WebSocket.OPEN ? "Conectado" : "Desconectado"}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </section>
       </div>
