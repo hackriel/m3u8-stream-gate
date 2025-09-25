@@ -14,7 +14,7 @@ const server = createServer(app);
 const PORT = process.env.PORT || 3001;
 
 // WebSocket server para logs en tiempo real
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, path: '/ws' });
 const connectedClients = new Set();
 
 wss.on('connection', (ws) => {
