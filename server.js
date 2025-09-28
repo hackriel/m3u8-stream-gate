@@ -132,49 +132,104 @@ app.post('/api/emit', (req, res) => {
     let ffmpegArgs;
     
     if (custom_quality) {
-      // Comando con recodificación personalizada
+      // CONFIGURACIÓN OPTIMIZADA PARA STREAMS PROFESIONALES
+      // Análisis: TUDN y streams similares requieren configuración más sofisticada
+      sendLog(process_id, 'info', `Iniciando recodificación profesional: ${video_resolution} @ ${video_bitrate}`);
+      
       ffmpegArgs = [
-        '-re', // Leer input a su velocidad nativa
-        '-i', source_m3u8,
-        '-c:v', 'libx264', // Recodificar video
-        '-b:v', video_bitrate, // Bitrate personalizado
-        '-s', video_resolution, // Resolución personalizada
-        '-preset', 'fast', // Preset de codificación rápido
-        '-c:a', 'aac', // Recodificar audio a AAC
-        '-b:a', '128k', // Bitrate de audio
-        '-f', 'flv',    // Formato de salida FLV para RTMP
-        '-flvflags', 'no_duration_filesize',
-        // Configuración de reconexión mejorada
+        // === INPUT OPTIMIZATION ===
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', // Compatibilidad con CDNs
+        '-headers', 'Accept: application/vnd.apple.mpegurl,*/*;q=0.8',
+        '-multiple_requests', '1', // Mejor para HLS
         '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '10',
+        '-reconnect_streamed', '1', 
+        '-reconnect_delay_max', '4',
         '-reconnect_at_eof', '1',
-        // Buffer settings para estabilidad
-        '-fflags', '+genpts',
+        '-i', source_m3u8,
+        
+        // === VIDEO ENCODING OPTIMIZADO ===
+        '-c:v', 'libx264',
+        '-preset', 'veryfast', // Balance velocidad/calidad para live streaming
+        '-tune', 'zerolatency', // Crítico para streaming en vivo
+        '-profile:v', 'high', // Perfil H.264 alto para mejor compresión
+        '-level', '4.1', // Compatibilidad amplia
+        '-b:v', video_bitrate,
+        '-maxrate', video_bitrate,
+        '-bufsize', `${parseInt(video_bitrate.replace('k', '')) * 2}k`, // Buffer = 2x bitrate
+        '-s', video_resolution,
+        '-r', '30', // FPS fijo para estabilidad
+        '-g', '60', // GOP de 2 segundos (30fps * 2)
+        '-keyint_min', '30', // Keyframe mínimo cada segundo
+        '-sc_threshold', '0', // Deshabilitar detección de cambio de escena
+        
+        // === AUDIO ENCODING OPTIMIZADO ===
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ar', '48000', // Sample rate estándar
+        '-ac', '2', // Stereo
+        '-aac_coder', 'twoloop', // Mejor calidad de audio AAC
+        
+        // === FILTROS DE VIDEO PARA ESTABILIDAD ===
+        '-vf', 'fps=30,scale=' + video_resolution.replace('x', ':') + ':flags=lanczos:force_original_aspect_ratio=decrease,pad=' + video_resolution.replace('x', ':') + ':(ow-iw)/2:(oh-ih)/2',
+        
+        // === OUTPUT OPTIMIZATION ===
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize+no_metadata',
+        
+        // === THREADING Y PERFORMANCE ===
+        '-threads', '0', // Usar todos los cores disponibles
+        '-thread_type', 'slice',
+        
+        // === BUFFER Y SINCRONIZACIÓN ===
+        '-fflags', '+genpts+flush_packets',
         '-avoid_negative_ts', 'make_zero',
+        '-use_wallclock_as_timestamps', '1',
+        '-async', '1',
+        '-vsync', 'cfr', // Constant frame rate
+        
+        // === RTMP ESPECÍFICO ===
+        '-rtmp_live', 'live',
+        '-rtmp_buffer', '1000',
+        
         target_rtmp
       ];
-      sendLog(process_id, 'info', `Configuración personalizada: ${video_resolution} @ ${video_bitrate}`);
+      
+      sendLog(process_id, 'info', `Configuración profesional aplicada - Threading optimizado, buffering inteligente`);
+      
     } else {
-      // Comando SIN COMPRESIÓN - stream directo (modo original) con mejoras de estabilidad
+      // MODO COPIA DIRECTA MEJORADO
       ffmpegArgs = [
-        '-re', // Leer input a su velocidad nativa
-        '-i', source_m3u8,
-        '-c:v', 'copy', // Copiar video sin recodificar
-        '-c:a', 'copy', // Copiar audio sin recodificar
-        '-f', 'flv',    // Formato de salida FLV para RTMP
-        '-flvflags', 'no_duration_filesize',
-        // Configuración de reconexión mejorada
+        // === INPUT OPTIMIZATION ===
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        '-headers', 'Accept: application/vnd.apple.mpegurl,*/*;q=0.8',
+        '-multiple_requests', '1',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '10',
+        '-reconnect_delay_max', '4', 
         '-reconnect_at_eof', '1',
-        // Buffer settings para estabilidad
-        '-fflags', '+genpts',
+        '-i', source_m3u8,
+        
+        // === STREAM COPY ===
+        '-c:v', 'copy',
+        '-c:a', 'copy',
+        
+        // === OUTPUT SETTINGS ===
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize+no_metadata',
+        
+        // === BUFFER Y SINCRONIZACIÓN ===
+        '-fflags', '+genpts+flush_packets',
         '-avoid_negative_ts', 'make_zero',
+        '-use_wallclock_as_timestamps', '1',
+        
+        // === RTMP ESPECÍFICO ===
+        '-rtmp_live', 'live',
+        '-rtmp_buffer', '1000',
+        
         target_rtmp
       ];
-      sendLog(process_id, 'info', 'Usando modo copia directa (sin recodificación)');
+      
+      sendLog(process_id, 'info', 'Modo copia directa optimizado - Sin recodificación, máxima velocidad');
     }
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
