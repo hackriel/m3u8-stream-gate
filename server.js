@@ -132,32 +132,20 @@ app.post('/api/emit', (req, res) => {
     let ffmpegArgs;
     
     if (custom_quality) {
-      // CONFIGURACIÓN SIMPLE Y ESTABLE PARA CALIDAD PERSONALIZADA
-      sendLog(process_id, 'info', `Iniciando recodificación: ${video_resolution} @ ${video_bitrate}`);
+      // CONFIGURACIÓN ULTRA-BÁSICA QUE FUNCIONABA ANTES
+      sendLog(process_id, 'info', `Iniciando recodificación básica: ${video_resolution} @ ${video_bitrate}`);
       
       ffmpegArgs = [
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '4',
         '-i', source_m3u8,
-        
-        // Video encoding básico y estable
         '-c:v', 'libx264',
-        '-preset', 'fast',
         '-b:v', video_bitrate,
         '-s', video_resolution,
-        '-r', '30',
-        
-        // Audio encoding simple
         '-c:a', 'aac',
-        '-b:a', '128k',
-        
-        // Output
         '-f', 'flv',
         target_rtmp
       ];
       
-      sendLog(process_id, 'info', `Configuración simple aplicada`);
+      sendLog(process_id, 'info', `Configuración ultra-básica aplicada`);
       
     } else {
       // MODO COPIA DIRECTA MEJORADO
