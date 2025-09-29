@@ -132,20 +132,22 @@ app.post('/api/emit', (req, res) => {
     let ffmpegArgs;
     
     if (custom_quality) {
-      // CONFIGURACIÓN ULTRA-BÁSICA QUE FUNCIONABA ANTES
-      sendLog(process_id, 'info', `Iniciando recodificación básica: ${video_resolution} @ ${video_bitrate}`);
+      // CONFIGURACIÓN CORRECTA CON FLAG -re ESENCIAL PARA LIVE STREAMING
+      sendLog(process_id, 'info', `Iniciando recodificación con rate control: ${video_resolution} @ ${video_bitrate}`);
       
       ffmpegArgs = [
+        '-re', // CRÍTICO: Lee input a frame rate nativo - ESENCIAL para live streaming
         '-i', source_m3u8,
         '-c:v', 'libx264',
         '-b:v', video_bitrate,
         '-s', video_resolution,
         '-c:a', 'aac',
         '-f', 'flv',
+        '-flvflags', 'no_duration_filesize', // CRÍTICO: Para live streams
         target_rtmp
       ];
       
-      sendLog(process_id, 'info', `Configuración ultra-básica aplicada`);
+      sendLog(process_id, 'info', `Configuración con rate control aplicada (-re flag incluido)`);
       
     } else {
       // MODO COPIA DIRECTA MEJORADO
