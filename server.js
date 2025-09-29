@@ -132,22 +132,36 @@ app.post('/api/emit', (req, res) => {
     let ffmpegArgs;
     
     if (custom_quality) {
-      // CONFIGURACIÓN CORRECTA CON FLAG -re ESENCIAL PARA LIVE STREAMING
-      sendLog(process_id, 'info', `Iniciando recodificación con rate control: ${video_resolution} @ ${video_bitrate}`);
+      // CONFIGURACIÓN ANTI-TRAILER: Evita "Error writing trailer" en RTMP
+      sendLog(process_id, 'info', `Iniciando recodificación sin trailer: ${video_resolution} @ ${video_bitrate}`);
       
       ffmpegArgs = [
-        '-re', // CRÍTICO: Lee input a frame rate nativo - ESENCIAL para live streaming
+        // Input optimizado para HLS/M3U8
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '4',
         '-i', source_m3u8,
+        
+        // Video encoding simple
         '-c:v', 'libx264',
         '-b:v', video_bitrate,
         '-s', video_resolution,
+        '-preset', 'ultrafast', // Más rápido = menos problemas
+        
+        // Audio simple
         '-c:a', 'aac',
+        '-b:a', '128k',
+        
+        // CRÍTICO: Configuración FLV/RTMP para evitar trailer
         '-f', 'flv',
-        '-flvflags', 'no_duration_filesize', // CRÍTICO: Para live streams
+        '-flvflags', 'no_duration_filesize+no_metadata', // Previene trailer
+        '-rtmp_live', 'live', // Especifica que es live stream
+        '-rtmp_buffer', '100', // Buffer pequeño
+        
         target_rtmp
       ];
       
-      sendLog(process_id, 'info', `Configuración con rate control aplicada (-re flag incluido)`);
+      sendLog(process_id, 'info', `Configuración anti-trailer aplicada`);
       
     } else {
       // MODO COPIA DIRECTA MEJORADO
