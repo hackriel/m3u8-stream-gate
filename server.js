@@ -132,69 +132,32 @@ app.post('/api/emit', (req, res) => {
     let ffmpegArgs;
     
     if (custom_quality) {
-      // CONFIGURACIÓN OPTIMIZADA PARA STREAMS PROFESIONALES
-      // Análisis: TUDN y streams similares requieren configuración más sofisticada
-      sendLog(process_id, 'info', `Iniciando recodificación profesional: ${video_resolution} @ ${video_bitrate}`);
+      // CONFIGURACIÓN SIMPLE Y ESTABLE PARA CALIDAD PERSONALIZADA
+      sendLog(process_id, 'info', `Iniciando recodificación: ${video_resolution} @ ${video_bitrate}`);
       
       ffmpegArgs = [
-        // === INPUT OPTIMIZATION ===
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', // Compatibilidad con CDNs
-        '-headers', 'Accept: application/vnd.apple.mpegurl,*/*;q=0.8',
-        '-multiple_requests', '1', // Mejor para HLS
         '-reconnect', '1',
-        '-reconnect_streamed', '1', 
+        '-reconnect_streamed', '1',
         '-reconnect_delay_max', '4',
-        '-reconnect_at_eof', '1',
         '-i', source_m3u8,
         
-        // === VIDEO ENCODING OPTIMIZADO ===
+        // Video encoding básico y estable
         '-c:v', 'libx264',
-        '-preset', 'veryfast', // Balance velocidad/calidad para live streaming
-        '-tune', 'zerolatency', // Crítico para streaming en vivo
-        '-profile:v', 'high', // Perfil H.264 alto para mejor compresión
-        '-level', '4.1', // Compatibilidad amplia
+        '-preset', 'fast',
         '-b:v', video_bitrate,
-        '-maxrate', video_bitrate,
-        '-bufsize', `${parseInt(video_bitrate.replace('k', '')) * 2}k`, // Buffer = 2x bitrate
         '-s', video_resolution,
-        '-r', '30', // FPS fijo para estabilidad
-        '-g', '60', // GOP de 2 segundos (30fps * 2)
-        '-keyint_min', '30', // Keyframe mínimo cada segundo
-        '-sc_threshold', '0', // Deshabilitar detección de cambio de escena
+        '-r', '30',
         
-        // === AUDIO ENCODING OPTIMIZADO ===
+        // Audio encoding simple
         '-c:a', 'aac',
         '-b:a', '128k',
-        '-ar', '48000', // Sample rate estándar
-        '-ac', '2', // Stereo
-        '-aac_coder', 'twoloop', // Mejor calidad de audio AAC
         
-        // === FILTROS DE VIDEO PARA ESTABILIDAD ===
-        '-vf', 'fps=30,scale=' + video_resolution.replace('x', ':') + ':flags=lanczos:force_original_aspect_ratio=decrease,pad=' + video_resolution.replace('x', ':') + ':(ow-iw)/2:(oh-ih)/2',
-        
-        // === OUTPUT OPTIMIZATION ===
+        // Output
         '-f', 'flv',
-        '-flvflags', 'no_duration_filesize+no_metadata',
-        
-        // === THREADING Y PERFORMANCE ===
-        '-threads', '0', // Usar todos los cores disponibles
-        '-thread_type', 'slice',
-        
-        // === BUFFER Y SINCRONIZACIÓN ===
-        '-fflags', '+genpts+flush_packets',
-        '-avoid_negative_ts', 'make_zero',
-        '-use_wallclock_as_timestamps', '1',
-        '-async', '1',
-        '-vsync', 'cfr', // Constant frame rate
-        
-        // === RTMP ESPECÍFICO ===
-        '-rtmp_live', 'live',
-        '-rtmp_buffer', '1000',
-        
         target_rtmp
       ];
       
-      sendLog(process_id, 'info', `Configuración profesional aplicada - Threading optimizado, buffering inteligente`);
+      sendLog(process_id, 'info', `Configuración simple aplicada`);
       
     } else {
       // MODO COPIA DIRECTA MEJORADO
