@@ -27,22 +27,8 @@ interface EmissionProcess {
   startTime: number;
   emitStatus: "idle" | "starting" | "running" | "stopping" | "error";
   emitMsg: string;
-  healthPoints: Array<{ t: number; up: number }>;
-  customQuality: boolean;
-  videoBitrate: string;
-  videoResolution: string;
   reconnectAttempts: number;
   lastReconnectTime: number;
-}
-
-// Tipo para logs del servidor
-interface ServerLog {
-  id: string;
-  timestamp: number;
-  processId: string;
-  level: 'info' | 'warn' | 'error' | 'success';
-  message: string;
-  details?: any;
 }
 
 export default function EmisorM3U8Panel() {
@@ -50,9 +36,7 @@ export default function EmisorM3U8Panel() {
   const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
-  const [serverLogs, setServerLogs] = useState<ServerLog[]>([]);
-  const [showLogs, setShowLogs] = useState(true);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [globalHealthPoints, setGlobalHealthPoints] = useState<Array<{ t: number; up: number }>>([]);
 
   // Estado para 5 procesos independientes
   const [processes, setProcesses] = useState<EmissionProcess[]>(() => {
@@ -67,10 +51,6 @@ export default function EmisorM3U8Panel() {
         startTime: parseInt(localStorage.getItem(`emisor_start_time_${i}`) || "0"),
         emitStatus: (localStorage.getItem(`emisor_status_${i}`) as any) || "idle",
         emitMsg: localStorage.getItem(`emisor_msg_${i}`) || "",
-        healthPoints: [],
-        customQuality: localStorage.getItem(`emisor_custom_quality_${i}`) === "true",
-        videoBitrate: localStorage.getItem(`emisor_video_bitrate_${i}`) || "2000k",
-        videoResolution: localStorage.getItem(`emisor_video_resolution_${i}`) || "1920x1080",
         reconnectAttempts: 0,
         lastReconnectTime: 0
       });
@@ -80,63 +60,50 @@ export default function EmisorM3U8Panel() {
 
   const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
 
-  // WebSocket para logs en tiempo real
+  // Limpieza de caché programada del lado del cliente (4am Costa Rica)
   useEffect(() => {
-    const connectWebSocket = () => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const checkCacheClear = () => {
+      const now = new Date();
+      const costaRicaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Costa_Rica' }));
+      const hour = costaRicaTime.getHours();
+      const minute = costaRicaTime.getMinutes();
       
-      try {
-        wsRef.current = new WebSocket(wsUrl);
+      // Entre 4:00am y 4:05am Costa Rica
+      if (hour === 4 && minute < 5) {
+        const lastClear = localStorage.getItem('last_cache_clear');
+        const lastClearTime = lastClear ? parseInt(lastClear) : 0;
+        const hoursSinceClear = (Date.now() - lastClearTime) / (1000 * 60 * 60);
         
-        wsRef.current.onopen = () => {
-          addLog("system", "info", "Conectado al sistema de logs en tiempo real");
-        };
-        
-        wsRef.current.onmessage = (event) => {
-          try {
-            const logData = JSON.parse(event.data);
-            setServerLogs(prev => [...prev.slice(-49), logData]); // Mantener últimos 50 logs
-          } catch (e) {
-            console.warn("Error parsing WebSocket message:", e);
+        if (hoursSinceClear > 12) {
+          console.log('🧹 Limpiando caché programado (4am Costa Rica)');
+          
+          // Guardar solo datos esenciales
+          const essentialData: Record<string, string> = {};
+          for (let i = 0; i < 5; i++) {
+            const m3u8 = localStorage.getItem(`emisor_m3u8_${i}`);
+            const rtmp = localStorage.getItem(`emisor_rtmp_${i}`);
+            if (m3u8) essentialData[`emisor_m3u8_${i}`] = m3u8;
+            if (rtmp) essentialData[`emisor_rtmp_${i}`] = rtmp;
           }
-        };
-        
-        wsRef.current.onclose = () => {
-          addLog("system", "warn", "Desconectado del sistema de logs. Reintentando...");
-          // Reconectar después de 3 segundos
-          setTimeout(connectWebSocket, 3000);
-        };
-        
-        wsRef.current.onerror = (error) => {
-          addLog("system", "error", "Error en WebSocket de logs");
-        };
-      } catch (e) {
-        addLog("system", "error", "No se pudo conectar al sistema de logs");
+          
+          // Limpiar todo
+          localStorage.clear();
+          
+          // Restaurar datos esenciales
+          Object.entries(essentialData).forEach(([key, value]) => {
+            localStorage.setItem(key, value);
+          });
+          
+          localStorage.setItem('last_cache_clear', Date.now().toString());
+          console.log('✅ Caché limpiado exitosamente');
+        }
       }
     };
     
-    connectWebSocket();
-    
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
+    // Verificar cada minuto
+    const interval = setInterval(checkCacheClear, 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
-
-  // Función para agregar logs locales
-  const addLog = (processId: string, level: ServerLog['level'], message: string, details?: any) => {
-    const log: ServerLog = {
-      id: Date.now() + Math.random().toString(),
-      timestamp: Date.now(),
-      processId,
-      level,
-      message,
-      details
-    };
-    setServerLogs(prev => [...prev.slice(-49), log]);
-  };
 
   // Persistir datos en localStorage cuando cambien
   useEffect(() => {
@@ -149,9 +116,6 @@ export default function EmisorM3U8Panel() {
       localStorage.setItem(`emisor_start_time_${index}`, process.startTime.toString());
       localStorage.setItem(`emisor_status_${index}`, process.emitStatus);
       localStorage.setItem(`emisor_msg_${index}`, process.emitMsg);
-      localStorage.setItem(`emisor_custom_quality_${index}`, process.customQuality.toString());
-      localStorage.setItem(`emisor_video_bitrate_${index}`, process.videoBitrate);
-      localStorage.setItem(`emisor_video_resolution_${index}`, process.videoResolution);
     });
   }, [processes]);
 
@@ -189,62 +153,61 @@ export default function EmisorM3U8Panel() {
     });
   }, []);
 
-  // Cada 5s registramos un punto de salud para cada proceso y verificamos reconexión
+  // Cada 5s registramos un punto de salud GLOBAL (combinando todos los procesos)
   useEffect(() => {
     const id = setInterval(() => {
+      let totalUp = 0;
+      let totalActive = 0;
+      
       processes.forEach((process, index) => {
         const video = videoRefs[index].current;
         const up = video && video.readyState >= 2 && video.networkState !== 3 ? 1 : 0;
         
-        // Si el proceso está activo pero el video está caído, intentar reconexión
-        if (process.isEmitiendo && up === 0 && process.emitStatus === 'running') {
-          const now = Date.now();
-          const timeSinceLastReconnect = now - process.lastReconnectTime;
+        // Solo contar procesos que están emitiendo
+        if (process.isEmitiendo) {
+          totalActive++;
+          totalUp += up;
           
-          // Intentar reconexión cada 15 segundos, máximo 3 intentos seguidos
-          if (timeSinceLastReconnect > 15000 && process.reconnectAttempts < 3) {
-            addLog(index.toString(), "warn", `Intento de reconexión automática ${process.reconnectAttempts + 1}/3`);
+          // Lógica de reconexión individual
+          if (up === 0 && process.emitStatus === 'running') {
+            const now = Date.now();
+            const timeSinceLastReconnect = now - process.lastReconnectTime;
             
-            updateProcess(index, {
-              reconnectAttempts: process.reconnectAttempts + 1,
-              lastReconnectTime: now,
-              emitMsg: `Reconectando... (${process.reconnectAttempts + 1}/3)`
-            });
-            
-            // Reintentar carga del preview
-            const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
-            if (previewUrl) {
-              setTimeout(() => {
-                loadPreview(previewUrl, index);
-              }, 2000);
+            if (timeSinceLastReconnect > 15000 && process.reconnectAttempts < 3) {
+              console.log(`⚠️ Proceso ${index + 1}: Intento de reconexión ${process.reconnectAttempts + 1}/3`);
+              
+              updateProcess(index, {
+                reconnectAttempts: process.reconnectAttempts + 1,
+                lastReconnectTime: now,
+                emitMsg: `Reconectando... (${process.reconnectAttempts + 1}/3)`
+              });
+              
+              const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
+              if (previewUrl) {
+                setTimeout(() => loadPreview(previewUrl, index), 2000);
+              }
+            } else if (process.reconnectAttempts >= 3) {
+              updateProcess(index, {
+                emitStatus: "error",
+                emitMsg: "Stream caído - máximo de reconexiones alcanzado"
+              });
             }
-            
-            // Verificar el estado del backend
-            checkProcessStatus(index);
-          } else if (process.reconnectAttempts >= 3) {
-            // Máximo de reintentos alcanzado
-            addLog(index.toString(), "error", "Máximo de reconexiones alcanzado. Stream posiblemente caído.");
+          } else if (up === 1 && process.reconnectAttempts > 0) {
             updateProcess(index, {
-              emitStatus: "error",
-              emitMsg: "Stream caído - máximo de reconexiones alcanzado"
+              reconnectAttempts: 0,
+              emitMsg: process.emitStatus === 'running' ? "Emitiendo correctamente" : process.emitMsg
             });
           }
-        } else if (up === 1 && process.reconnectAttempts > 0) {
-          // Stream recuperado, resetear contador
-          updateProcess(index, {
-            reconnectAttempts: 0,
-            emitMsg: process.emitStatus === 'running' ? "Emitiendo correctamente" : process.emitMsg
-          });
-          addLog(index.toString(), "success", "Stream recuperado exitosamente");
         }
-        
-        updateProcess(index, {
-          healthPoints: [
-            ...process.healthPoints.slice(-119),
-            { t: Math.floor(Date.now() / 1000), up }
-          ]
-        });
       });
+      
+      // Calcular porcentaje de uptime global (100 = todos arriba, 0 = todos caídos)
+      const uptimePercentage = totalActive > 0 ? (totalUp / totalActive) * 100 : 0;
+      
+      setGlobalHealthPoints(prev => [
+        ...prev.slice(-119),
+        { t: Math.floor(Date.now() / 1000), up: uptimePercentage }
+      ]);
     }, 5000);
     return () => clearInterval(id);
   }, [processes]);
@@ -256,16 +219,16 @@ export default function EmisorM3U8Panel() {
       const data = await resp.json();
       
       if (!data.process_running && processes[processIndex].isEmitiendo) {
-        addLog(processIndex.toString(), "error", "Proceso FFmpeg no está corriendo en el servidor");
+        console.error(`Proceso ${processIndex + 1}: FFmpeg no está corriendo en el servidor`);
         
         // Intentar reiniciar el proceso automáticamente
         setTimeout(() => {
-          addLog(processIndex.toString(), "info", "Intentando reiniciar proceso automáticamente...");
+          console.log(`Proceso ${processIndex + 1}: Intentando reiniciar automáticamente...`);
           startEmitToRTMP(processIndex);
         }, 5000);
       }
     } catch (e) {
-      addLog(processIndex.toString(), "error", "Error verificando estado del servidor");
+      console.error(`Proceso ${processIndex + 1}: Error verificando estado del servidor`);
     }
   };
 
@@ -561,7 +524,7 @@ export default function EmisorM3U8Panel() {
       lastReconnectTime: 0
     });
 
-    addLog(processIndex.toString(), "info", `Iniciando emisión: ${process.m3u8} → ${process.rtmp}`);
+    console.log(`🚀 Iniciando emisión ${processIndex + 1}: ${process.m3u8} → ${process.rtmp}`);
 
     try {
       const resp = await fetch("/api/emit", {
@@ -572,10 +535,7 @@ export default function EmisorM3U8Panel() {
         body: JSON.stringify({ 
           source_m3u8: process.m3u8, 
           target_rtmp: process.rtmp, 
-          process_id: processIndex.toString(),
-          custom_quality: process.customQuality,
-          video_bitrate: process.videoBitrate,
-          video_resolution: process.videoResolution
+          process_id: processIndex.toString()
         }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -705,10 +665,6 @@ export default function EmisorM3U8Panel() {
   // Función para renderizar un tab de proceso
   const renderProcessTab = (processIndex: number) => {
     const process = processes[processIndex];
-    const uptimeData = process.healthPoints.map((p) => ({
-      name: new Date(p.t * 1000).toLocaleTimeString(),
-      Estado: p.up ? 100 : 0,
-    }));
 
     return (
       <div className="space-y-6">
@@ -754,57 +710,13 @@ export default function EmisorM3U8Panel() {
               <span className="underline break-all text-primary">{previewFromRTMP(process.rtmp, process.previewSuffix) || "rtmp://fluestabiliz.giize.com/costaSTAR007/video.m3u8"}</span>
             </p>
 
-            {/* Controles de calidad personalizada */}
-            <div className="mb-4 p-4 rounded-xl bg-card/50 border border-border">
-              <div className="flex items-center gap-3 mb-3">
-                <Switch
-                  checked={process.customQuality}
-                  onCheckedChange={(checked) => updateProcess(processIndex, { customQuality: checked })}
-                />
-                <label className="text-sm font-medium text-foreground cursor-pointer" onClick={() => updateProcess(processIndex, { customQuality: !process.customQuality })}>
-                  🎛️ Configuración de calidad personalizada
-                </label>
-              </div>
-              
-              {process.customQuality && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                  <div>
-                    <label className="block text-xs mb-2 text-muted-foreground">Bitrate de video</label>
-                    <select
-                      value={process.videoBitrate}
-                      onChange={(e) => updateProcess(processIndex, { videoBitrate: e.target.value })}
-                      className="w-full bg-card border border-border rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-primary/50 text-sm"
-                    >
-                      <option value="500k">500 kbps (Calidad baja)</option>
-                      <option value="1000k">1000 kbps (Calidad media)</option>
-                      <option value="1500k">1500 kbps (Calidad buena)</option>
-                      <option value="2000k">2000 kbps (Calidad alta)</option>
-                      <option value="3000k">3000 kbps (Calidad muy alta)</option>
-                      <option value="4000k">4000 kbps (Calidad máxima)</option>
-                    </select>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-xs mb-2 text-muted-foreground">Resolución de video</label>
-                    <select
-                      value={process.videoResolution}
-                      onChange={(e) => updateProcess(processIndex, { videoResolution: e.target.value })}
-                      className="w-full bg-card border border-border rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-primary/50 text-sm"
-                    >
-                      <option value="640x360">640x360 (360p)</option>
-                      <option value="854x480">854x480 (480p)</option>
-                      <option value="1280x720">1280x720 (720p)</option>
-                      <option value="1920x1080">1920x1080 (1080p)</option>
-                      <option value="2560x1440">2560x1440 (1440p)</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-              
-              <p className="text-xs text-muted-foreground mt-2">
-                {process.customQuality 
-                  ? `🎥 Se aplicará recodificación con bitrate ${process.videoBitrate.replace('k', ' kbps')} y resolución ${process.videoResolution}` 
-                  : "📺 Se mantendrá la calidad original del stream (copy mode)"}
+            {/* Información de optimización automática */}
+            <div className="mb-4 p-4 rounded-xl bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20">
+              <p className="text-sm text-foreground font-medium mb-1">🧠 Optimización Inteligente Activa</p>
+              <p className="text-xs text-muted-foreground">
+                El sistema detecta automáticamente la resolución del stream:
+                <br />• ≤ 720p → <span className="text-green-400 font-semibold">Copia directa</span> (0% uso CPU, máxima velocidad)
+                <br />• &gt; 720p → <span className="text-blue-400 font-semibold">Recodificación a 720p30</span> (optimizado, 3.5Mbps)
               </p>
             </div>
 
@@ -890,14 +802,50 @@ export default function EmisorM3U8Panel() {
           </div>
         </section>
 
-        {/* Tarjeta de salud rápida */}
+        {/* Resumen del proceso */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
+            <h3 className="text-base font-medium mb-4 text-accent">📈 Resumen - Proceso {processIndex + 1}</h3>
+            <ul className="space-y-3 text-sm">
+              <li className="flex justify-between">
+                <span className="text-muted-foreground">Tiempo emitiendo:</span>
+                <span className="font-mono text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
+              </li>
+              <li className="flex justify-between">
+                <span className="text-muted-foreground">Estado actual:</span>
+                <span className={`font-semibold ${
+                  process.emitStatus === 'running' ? "text-status-live" : 
+                  process.emitStatus === 'error' ? "text-status-error" : 
+                  "text-muted-foreground"
+                }`}>
+                  {process.emitStatus === 'running' ? "🟢 Emitiendo" : 
+                   process.emitStatus === 'error' ? "🔴 Error" : 
+                   "⚫ Detenido"}
+                </span>
+              </li>
+              <li className="flex justify-between">
+                <span className="text-muted-foreground">Reconexiones:</span>
+                <span className="text-foreground font-semibold">{process.reconnectAttempts}/3</span>
+              </li>
+            </ul>
+          </div>
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 col-span-2 transition-all duration-300 hover:shadow-xl">
-            <h3 className="text-base font-medium mb-2 text-accent">Uptime reciente (~10 min) - Proceso {processIndex + 1}</h3>
-            <div className="h-56">
-              {uptimeData.length > 0 ? (
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-medium text-accent">📊 Monitor de Rendimiento del Servidor</h3>
+              <span className="text-xs text-muted-foreground">Combinado de todos los procesos activos</span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-2">
+              {processes.filter(p => p.isEmitiendo).length > 0 
+                ? `${processes.filter(p => p.isEmitiendo).length} proceso(s) activo(s) - Uptime combinado en tiempo real`
+                : "Ningún proceso activo - Gráfico se actualizará cuando inicies emisión"}
+            </p>
+            <div className="h-48">
+              {globalHealthPoints.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={uptimeData} margin={{ left: 6, right: 16, top: 10, bottom: 0 }}>
+                  <LineChart data={globalHealthPoints.map((p) => ({
+                    name: new Date(p.t * 1000).toLocaleTimeString(),
+                    Uptime: p.up,
+                  }))} margin={{ left: 6, right: 16, top: 10, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
                     <XAxis 
                       dataKey="name" 
@@ -911,7 +859,7 @@ export default function EmisorM3U8Panel() {
                       tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} 
                     />
                     <Tooltip 
-                      formatter={(v) => [`${v}%`, "Estado"]} 
+                      formatter={(v) => [`${Number(v).toFixed(1)}%`, "Uptime"]} 
                       contentStyle={{ 
                         backgroundColor: "hsl(var(--card))", 
                         border: "1px solid hsl(var(--border))",
@@ -920,114 +868,28 @@ export default function EmisorM3U8Panel() {
                       }}
                     />
                     <Line 
-                      type="stepAfter" 
-                      dataKey="Estado" 
+                      type="monotone" 
+                      dataKey="Uptime" 
                       dot={false} 
                       strokeWidth={2} 
                       stroke="hsl(var(--primary))"
                       strokeLinecap="round"
+                      fill="url(#uptimeGradient)"
                     />
+                    <defs>
+                      <linearGradient id="uptimeGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
-                  <span className="text-sm">Recopilando datos de uptime...</span>
+                  <span className="text-sm">📡 Esperando datos de rendimiento global...</span>
                 </div>
               )}
             </div>
-          </div>
-          <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <h3 className="text-base font-medium mb-4 text-accent">📈 Resumen - Proceso {processIndex + 1}</h3>
-            <ul className="space-y-3 text-sm">
-              <li className="flex justify-between">
-                <span className="text-muted-foreground">Tiempo emitiendo:</span>
-                <span className="font-mono text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
-              </li>
-              <li className="flex justify-between">
-                <span className="text-muted-foreground">Puntos muestreados:</span>
-                <span className="text-foreground font-semibold">{process.healthPoints.length}</span>
-              </li>
-              <li className="flex justify-between">
-                <span className="text-muted-foreground">Último estado:</span>
-                <span className={`font-semibold ${process.healthPoints.at(-1)?.up ? "text-status-live" : "text-status-error"}`}>
-                  {process.healthPoints.at(-1)?.up ? "🟢 Arriba" : "🔴 Caído"}
-                </span>
-              </li>
-            </ul>
-          </div>
-        </section>
-
-        {/* Panel de logs del servidor */}
-        <section className="mt-6">
-          <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <div className="flex items-center justify-between p-4 border-b border-broadcast-border/30">
-              <h3 className="text-lg font-medium text-accent flex items-center gap-2">
-                <span className="text-xl">📋</span>
-                Logs del Servidor en Tiempo Real
-              </h3>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setServerLogs([])}
-                  className="px-3 py-1 rounded-lg bg-secondary hover:bg-secondary/90 text-secondary-foreground text-sm transition-all duration-200"
-                >
-                  🗑️ Limpiar
-                </button>
-                <button
-                  onClick={() => setShowLogs(!showLogs)}
-                  className="px-3 py-1 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-sm transition-all duration-200"
-                >
-                  {showLogs ? '📕 Ocultar' : '📖 Mostrar'}
-                </button>
-              </div>
-            </div>
-            
-            {showLogs && (
-              <div className="p-4">
-                <div className="bg-black/80 rounded-xl p-4 h-64 overflow-y-auto font-mono text-sm">
-                  {serverLogs.length === 0 ? (
-                    <div className="text-muted-foreground text-center py-8">
-                      Sin logs recientes. Los logs aparecerán aquí en tiempo real.
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      {serverLogs.map((log) => (
-                        <div key={log.id} className="flex items-start gap-2 text-xs">
-                          <span className="text-muted-foreground shrink-0 w-20">
-                            {new Date(log.timestamp).toLocaleTimeString()}
-                          </span>
-                          <span className={`shrink-0 w-12 text-center px-1 rounded text-[10px] font-bold ${
-                            log.level === 'error' ? 'bg-red-900/50 text-red-300' :
-                            log.level === 'warn' ? 'bg-yellow-900/50 text-yellow-300' :
-                            log.level === 'success' ? 'bg-green-900/50 text-green-300' :
-                            'bg-blue-900/50 text-blue-300'
-                          }`}>
-                            {log.level.toUpperCase()}
-                          </span>
-                          <span className="text-cyan-400 shrink-0 w-8">
-                            P{log.processId}
-                          </span>
-                          <span className="text-gray-300 break-all">
-                            {log.message}
-                          </span>
-                          {log.details && (
-                            <span className="text-gray-500 text-[10px] break-all">
-                              {JSON.stringify(log.details)}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="text-xs text-muted-foreground mt-2 flex items-center justify-between">
-                  <span>Logs: {serverLogs.length}/50 (se mantienen los últimos 50)</span>
-                  <span className="flex items-center gap-1">
-                    <span className={`inline-flex h-2 w-2 rounded-full ${wsRef.current?.readyState === WebSocket.OPEN ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
-                    {wsRef.current?.readyState === WebSocket.OPEN ? "Conectado" : "Desconectado"}
-                  </span>
-                </div>
-              </div>
-            )}
           </div>
         </section>
       </div>

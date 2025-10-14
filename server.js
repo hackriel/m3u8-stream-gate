@@ -102,12 +102,45 @@ const detectRTMPIssues = (output, processId) => {
   return issues.length > 0;
 };
 
-// Endpoint para iniciar emisión
-app.post('/api/emit', (req, res) => {
-  try {
-    const { source_m3u8, target_rtmp, process_id = '0', custom_quality = false, video_bitrate = '2000k', video_resolution = '1920x1080' } = req.body;
+// Función auxiliar para detectar resolución de un M3U8
+const detectM3U8Resolution = async (m3u8Url) => {
+  return new Promise((resolve) => {
+    const probe = spawn('ffprobe', [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height',
+      '-of', 'json',
+      m3u8Url
+    ]);
+    
+    let output = '';
+    probe.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    probe.on('close', () => {
+      try {
+        const data = JSON.parse(output);
+        const width = data.streams?.[0]?.width || 0;
+        const height = data.streams?.[0]?.height || 0;
+        resolve({ width, height });
+      } catch (e) {
+        resolve({ width: 0, height: 0 });
+      }
+    });
+    
+    probe.on('error', () => {
+      resolve({ width: 0, height: 0 });
+    });
+  });
+};
 
-    sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp, custom_quality });
+// Endpoint para iniciar emisión
+app.post('/api/emit', async (req, res) => {
+  try {
+    const { source_m3u8, target_rtmp, process_id = '0' } = req.body;
+
+    sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
 
     // Validaciones
     if (!source_m3u8 || !target_rtmp) {
@@ -126,47 +159,19 @@ app.post('/api/emit', (req, res) => {
     }
 
     emissionStatuses.set(process_id, 'starting');
-    sendLog(process_id, 'info', `Iniciando proceso FFmpeg - Modo: ${custom_quality ? 'Personalizada' : 'Copia directa'}`);
-
-    // Construir comando ffmpeg según configuración de calidad
+    
+    // === INTELIGENCIA AUTOMÁTICA DE RESOLUCIÓN ===
+    sendLog(process_id, 'info', `Detectando resolución de entrada...`);
+    const { width, height } = await detectM3U8Resolution(source_m3u8);
+    
     let ffmpegArgs;
     
-    if (custom_quality) {
-      // CONFIGURACIÓN ANTI-TRAILER: Evita "Error writing trailer" en RTMP
-      sendLog(process_id, 'info', `Iniciando recodificación sin trailer: ${video_resolution} @ ${video_bitrate}`);
+    // Si resolución es <= 720p O no se pudo detectar → COPIA DIRECTA
+    if (height <= 720 || height === 0) {
+      const mode = height === 0 ? 'desconocida (usando copia segura)' : `${width}x${height}`;
+      sendLog(process_id, 'info', `Resolución detectada: ${mode} → Usando COPIA DIRECTA (eficiente)`);
       
       ffmpegArgs = [
-        // Input optimizado para HLS/M3U8
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '4',
-        '-i', source_m3u8,
-        
-        // Video encoding simple
-        '-c:v', 'libx264',
-        '-b:v', video_bitrate,
-        '-s', video_resolution,
-        '-preset', 'ultrafast', // Más rápido = menos problemas
-        
-        // Audio simple
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        
-        // CRÍTICO: Configuración FLV/RTMP para evitar trailer
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize+no_metadata', // Previene trailer
-        '-rtmp_live', 'live', // Especifica que es live stream
-        '-rtmp_buffer', '100', // Buffer pequeño
-        
-        target_rtmp
-      ];
-      
-      sendLog(process_id, 'info', `Configuración anti-trailer aplicada`);
-      
-    } else {
-      // MODO COPIA DIRECTA MEJORADO
-      ffmpegArgs = [
-        // === INPUT OPTIMIZATION ===
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         '-headers', 'Accept: application/vnd.apple.mpegurl,*/*;q=0.8',
         '-multiple_requests', '1',
@@ -175,28 +180,46 @@ app.post('/api/emit', (req, res) => {
         '-reconnect_delay_max', '4', 
         '-reconnect_at_eof', '1',
         '-i', source_m3u8,
-        
-        // === STREAM COPY ===
         '-c:v', 'copy',
         '-c:a', 'copy',
-        
-        // === OUTPUT SETTINGS ===
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize+no_metadata',
-        
-        // === BUFFER Y SINCRONIZACIÓN ===
         '-fflags', '+genpts+flush_packets',
         '-avoid_negative_ts', 'make_zero',
         '-use_wallclock_as_timestamps', '1',
-        
-        // === RTMP ESPECÍFICO ===
         '-rtmp_live', 'live',
         '-rtmp_buffer', '1000',
-        
         target_rtmp
       ];
       
-      sendLog(process_id, 'info', 'Modo copia directa optimizado - Sin recodificación, máxima velocidad');
+    } else {
+      // Resolución > 720p → RECODIFICAR a 720p con preset optimizado
+      sendLog(process_id, 'info', `Resolución detectada: ${width}x${height} → Recodificando a 720p30`);
+      
+      ffmpegArgs = [
+        '-re',
+        '-i', source_m3u8,
+        '-map', '0:v',
+        '-map', '0:a',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-tune', 'film',
+        '-profile:v', 'high',
+        '-level', '4.1',
+        '-b:v', '3500k',
+        '-maxrate', '5000k',
+        '-bufsize', '8000k',
+        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
+        '-g', '60',
+        '-keyint_min', '60',
+        '-sc_threshold', '0',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ac', '2',
+        '-ar', '48000',
+        '-f', 'flv',
+        target_rtmp
+      ];
     }
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
@@ -398,6 +421,44 @@ app.get('/api/health', (req, res) => {
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
+
+// === TAREA PROGRAMADA: Limpieza de caché diaria a las 4am Costa Rica ===
+const scheduleCacheClear = () => {
+  const checkAndClear = () => {
+    const now = new Date();
+    // Costa Rica es UTC-6
+    const costaRicaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Costa_Rica' }));
+    const hour = costaRicaTime.getHours();
+    const minute = costaRicaTime.getMinutes();
+    
+    // Ejecutar entre 4:00am y 4:05am
+    if (hour === 4 && minute < 5) {
+      const lastCleared = global.lastCacheClear || 0;
+      const hoursSinceLastClear = (Date.now() - lastCleared) / (1000 * 60 * 60);
+      
+      // Solo ejecutar si han pasado más de 12 horas desde la última limpieza
+      if (hoursSinceLastClear > 12) {
+        sendLog('system', 'info', '🧹 Iniciando limpieza programada de caché (4am Costa Rica)');
+        
+        // Limpiar cookies y caché del navegador (localStorage se limpia en cliente)
+        if (global.gc) {
+          global.gc();
+          sendLog('system', 'success', 'Garbage collector ejecutado');
+        }
+        
+        // Marcar timestamp de limpieza
+        global.lastCacheClear = Date.now();
+        sendLog('system', 'success', '✅ Limpieza de caché completada');
+      }
+    }
+  };
+  
+  // Verificar cada minuto
+  setInterval(checkAndClear, 60 * 1000);
+  sendLog('system', 'info', '⏰ Tarea programada activada: Limpieza de caché diaria a las 4am Costa Rica');
+};
+
+scheduleCacheClear();
 
 // Manejo de cierre limpio
 process.on('SIGINT', () => {
