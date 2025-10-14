@@ -153,13 +153,21 @@ export default function EmisorM3U8Panel() {
     });
   }, []);
 
+  // Ref para acceder al estado actual de processes sin causar re-renders
+  const processesRef = useRef(processes);
+  
+  // Mantener la ref actualizada
+  useEffect(() => {
+    processesRef.current = processes;
+  }, [processes]);
+
   // Cada 5s registramos un punto de salud GLOBAL (combinando todos los procesos)
   useEffect(() => {
     const id = setInterval(() => {
       let totalUp = 0;
       let totalActive = 0;
       
-      processes.forEach((process, index) => {
+      processesRef.current.forEach((process, index) => {
         const video = videoRefs[index].current;
         const up = video && video.readyState >= 2 && video.networkState !== 3 ? 1 : 0;
         
@@ -210,7 +218,7 @@ export default function EmisorM3U8Panel() {
       ]);
     }, 5000);
     return () => clearInterval(id);
-  }, [processes]);
+  }, []);
 
   // Función para verificar estado del proceso en el backend
   const checkProcessStatus = async (processIndex: number) => {
