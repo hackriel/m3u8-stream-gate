@@ -181,14 +181,13 @@ export default function EmisorM3U8Panel() {
           totalActive++;
           totalUp += up;
           
-          // Lógica de reconexión reducida (el servidor ahora hace auto-restart)
+          // Lógica de reconexión simple
           if (up === 0 && process.emitStatus === 'running') {
             const now = Date.now();
             const timeSinceLastReconnect = now - process.lastReconnectTime;
             
-            // Solo 3 intentos porque el servidor hace auto-restart
-            const maxAttempts = 3;
-            const reconnectDelay = 15000; // 15 segundos entre intentos
+            const maxAttempts = 5;
+            const reconnectDelay = 10000; // 10 segundos entre intentos
             
             if (timeSinceLastReconnect > reconnectDelay && process.reconnectAttempts < maxAttempts) {
               console.log(`⚠️ Proceso ${index + 1}: Verificando stream... (${process.reconnectAttempts + 1}/${maxAttempts})`);
@@ -204,9 +203,8 @@ export default function EmisorM3U8Panel() {
                 setTimeout(() => loadPreview(previewUrl, index), 5000);
               }
             } else if (process.reconnectAttempts >= maxAttempts) {
-              console.log(`ℹ️ Proceso ${index + 1}: Esperando auto-restart del servidor...`);
               updateProcess(index, {
-                emitMsg: "Esperando reinicio automático del servidor..."
+                emitMsg: "Stream caído - máximo de reconexiones alcanzado"
               });
             }
           } else if (up === 1 && process.reconnectAttempts > 0) {

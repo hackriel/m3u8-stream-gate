@@ -215,61 +215,38 @@ app.post('/api/emit', async (req, res) => {
 
     emissionStatuses.set(process_id, 'starting');
     
-    // === MODO ULTRA ESTABLE CON AUTO-RESTART ===
-    sendLog(process_id, 'info', `Configurando recodificación ultra estable a 720p30 con auto-restart...`);
+    // === RECODIFICACIÓN SIMPLE Y DIRECTA A 720p30 ===
+    sendLog(process_id, 'info', `Configurando recodificación a 720p30...`);
     
     const ffmpegArgs = [
-      // Parámetros de entrada con reconexión ULTRA robusta
+      // Entrada simple y rápida
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      '-headers', 'Accept: application/vnd.apple.mpegurl,*/*;q=0.8',
-      '-analyzeduration', '10000000',
-      '-probesize', '10000000',
-      '-fflags', '+genpts+discardcorrupt+nobuffer',
-      '-multiple_requests', '1',
       '-reconnect', '1',
       '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '30',
-      '-reconnect_at_eof', '1',
-      '-timeout', '30000000',
-      '-rw_timeout', '30000000',
+      '-reconnect_delay_max', '5',
       '-re',
-      '-err_detect', 'ignore_err',
       '-i', source_m3u8,
       
-      // Mapeo de streams con manejo de errores
-      '-map', '0:v?',
-      '-map', '0:a?',
-      
-      // Codificación de video: 720p30 estable
+      // Video: 720p30 simple
       '-c:v', 'libx264',
       '-preset', 'veryfast',
-      '-tune', 'zerolatency',
-      '-profile:v', 'main',
-      '-level', '4.0',
       '-b:v', '2800k',
       '-maxrate', '3800k',
-      '-bufsize', '8400k',
+      '-bufsize', '5600k',
       '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
       '-g', '60',
       '-keyint_min', '60',
       '-sc_threshold', '0',
-      '-force_key_frames', 'expr:gte(t,n_forced*2)',
       
-      // Codificación de audio: AAC estéreo con manejo de errores
+      // Audio: AAC simple
       '-c:a', 'aac',
       '-b:a', '128k',
       '-ac', '2',
       '-ar', '48000',
-      '-async', '1',
-      '-af', 'aresample=async=1',
       
-      // Salida RTMP con flags ultra optimizados
+      // Salida RTMP simple
       '-f', 'flv',
-      '-flvflags', 'no_duration_filesize+no_metadata',
-      '-max_delay', '10000000',
-      '-rtmp_live', 'live',
-      '-rtmp_buffer', '10000',
-      '-rtmp_flush_interval', '10',
+      '-flvflags', 'no_duration_filesize',
       target_rtmp
     ];
 
@@ -281,8 +258,7 @@ app.post('/api/emit', async (req, res) => {
     const processInfo = { 
       process: ffmpegProcess, 
       status: 'starting',
-      startTime: Date.now(),
-      restartCount: (existingProcess?.restartCount || 0)
+      startTime: Date.now()
     };
     ffmpegProcesses.set(process_id, processInfo);
 
@@ -330,99 +306,19 @@ app.post('/api/emit', async (req, res) => {
       }
     });
 
-    // Manejar cierre del proceso con AUTO-RESTART
+    // Manejar cierre del proceso
     ffmpegProcess.on('close', (code) => {
       const processInfo = ffmpegProcesses.get(process_id);
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
-      const restartCount = processInfo?.restartCount || 0;
-      const maxRestarts = 50; // Permitir hasta 50 reintentos
       
       if (code === 0) {
         sendLog(process_id, 'success', `FFmpeg terminó exitosamente (código: ${code}, runtime: ${Math.floor(runtime/1000)}s)`);
-        emissionStatuses.set(process_id, 'idle');
-        ffmpegProcesses.delete(process_id);
       } else {
-        // Si el proceso falló y no ha alcanzado el máximo de reintentos
-        if (restartCount < maxRestarts) {
-          const restartDelay = Math.min(5000 + (restartCount * 1000), 30000); // Delay progresivo: 5s, 6s, 7s... hasta 30s
-          sendLog(process_id, 'warn', `FFmpeg falló (código: ${code}, runtime: ${Math.floor(runtime/1000)}s). Auto-restart en ${restartDelay/1000}s (intento ${restartCount + 1}/${maxRestarts})...`);
-          
-          emissionStatuses.set(process_id, 'restarting');
-          
-          // Auto-restart después del delay
-          setTimeout(async () => {
-            try {
-              sendLog(process_id, 'info', `Reiniciando emisión automáticamente...`);
-              
-              // Reiniciar con el mismo comando pero incrementando el contador
-              const newProcess = spawn('ffmpeg', ffmpegArgs);
-              const newProcessInfo = { 
-                process: newProcess, 
-                status: 'starting',
-                startTime: Date.now(),
-                restartCount: restartCount + 1
-              };
-              ffmpegProcesses.set(process_id, newProcessInfo);
-              
-              // Reutilizar los mismos handlers
-              newProcess.stdout.on('data', (data) => {
-                const output = data.toString();
-                sendLog(process_id, 'info', `FFmpeg stdout: ${output.trim()}`);
-              });
-              
-              newProcess.stderr.on('data', (data) => {
-                const output = data.toString();
-                
-                if (output.includes('frame=') || output.includes('fps=')) {
-                  const currentStatus = emissionStatuses.get(process_id);
-                  if (currentStatus === 'starting' || currentStatus === 'restarting') {
-                    emissionStatuses.set(process_id, 'running');
-                    sendLog(process_id, 'success', `Emisión reiniciada exitosamente (intento ${restartCount + 1})`);
-                  }
-                  
-                  const frameMatch = output.match(/frame=\s*(\d+)/);
-                  const fpsMatch = output.match(/fps=\s*([\d.]+)/);
-                  const bitrateMatch = output.match(/bitrate=\s*([\d.]+)kbits\/s/);
-                  
-                  if (frameMatch && fpsMatch) {
-                    sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}, bitrate=${bitrateMatch ? bitrateMatch[1] + 'kbps' : 'N/A'}`);
-                  }
-                } else if (output.includes('error') || output.includes('Error') || output.includes('failed') || output.includes('Failed')) {
-                  const hasRTMPIssues = detectRTMPIssues(output, process_id);
-                  if (!hasRTMPIssues) {
-                    sendLog(process_id, 'error', `FFmpeg error: ${output.trim()}`);
-                  }
-                } else if (output.includes('warning') || output.includes('Warning')) {
-                  sendLog(process_id, 'warn', `FFmpeg warning: ${output.trim()}`);
-                } else {
-                  if (output.includes('Stream #') || output.includes('Input #') || output.includes('Output #')) {
-                    sendLog(process_id, 'info', `FFmpeg: ${output.trim()}`);
-                  }
-                }
-              });
-              
-              // Este close handler se llamará recursivamente si vuelve a fallar
-              newProcess.on('close', arguments.callee);
-              
-              newProcess.on('error', (error) => {
-                sendLog(process_id, 'error', `Error crítico de FFmpeg: ${error.message}`, { error: error.toString() });
-                emissionStatuses.set(process_id, 'error');
-              });
-              
-            } catch (error) {
-              sendLog(process_id, 'error', `Error al reiniciar FFmpeg: ${error.message}`);
-              emissionStatuses.set(process_id, 'error');
-              ffmpegProcesses.delete(process_id);
-            }
-          }, restartDelay);
-          
-        } else {
-          // Alcanzó el máximo de reintentos
-          sendLog(process_id, 'error', `FFmpeg falló permanentemente después de ${maxRestarts} intentos (código: ${code}, runtime: ${Math.floor(runtime/1000)}s)`);
-          emissionStatuses.set(process_id, 'error');
-          ffmpegProcesses.delete(process_id);
-        }
+        sendLog(process_id, 'error', `FFmpeg terminó con error (código: ${code}, runtime: ${Math.floor(runtime/1000)}s)`);
       }
+      
+      emissionStatuses.set(process_id, 'idle');
+      ffmpegProcesses.delete(process_id);
     });
 
     // Manejar error del proceso
@@ -432,14 +328,14 @@ app.post('/api/emit', async (req, res) => {
       ffmpegProcesses.delete(process_id);
     });
 
-    // Simular delay de inicio
+    // Timeout de inicio simple
     setTimeout(() => {
       const currentStatus = emissionStatuses.get(process_id);
       const processData = ffmpegProcesses.get(process_id);
       if (currentStatus === 'starting' && processData && processData.process && !processData.process.killed) {
         emissionStatuses.set(process_id, 'running');
       }
-    }, 3000);
+    }, 2000);
 
     res.json({ 
       success: true, 
@@ -511,73 +407,55 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `Creada playlist con ${files.length} archivos`);
     }
 
-    // === MODO ULTRA ESTABLE CON AUTO-RESTART ===
-    sendLog(process_id, 'info', `Configurando recodificación ultra estable a 720p30 con auto-restart...`);
+    // === RECODIFICACIÓN SIMPLE A 720p30 ===
+    sendLog(process_id, 'info', `Configurando recodificación a 720p30...`);
     
     let ffmpegArgs;
     
     if (files.length === 1) {
-      // Archivo único con recodificación ultra estable
+      // Archivo único simple
       ffmpegArgs = [
         '-re',
         '-stream_loop', '-1',
-        '-fflags', '+genpts+discardcorrupt',
-        '-err_detect', 'ignore_err',
         '-i', path.basename(inputSource),
         '-c:v', 'libx264',
         '-preset', 'veryfast',
-        '-tune', 'zerolatency',
-        '-profile:v', 'main',
-        '-level', '4.0',
         '-b:v', '2800k',
         '-maxrate', '3800k',
-        '-bufsize', '8400k',
+        '-bufsize', '5600k',
         '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
         '-g', '60',
         '-keyint_min', '60',
         '-sc_threshold', '0',
-        '-force_key_frames', 'expr:gte(t,n_forced*2)',
         '-c:a', 'aac',
         '-b:a', '128k',
         '-ac', '2',
         '-ar', '48000',
-        '-async', '1',
         '-f', 'flv',
-        '-rtmp_live', 'live',
-        '-rtmp_buffer', '10000',
         target_rtmp
       ];
     } else {
-      // Múltiples archivos con recodificación ultra estable
+      // Múltiples archivos simple
       ffmpegArgs = [
         '-re',
         '-f', 'concat',
         '-safe', '0',
         '-stream_loop', '-1',
-        '-fflags', '+genpts+discardcorrupt',
-        '-err_detect', 'ignore_err',
         '-i', inputSource,
         '-c:v', 'libx264',
         '-preset', 'veryfast',
-        '-tune', 'zerolatency',
-        '-profile:v', 'main',
-        '-level', '4.0',
         '-b:v', '2800k',
         '-maxrate', '3800k',
-        '-bufsize', '8400k',
+        '-bufsize', '5600k',
         '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
         '-g', '60',
         '-keyint_min', '60',
         '-sc_threshold', '0',
-        '-force_key_frames', 'expr:gte(t,n_forced*2)',
         '-c:a', 'aac',
         '-b:a', '128k',
         '-ac', '2',
         '-ar', '48000',
-        '-async', '1',
         '-f', 'flv',
-        '-rtmp_live', 'live',
-        '-rtmp_buffer', '10000',
         target_rtmp
       ];
     }
@@ -587,14 +465,13 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
 
     // Ejecutar ffmpeg
     const ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
-      cwd: path.join(__dirname, 'uploads') // Trabajar en directorio uploads
+      cwd: path.join(__dirname, 'uploads')
     });
     
     const processInfo = { 
       process: ffmpegProcess, 
       status: 'starting',
       startTime: Date.now(),
-      restartCount: (existingProcess?.restartCount || 0),
       cleanupFiles: cleanupFiles.concat(files.map(f => f.path))
     };
     ffmpegProcesses.set(process_id, processInfo);
@@ -628,120 +505,29 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     ffmpegProcess.on('close', (code) => {
       const processInfo = ffmpegProcesses.get(process_id);
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
-      const restartCount = processInfo?.restartCount || 0;
-      const maxRestarts = 50; // Permitir hasta 50 reintentos
       
-      // NO limpiar archivos durante auto-restart, solo al final
+      // Limpiar archivos siempre
+      if (processInfo && processInfo.cleanupFiles) {
+        processInfo.cleanupFiles.forEach(file => {
+          try {
+            if (fs.existsSync(file)) {
+              fs.unlinkSync(file);
+              sendLog(process_id, 'info', `Archivo limpiado: ${path.basename(file)}`);
+            }
+          } catch (e) {
+            console.error(`Error limpiando archivo ${file}:`, e);
+          }
+        });
+      }
       
       if (code === 0) {
-        // Limpiar archivos solo si termina exitosamente
-        if (processInfo && processInfo.cleanupFiles) {
-          processInfo.cleanupFiles.forEach(file => {
-            try {
-              if (fs.existsSync(file)) {
-                fs.unlinkSync(file);
-                sendLog(process_id, 'info', `Archivo limpiado: ${path.basename(file)}`);
-              }
-            } catch (e) {
-              console.error(`Error limpiando archivo ${file}:`, e);
-            }
-          });
-        }
-        sendLog(process_id, 'success', `FFmpeg terminó exitosamente`);
-        emissionStatuses.set(process_id, 'idle');
-        ffmpegProcesses.delete(process_id);
+        sendLog(process_id, 'success', `FFmpeg terminó exitosamente (runtime: ${Math.floor(runtime/1000)}s)`);
       } else {
-        // Si el proceso falló y no ha alcanzado el máximo de reintentos
-        if (restartCount < maxRestarts) {
-          const restartDelay = Math.min(5000 + (restartCount * 1000), 30000);
-          sendLog(process_id, 'warn', `FFmpeg falló (código: ${code}). Auto-restart en ${restartDelay/1000}s (intento ${restartCount + 1}/${maxRestarts})...`);
-          
-          emissionStatuses.set(process_id, 'restarting');
-          
-          setTimeout(async () => {
-            try {
-              sendLog(process_id, 'info', `Reiniciando emisión de archivos...`);
-              
-              const newProcess = spawn('ffmpeg', ffmpegArgs, {
-                cwd: path.join(__dirname, 'uploads')
-              });
-              
-              const newProcessInfo = { 
-                process: newProcess, 
-                status: 'starting',
-                startTime: Date.now(),
-                restartCount: restartCount + 1,
-                cleanupFiles: processInfo.cleanupFiles // Mantener los archivos para limpiar al final
-              };
-              ffmpegProcesses.set(process_id, newProcessInfo);
-              
-              newProcess.stdout.on('data', (data) => {
-                const output = data.toString();
-                sendLog(process_id, 'info', `FFmpeg stdout: ${output.trim()}`);
-              });
-              
-              newProcess.stderr.on('data', (data) => {
-                const output = data.toString();
-                
-                if (output.includes('frame=') || output.includes('fps=')) {
-                  const currentStatus = emissionStatuses.get(process_id);
-                  if (currentStatus === 'starting' || currentStatus === 'restarting') {
-                    emissionStatuses.set(process_id, 'running');
-                    sendLog(process_id, 'success', `Emisión de archivos reiniciada (intento ${restartCount + 1})`);
-                  }
-                  
-                  const frameMatch = output.match(/frame=\s*(\d+)/);
-                  const fpsMatch = output.match(/fps=\s*([\d.]+)/);
-                  if (frameMatch && fpsMatch) {
-                    sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}`);
-                  }
-                } else if (output.includes('error') || output.includes('Error')) {
-                  sendLog(process_id, 'error', `FFmpeg error: ${output.trim()}`);
-                }
-              });
-              
-              newProcess.on('close', arguments.callee);
-              
-              newProcess.on('error', (error) => {
-                sendLog(process_id, 'error', `Error crítico de FFmpeg: ${error.message}`);
-                emissionStatuses.set(process_id, 'error');
-              });
-              
-            } catch (error) {
-              sendLog(process_id, 'error', `Error al reiniciar FFmpeg: ${error.message}`);
-              emissionStatuses.set(process_id, 'error');
-              
-              // Limpiar archivos en caso de error fatal
-              if (processInfo && processInfo.cleanupFiles) {
-                processInfo.cleanupFiles.forEach(file => {
-                  try {
-                    if (fs.existsSync(file)) fs.unlinkSync(file);
-                  } catch (e) {}
-                });
-              }
-              ffmpegProcesses.delete(process_id);
-            }
-          }, restartDelay);
-          
-        } else {
-          // Limpiar archivos al alcanzar máximo de reintentos
-          if (processInfo && processInfo.cleanupFiles) {
-            processInfo.cleanupFiles.forEach(file => {
-              try {
-                if (fs.existsSync(file)) {
-                  fs.unlinkSync(file);
-                  sendLog(process_id, 'info', `Archivo limpiado: ${path.basename(file)}`);
-                }
-              } catch (e) {
-                console.error(`Error limpiando archivo ${file}:`, e);
-              }
-            });
-          }
-          sendLog(process_id, 'error', `FFmpeg falló permanentemente después de ${maxRestarts} intentos`);
-          emissionStatuses.set(process_id, 'error');
-          ffmpegProcesses.delete(process_id);
-        }
+        sendLog(process_id, 'error', `FFmpeg terminó con error (código: ${code}, runtime: ${Math.floor(runtime/1000)}s)`);
       }
+      
+      emissionStatuses.set(process_id, 'idle');
+      ffmpegProcesses.delete(process_id);
     });
 
     ffmpegProcess.on('error', (error) => {
@@ -756,7 +542,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       if (currentStatus === 'starting' && processData && processData.process && !processData.process.killed) {
         emissionStatuses.set(process_id, 'running');
       }
-    }, 3000);
+    }, 2000);
 
     res.json({ 
       success: true, 
