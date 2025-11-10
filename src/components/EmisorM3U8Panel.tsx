@@ -719,12 +719,30 @@ export default function EmisorM3U8Panel() {
             </p>
 
             {/* Información de optimización automática */}
-            <div className="mb-4 p-4 rounded-xl bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20">
-              <p className="text-sm text-foreground font-medium mb-1">🧠 Optimización Inteligente Activa</p>
-              <p className="text-xs text-muted-foreground">
-                El sistema detecta automáticamente la resolución del stream:
-                <br />• ≤ 720p → <span className="text-green-400 font-semibold">Copia directa</span> (0% uso CPU, máxima velocidad)
-                <br />• &gt; 720p → <span className="text-blue-400 font-semibold">Recodificación a 720p30</span> (optimizado, 3.5Mbps)
+            <div className="mb-4 p-5 rounded-xl bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20 shadow-sm">
+              <p className="text-sm text-foreground font-semibold mb-3">🌸 Optimización Inteligente 2.0 Activa</p>
+              <p className="text-xs text-muted-foreground leading-relaxed mb-4">
+                El sistema detecta automáticamente la resolución del stream y ajusta calidad vs. consumo del servidor:
+              </p>
+              
+              <div className="space-y-2.5 mb-4">
+                <div className="bg-background/40 backdrop-blur-sm rounded-lg p-3 border border-border/30">
+                  <p className="text-xs font-semibold text-foreground mb-1.5">≤ 720p → Copia directa</p>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    0% uso de CPU en vídeo, máxima velocidad y mínima latencia.
+                  </p>
+                </div>
+                
+                <div className="bg-background/40 backdrop-blur-sm rounded-lg p-3 border border-border/30">
+                  <p className="text-xs font-semibold text-foreground mb-1.5">&gt; 720p → Recodificación a 720p25</p>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    Vídeo optimizado a 720p / 25 fps / ~2.5 Mbps, reduciendo carga del servidor y manteniendo una fluidez agradable para TV, series y contenido general.
+                  </p>
+                </div>
+              </div>
+              
+              <p className="text-[10px] text-muted-foreground/80 italic leading-relaxed border-t border-border/20 pt-3">
+                Esta optimización reduce el uso de CPU y ancho de banda, permitiendo más usuarios conectados al mismo tiempo sin sacrificar la calidad percibida.
               </p>
             </div>
 
