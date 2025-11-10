@@ -232,9 +232,13 @@ app.post('/api/emit', async (req, res) => {
         '-multiple_requests', '1',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '4', 
+        '-reconnect_delay_max', '15',
         '-reconnect_at_eof', '1',
+        '-timeout', '10000000',
+        '-rw_timeout', '10000000',
         '-i', source_m3u8,
+        '-re',
+        '-max_delay', '5000000',
         '-c:v', 'copy',
         '-c:a', 'copy',
         '-f', 'flv',
@@ -243,7 +247,7 @@ app.post('/api/emit', async (req, res) => {
         '-avoid_negative_ts', 'make_zero',
         '-use_wallclock_as_timestamps', '1',
         '-rtmp_live', 'live',
-        '-rtmp_buffer', '1000',
+        '-rtmp_buffer', '5000',
         target_rtmp
       ];
       
