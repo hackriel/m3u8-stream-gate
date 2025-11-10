@@ -181,36 +181,32 @@ export default function EmisorM3U8Panel() {
           totalActive++;
           totalUp += up;
           
-          // Lógica de reconexión individual con backoff exponencial
+          // Lógica de reconexión reducida (el servidor ahora hace auto-restart)
           if (up === 0 && process.emitStatus === 'running') {
             const now = Date.now();
             const timeSinceLastReconnect = now - process.lastReconnectTime;
             
-            // Backoff exponencial: 20s, 30s, 45s, 60s, 90s, 120s, 180s, 240s, 300s, 360s
-            const maxAttempts = 10;
-            const backoffDelays = [20000, 30000, 45000, 60000, 90000, 120000, 180000, 240000, 300000, 360000];
-            const currentDelay = backoffDelays[Math.min(process.reconnectAttempts, backoffDelays.length - 1)];
+            // Solo 3 intentos porque el servidor hace auto-restart
+            const maxAttempts = 3;
+            const reconnectDelay = 15000; // 15 segundos entre intentos
             
-            if (timeSinceLastReconnect > currentDelay && process.reconnectAttempts < maxAttempts) {
-              console.log(`⚠️ Proceso ${index + 1}: Intento de reconexión ${process.reconnectAttempts + 1}/${maxAttempts} (esperando ${currentDelay/1000}s)`);
+            if (timeSinceLastReconnect > reconnectDelay && process.reconnectAttempts < maxAttempts) {
+              console.log(`⚠️ Proceso ${index + 1}: Verificando stream... (${process.reconnectAttempts + 1}/${maxAttempts})`);
               
               updateProcess(index, {
                 reconnectAttempts: process.reconnectAttempts + 1,
                 lastReconnectTime: now,
-                emitMsg: `Reconectando... (${process.reconnectAttempts + 1}/${maxAttempts})`
+                emitMsg: `Verificando conexión... (${process.reconnectAttempts + 1}/${maxAttempts})`
               });
               
               const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
               if (previewUrl) {
-                // Delay progresivo antes de recargar: 3s, 5s, 8s...
-                const reloadDelay = Math.min(3000 + (process.reconnectAttempts * 2000), 10000);
-                setTimeout(() => loadPreview(previewUrl, index), reloadDelay);
+                setTimeout(() => loadPreview(previewUrl, index), 5000);
               }
             } else if (process.reconnectAttempts >= maxAttempts) {
-              console.error(`❌ Proceso ${index + 1}: Máximo de reconexiones alcanzado después de ${maxAttempts} intentos`);
+              console.log(`ℹ️ Proceso ${index + 1}: Esperando auto-restart del servidor...`);
               updateProcess(index, {
-                emitStatus: "error",
-                emitMsg: "Stream caído - máximo de reconexiones alcanzado. Verifica el servidor."
+                emitMsg: "Esperando reinicio automático del servidor..."
               });
             }
           } else if (up === 1 && process.reconnectAttempts > 0) {
