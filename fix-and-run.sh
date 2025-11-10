@@ -14,9 +14,9 @@ print_status() { echo -e "${GREEN}✅ $1${NC}"; }
 print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 print_error() { echo -e "${RED}❌ $1${NC}"; }
 
-# 1. Verificar directorio actual
-if [[ ! "$(basename $(pwd))" == "emisor-m3u8" ]]; then
-    print_error "Ejecuta este script desde el directorio emisor-m3u8"
+# 1. Verificar que existan archivos del proyecto
+if [[ ! -f "package.json" ]] || [[ ! -f "server.js" ]]; then
+    print_error "Ejecuta este script desde el directorio raíz del proyecto (donde están package.json y server.js)"
     exit 1
 fi
 
