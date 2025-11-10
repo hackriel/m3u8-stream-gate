@@ -32,16 +32,16 @@ interface EmissionProcess {
 }
 
 export default function EmisorM3U8Panel() {
-  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
-  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
+  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
+  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
   const [globalHealthPoints, setGlobalHealthPoints] = useState<Array<{ t: number; up: number }>>([]);
 
-  // Estado para 5 procesos independientes
+  // Estado para 4 procesos independientes
   const [processes, setProcesses] = useState<EmissionProcess[]>(() => {
     const savedProcesses = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       savedProcesses.push({
         m3u8: localStorage.getItem(`emisor_m3u8_${i}`) || "",
         rtmp: localStorage.getItem(`emisor_rtmp_${i}`) || "",
@@ -58,7 +58,10 @@ export default function EmisorM3U8Panel() {
     return savedProcesses;
   });
 
-  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
+  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
+  
+  // Estado específico para el proceso 4 (archivos locales)
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
 
   // Limpieza de caché programada del lado del cliente (4am Costa Rica)
   useEffect(() => {
@@ -79,7 +82,7 @@ export default function EmisorM3U8Panel() {
           
           // Guardar solo datos esenciales
           const essentialData: Record<string, string> = {};
-          for (let i = 0; i < 5; i++) {
+          for (let i = 0; i < 4; i++) {
             const m3u8 = localStorage.getItem(`emisor_m3u8_${i}`);
             const rtmp = localStorage.getItem(`emisor_rtmp_${i}`);
             if (m3u8) essentialData[`emisor_m3u8_${i}`] = m3u8;
@@ -517,6 +520,67 @@ export default function EmisorM3U8Panel() {
   // --- Acciones de emisión hacia RTMP (vía backend) ---
   async function startEmitToRTMP(processIndex: number) {
     const process = processes[processIndex];
+    
+    // Proceso 4 (índice 3) usa archivos locales
+    if (processIndex === 3) {
+      if (uploadedFiles.length === 0 || !process.rtmp) {
+        updateProcess(processIndex, {
+          emitStatus: "error",
+          emitMsg: "Falta archivo(s) o RTMP"
+        });
+        return;
+      }
+      
+      updateProcess(processIndex, {
+        emitStatus: "starting",
+        emitMsg: "Subiendo archivos al servidor...",
+        reconnectAttempts: 0,
+        lastReconnectTime: 0
+      });
+      
+      try {
+        // Subir archivos al servidor
+        const formData = new FormData();
+        uploadedFiles.forEach((file, index) => {
+          formData.append('files', file);
+        });
+        formData.append('target_rtmp', process.rtmp);
+        formData.append('process_id', processIndex.toString());
+        
+        const resp = await fetch("/api/emit/files", {
+          method: "POST",
+          body: formData,
+        });
+        
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json().catch(() => ({}));
+        
+        updateProcess(processIndex, {
+          emitStatus: "running",
+          emitMsg: data?.message || "Emitiendo archivos a RTMP",
+          elapsed: 0,
+          startTime: Math.floor(Date.now() / 1000),
+          isEmitiendo: true
+        });
+        
+        // Cargar preview desde RTMP
+        const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
+        if (previewUrl) {
+          setTimeout(() => {
+            loadPreview(previewUrl, processIndex);
+          }, 2000);
+        }
+      } catch (e: any) {
+        updateProcess(processIndex, {
+          emitStatus: "error",
+          emitMsg: `No se pudo iniciar la emisión: ${e.message}`,
+          isEmitiendo: false
+        });
+      }
+      return;
+    }
+    
+    // Procesos 1-3 usan M3U8
     if (!process.m3u8 || !process.rtmp) {
       updateProcess(processIndex, {
         emitStatus: "error",
@@ -679,16 +743,52 @@ export default function EmisorM3U8Panel() {
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Panel de configuración */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <h2 className="text-lg font-medium mb-4 text-accent">Fuente y Cabeceras - Proceso {processIndex + 1}</h2>
+            <h2 className="text-lg font-medium mb-4 text-accent">
+              {processIndex === 3 ? "Archivos Locales" : "Fuente y Cabeceras"} - Proceso {processIndex + 1}
+            </h2>
 
-            <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 (fuente)</label>
-            <input
-              type="url"
-              placeholder="https://servidor/origen/playlist.m3u8"
-              value={process.m3u8}
-              onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-              className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-            />
+            {processIndex === 3 ? (
+              // Proceso 4: Upload de archivos
+              <>
+                <label className="block text-sm mb-2 text-muted-foreground">Archivos de video (MP4, MKV, etc.)</label>
+                <input
+                  type="file"
+                  accept="video/*"
+                  multiple
+                  onChange={(e) => {
+                    if (e.target.files) {
+                      setUploadedFiles(Array.from(e.target.files));
+                    }
+                  }}
+                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-2 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+                />
+                {uploadedFiles.length > 0 && (
+                  <div className="mb-4 p-3 rounded-xl bg-card/50 border border-border">
+                    <p className="text-xs text-muted-foreground mb-2">Archivos seleccionados:</p>
+                    <ul className="space-y-1">
+                      {uploadedFiles.map((file, idx) => (
+                        <li key={idx} className="text-xs text-foreground flex items-center gap-2">
+                          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+                          {file.name} ({(file.size / (1024 * 1024)).toFixed(2)} MB)
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            ) : (
+              // Procesos 1-3: URL M3U8
+              <>
+                <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 (fuente)</label>
+                <input
+                  type="url"
+                  placeholder="https://servidor/origen/playlist.m3u8"
+                  value={process.m3u8}
+                  onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
+                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+                />
+              </>
+            )}
 
             <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
             <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
@@ -930,12 +1030,12 @@ export default function EmisorM3U8Panel() {
             Emisor M3U8 → RTMP – Panel Multi-Proceso
           </h1>
           <div className="text-sm text-muted-foreground">
-            Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/5</span>
+            Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/4</span>
           </div>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-5 mb-6">
+          <TabsList className="grid w-full grid-cols-4 mb-6">
             <TabsTrigger value="0" className="flex items-center gap-2">
               <span className={`inline-flex h-2 w-2 rounded-full ${processes[0].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
               Proceso 1
@@ -950,11 +1050,7 @@ export default function EmisorM3U8Panel() {
             </TabsTrigger>
             <TabsTrigger value="3" className="flex items-center gap-2">
               <span className={`inline-flex h-2 w-2 rounded-full ${processes[3].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
-              Proceso 4
-            </TabsTrigger>
-            <TabsTrigger value="4" className="flex items-center gap-2">
-              <span className={`inline-flex h-2 w-2 rounded-full ${processes[4].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
-              Proceso 5
+              Archivos
             </TabsTrigger>
           </TabsList>
 
@@ -972,10 +1068,6 @@ export default function EmisorM3U8Panel() {
 
           <TabsContent value="3">
             {renderProcessTab(3)}
-          </TabsContent>
-
-          <TabsContent value="4">
-            {renderProcessTab(4)}
           </TabsContent>
         </Tabs>
 

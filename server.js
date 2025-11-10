@@ -5,9 +5,31 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
+import multer from 'multer';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Configurar multer para subida de archivos
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  }
+});
+
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 * 1024 } // 5GB max
+});
 
 const app = express();
 const server = createServer(app);
@@ -320,6 +342,191 @@ app.post('/api/emit', async (req, res) => {
   } catch (error) {
     console.error(`❌ Error en /api/emit [${req.body.process_id || '0'}]:`, error);
     emissionStatuses.set(req.body.process_id || '0', 'error');
+    res.status(500).json({ 
+      error: 'Error interno del servidor', 
+      details: error.message 
+    });
+  }
+});
+
+// Endpoint para emitir archivos locales
+app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
+  try {
+    const { target_rtmp, process_id = '3' } = req.body;
+    const files = req.files;
+
+    sendLog(process_id, 'info', `Nueva solicitud de emisión con archivos`, { 
+      fileCount: files?.length || 0, 
+      target_rtmp 
+    });
+
+    // Validaciones
+    if (!files || files.length === 0) {
+      sendLog(process_id, 'error', 'No se recibieron archivos');
+      return res.status(400).json({ 
+        error: 'No se recibieron archivos' 
+      });
+    }
+
+    if (!target_rtmp) {
+      sendLog(process_id, 'error', 'Falta parámetro target_rtmp');
+      return res.status(400).json({ 
+        error: 'Falta parámetro target_rtmp' 
+      });
+    }
+
+    // Si ya hay un proceso corriendo para este ID, detenerlo primero
+    const existingProcess = ffmpegProcesses.get(process_id);
+    if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
+      sendLog(process_id, 'warn', `Deteniendo proceso ffmpeg existente para reinicio`);
+      existingProcess.process.kill('SIGTERM');
+      ffmpegProcesses.delete(process_id);
+    }
+
+    emissionStatuses.set(process_id, 'starting');
+    
+    // Si hay múltiples archivos, crear un archivo concat
+    let inputSource;
+    let cleanupFiles = [];
+    
+    if (files.length === 1) {
+      inputSource = files[0].path;
+      sendLog(process_id, 'info', `Emitiendo archivo único: ${files[0].originalname}`);
+    } else {
+      // Crear archivo concat para múltiples videos
+      const concatFilePath = path.join(__dirname, 'uploads', `concat-${process_id}-${Date.now()}.txt`);
+      const concatContent = files.map(f => `file '${path.basename(f.path)}'`).join('\n');
+      fs.writeFileSync(concatFilePath, concatContent);
+      inputSource = concatFilePath;
+      cleanupFiles.push(concatFilePath);
+      sendLog(process_id, 'info', `Creada playlist con ${files.length} archivos`);
+    }
+
+    // Construir comando ffmpeg para archivos locales
+    let ffmpegArgs;
+    
+    if (files.length === 1) {
+      // Archivo único - streaming directo
+      ffmpegArgs = [
+        '-re',
+        '-stream_loop', '-1', // Loop infinito
+        '-i', inputSource,
+        '-c:v', 'copy',
+        '-c:a', 'copy',
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        target_rtmp
+      ];
+    } else {
+      // Múltiples archivos - usar concat demuxer con loop
+      ffmpegArgs = [
+        '-f', 'concat',
+        '-safe', '0',
+        '-stream_loop', '-1', // Loop infinito de la playlist
+        '-i', inputSource,
+        '-c:v', 'copy',
+        '-c:a', 'copy',
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        target_rtmp
+      ];
+    }
+
+    const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
+    sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 150)}...`);
+
+    // Ejecutar ffmpeg
+    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
+      cwd: path.join(__dirname, 'uploads') // Trabajar en directorio uploads
+    });
+    
+    const processInfo = { 
+      process: ffmpegProcess, 
+      status: 'starting',
+      startTime: Date.now(),
+      restartCount: (existingProcess?.restartCount || 0),
+      cleanupFiles: cleanupFiles.concat(files.map(f => f.path))
+    };
+    ffmpegProcesses.set(process_id, processInfo);
+
+    // Manejar salida (reutilizar lógica existente)
+    ffmpegProcess.stdout.on('data', (data) => {
+      const output = data.toString();
+      sendLog(process_id, 'info', `FFmpeg stdout: ${output.trim()}`);
+    });
+
+    ffmpegProcess.stderr.on('data', (data) => {
+      const output = data.toString();
+      
+      if (output.includes('frame=') || output.includes('fps=')) {
+        const currentStatus = emissionStatuses.get(process_id);
+        if (currentStatus === 'starting') {
+          emissionStatuses.set(process_id, 'running');
+          sendLog(process_id, 'success', `Emisión de archivos iniciada exitosamente`);
+        }
+        
+        const frameMatch = output.match(/frame=\s*(\d+)/);
+        const fpsMatch = output.match(/fps=\s*([\d.]+)/);
+        if (frameMatch && fpsMatch) {
+          sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}`);
+        }
+      } else if (output.includes('error') || output.includes('Error')) {
+        sendLog(process_id, 'error', `FFmpeg error: ${output.trim()}`);
+      }
+    });
+
+    ffmpegProcess.on('close', (code) => {
+      const processInfo = ffmpegProcesses.get(process_id);
+      
+      // Limpiar archivos temporales
+      if (processInfo && processInfo.cleanupFiles) {
+        processInfo.cleanupFiles.forEach(file => {
+          try {
+            if (fs.existsSync(file)) {
+              fs.unlinkSync(file);
+              sendLog(process_id, 'info', `Archivo limpiado: ${path.basename(file)}`);
+            }
+          } catch (e) {
+            console.error(`Error limpiando archivo ${file}:`, e);
+          }
+        });
+      }
+      
+      if (code === 0) {
+        sendLog(process_id, 'success', `FFmpeg terminó exitosamente`);
+      } else {
+        sendLog(process_id, 'error', `FFmpeg terminó con error (código: ${code})`);
+      }
+      
+      emissionStatuses.set(process_id, code === 0 ? 'idle' : 'error');
+      ffmpegProcesses.delete(process_id);
+    });
+
+    ffmpegProcess.on('error', (error) => {
+      sendLog(process_id, 'error', `Error crítico de FFmpeg: ${error.message}`);
+      emissionStatuses.set(process_id, 'error');
+      ffmpegProcesses.delete(process_id);
+    });
+
+    setTimeout(() => {
+      const currentStatus = emissionStatuses.get(process_id);
+      const processData = ffmpegProcesses.get(process_id);
+      if (currentStatus === 'starting' && processData && processData.process && !processData.process.killed) {
+        emissionStatuses.set(process_id, 'running');
+      }
+    }, 3000);
+
+    res.json({ 
+      success: true, 
+      message: `Emisión iniciada con ${files.length} archivo(s)`,
+      status: 'starting',
+      files: files.map(f => ({ name: f.originalname, size: f.size }))
+    });
+
+  } catch (error) {
+    const process_id = req.body.process_id || '3';
+    console.error(`❌ Error en /api/emit/files [${process_id}]:`, error);
+    emissionStatuses.set(process_id, 'error');
     res.status(500).json({ 
       error: 'Error interno del servidor', 
       details: error.message 
