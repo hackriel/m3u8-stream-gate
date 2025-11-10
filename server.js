@@ -157,6 +157,39 @@ const detectM3U8Resolution = async (m3u8Url) => {
   });
 };
 
+// Función auxiliar para detectar resolución de un archivo local
+const detectFileResolution = async (filePath) => {
+  return new Promise((resolve) => {
+    const probe = spawn('ffprobe', [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height',
+      '-of', 'json',
+      filePath
+    ]);
+    
+    let output = '';
+    probe.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    probe.on('close', () => {
+      try {
+        const data = JSON.parse(output);
+        const width = data.streams?.[0]?.width || 0;
+        const height = data.streams?.[0]?.height || 0;
+        resolve({ width, height });
+      } catch (e) {
+        resolve({ width: 0, height: 0 });
+      }
+    });
+    
+    probe.on('error', () => {
+      resolve({ width: 0, height: 0 });
+    });
+  });
+};
+
 // Endpoint para iniciar emisión
 app.post('/api/emit', async (req, res) => {
   try {
@@ -403,35 +436,102 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `Creada playlist con ${files.length} archivos`);
     }
 
-    // Construir comando ffmpeg para archivos locales
+    // === INTELIGENCIA AUTOMÁTICA DE RESOLUCIÓN PARA ARCHIVOS ===
+    sendLog(process_id, 'info', `Detectando resolución del archivo...`);
+    const { width, height } = await detectFileResolution(files[0].path);
+    
     let ffmpegArgs;
     
-    if (files.length === 1) {
-      // Archivo único - streaming directo
-      ffmpegArgs = [
-        '-re',
-        '-stream_loop', '-1', // Loop infinito
-        '-i', path.basename(inputSource),
-        '-c:v', 'copy',
-        '-c:a', 'copy',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        target_rtmp
-      ];
+    // Si resolución es <= 720p O no se pudo detectar → COPIA DIRECTA
+    if (height <= 720 || height === 0) {
+      const mode = height === 0 ? 'desconocida (usando copia segura)' : `${width}x${height}`;
+      sendLog(process_id, 'info', `Resolución detectada: ${mode} → Usando COPIA DIRECTA (eficiente)`);
+      
+      if (files.length === 1) {
+        // Archivo único - streaming directo con copia
+        ffmpegArgs = [
+          '-re',
+          '-stream_loop', '-1',
+          '-i', path.basename(inputSource),
+          '-c:v', 'copy',
+          '-c:a', 'copy',
+          '-f', 'flv',
+          '-flvflags', 'no_duration_filesize',
+          target_rtmp
+        ];
+      } else {
+        // Múltiples archivos - concat con copia
+        ffmpegArgs = [
+          '-re',
+          '-f', 'concat',
+          '-safe', '0',
+          '-stream_loop', '-1',
+          '-i', inputSource,
+          '-c:v', 'copy',
+          '-c:a', 'copy',
+          '-f', 'flv',
+          '-flvflags', 'no_duration_filesize',
+          target_rtmp
+        ];
+      }
+      
     } else {
-      // Múltiples archivos - usar concat demuxer con loop
-      ffmpegArgs = [
-        '-re',
-        '-f', 'concat',
-        '-safe', '0',
-        '-stream_loop', '-1', // Loop infinito de la playlist
-        '-i', inputSource,
-        '-c:v', 'copy',
-        '-c:a', 'copy',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        target_rtmp
-      ];
+      // Resolución > 720p → RECODIFICAR a 720p25 optimizado
+      sendLog(process_id, 'info', `Resolución detectada: ${width}x${height} → Recodificando a 720p25 (~2.5Mbps)`);
+      
+      if (files.length === 1) {
+        // Archivo único con recodificación
+        ffmpegArgs = [
+          '-re',
+          '-stream_loop', '-1',
+          '-i', path.basename(inputSource),
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-tune', 'film',
+          '-profile:v', 'high',
+          '-level', '4.1',
+          '-b:v', '2500k',
+          '-maxrate', '3500k',
+          '-bufsize', '5000k',
+          '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=25',
+          '-g', '50',
+          '-keyint_min', '50',
+          '-sc_threshold', '0',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ac', '2',
+          '-ar', '48000',
+          '-f', 'flv',
+          target_rtmp
+        ];
+      } else {
+        // Múltiples archivos con recodificación
+        ffmpegArgs = [
+          '-re',
+          '-f', 'concat',
+          '-safe', '0',
+          '-stream_loop', '-1',
+          '-i', inputSource,
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-tune', 'film',
+          '-profile:v', 'high',
+          '-level', '4.1',
+          '-b:v', '2500k',
+          '-maxrate', '3500k',
+          '-bufsize', '5000k',
+          '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=25',
+          '-g', '50',
+          '-keyint_min', '50',
+          '-sc_threshold', '0',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ac', '2',
+          '-ar', '48000',
+          '-f', 'flv',
+          target_rtmp
+        ];
+      }
     }
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
