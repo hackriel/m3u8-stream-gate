@@ -781,7 +781,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Servir archivos estáticos de React en producción
-app.get('*', (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
