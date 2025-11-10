@@ -134,6 +134,6 @@ echo "🎯 Presiona Ctrl+C para detener"
 echo ""
 
 # Iniciar con variables de entorno
-NODE_ENV=production PORT=3001 node simple-server.js
+NODE_ENV=production PORT=3001 node server.js
 
 print_status "✨ Proceso completado"
