@@ -193,8 +193,8 @@ app.post('/api/emit', async (req, res) => {
       ];
       
     } else {
-      // Resolución > 720p → RECODIFICAR a 720p con preset optimizado
-      sendLog(process_id, 'info', `Resolución detectada: ${width}x${height} → Recodificando a 720p30`);
+      // Resolución > 720p → RECODIFICAR a 720p25 optimizado
+      sendLog(process_id, 'info', `Resolución detectada: ${width}x${height} → Recodificando a 720p25 (~2.5Mbps)`);
       
       ffmpegArgs = [
         '-re',
@@ -206,12 +206,12 @@ app.post('/api/emit', async (req, res) => {
         '-tune', 'film',
         '-profile:v', 'high',
         '-level', '4.1',
-        '-b:v', '3500k',
-        '-maxrate', '5000k',
-        '-bufsize', '8000k',
-        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
-        '-g', '60',
-        '-keyint_min', '60',
+        '-b:v', '2500k',
+        '-maxrate', '3500k',
+        '-bufsize', '5000k',
+        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=25',
+        '-g', '50',
+        '-keyint_min', '50',
         '-sc_threshold', '0',
         '-c:a', 'aac',
         '-b:a', '128k',
