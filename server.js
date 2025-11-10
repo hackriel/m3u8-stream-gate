@@ -215,71 +215,55 @@ app.post('/api/emit', async (req, res) => {
 
     emissionStatuses.set(process_id, 'starting');
     
-    // === INTELIGENCIA AUTOMÁTICA DE RESOLUCIÓN ===
-    sendLog(process_id, 'info', `Detectando resolución de entrada...`);
-    const { width, height } = await detectM3U8Resolution(source_m3u8);
+    // === MODO ESTABLE: SIEMPRE RECODIFICAR A 720p25 ===
+    sendLog(process_id, 'info', `Configurando recodificación estable a 720p25 (~2.5Mbps)...`);
     
-    let ffmpegArgs;
-    
-    // Si resolución es <= 720p O no se pudo detectar → COPIA DIRECTA
-    if (height <= 720 || height === 0) {
-      const mode = height === 0 ? 'desconocida (usando copia segura)' : `${width}x${height}`;
-      sendLog(process_id, 'info', `Resolución detectada: ${mode} → Usando COPIA DIRECTA (eficiente)`);
+    const ffmpegArgs = [
+      // Parámetros de entrada con reconexión robusta
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      '-headers', 'Accept: application/vnd.apple.mpegurl,*/*;q=0.8',
+      '-multiple_requests', '1',
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '15',
+      '-reconnect_at_eof', '1',
+      '-timeout', '10000000',
+      '-rw_timeout', '10000000',
+      '-re',
+      '-i', source_m3u8,
       
-      ffmpegArgs = [
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        '-headers', 'Accept: application/vnd.apple.mpegurl,*/*;q=0.8',
-        '-multiple_requests', '1',
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '15',
-        '-reconnect_at_eof', '1',
-        '-timeout', '10000000',
-        '-rw_timeout', '10000000',
-        '-i', source_m3u8,
-        '-re',
-        '-max_delay', '5000000',
-        '-c:v', 'copy',
-        '-c:a', 'copy',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize+no_metadata',
-        '-fflags', '+genpts+flush_packets',
-        '-avoid_negative_ts', 'make_zero',
-        '-use_wallclock_as_timestamps', '1',
-        '-rtmp_live', 'live',
-        '-rtmp_buffer', '5000',
-        target_rtmp
-      ];
+      // Mapeo de streams
+      '-map', '0:v',
+      '-map', '0:a',
       
-    } else {
-      // Resolución > 720p → RECODIFICAR a 720p25 optimizado
-      sendLog(process_id, 'info', `Resolución detectada: ${width}x${height} → Recodificando a 720p25 (~2.5Mbps)`);
+      // Codificación de video: 720p25 estable
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-tune', 'film',
+      '-profile:v', 'high',
+      '-level', '4.1',
+      '-b:v', '2500k',
+      '-maxrate', '3500k',
+      '-bufsize', '5000k',
+      '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=25',
+      '-g', '50',
+      '-keyint_min', '50',
+      '-sc_threshold', '0',
       
-      ffmpegArgs = [
-        '-re',
-        '-i', source_m3u8,
-        '-map', '0:v',
-        '-map', '0:a',
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-tune', 'film',
-        '-profile:v', 'high',
-        '-level', '4.1',
-        '-b:v', '2500k',
-        '-maxrate', '3500k',
-        '-bufsize', '5000k',
-        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=25',
-        '-g', '50',
-        '-keyint_min', '50',
-        '-sc_threshold', '0',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ac', '2',
-        '-ar', '48000',
-        '-f', 'flv',
-        target_rtmp
-      ];
-    }
+      // Codificación de audio: AAC estéreo
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-ac', '2',
+      '-ar', '48000',
+      
+      // Salida RTMP con flags optimizados
+      '-f', 'flv',
+      '-flvflags', 'no_duration_filesize+no_metadata',
+      '-max_delay', '5000000',
+      '-rtmp_live', 'live',
+      '-rtmp_buffer', '5000',
+      target_rtmp
+    ];
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 100)}...`);
