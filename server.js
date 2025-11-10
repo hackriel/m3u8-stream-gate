@@ -88,8 +88,21 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // Variables globales para manejo de múltiples procesos ffmpeg
-const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTime, restartCount }>
+const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTime, target_rtmp }>
 const emissionStatuses = new Map(); // Map<processId, status>
+
+// Función para verificar si un destino RTMP ya está en uso
+const checkRTMPConflict = (target_rtmp, current_process_id) => {
+  for (const [processId, processData] of ffmpegProcesses.entries()) {
+    if (processId !== current_process_id && 
+        processData.target_rtmp === target_rtmp && 
+        processData.process && 
+        !processData.process.killed) {
+      return processId;
+    }
+  }
+  return null;
+};
 
 // Función mejorada para detectar problemas de RTMP
 const detectRTMPIssues = (output, processId) => {
@@ -205,6 +218,21 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
+    // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP
+    const conflictingProcessId = checkRTMPConflict(target_rtmp, process_id);
+    if (conflictingProcessId) {
+      const conflictingProcess = ffmpegProcesses.get(conflictingProcessId);
+      sendLog(process_id, 'error', `⚠️ CONFLICTO: El destino RTMP ya está en uso por Proceso ${conflictingProcessId}`);
+      sendLog(conflictingProcessId, 'warn', `⚠️ Otro proceso (${process_id}) intenta usar el mismo destino RTMP - deteniendo este proceso`);
+      
+      // Detener el proceso conflictivo
+      if (conflictingProcess && conflictingProcess.process && !conflictingProcess.process.killed) {
+        conflictingProcess.process.kill('SIGTERM');
+        ffmpegProcesses.delete(conflictingProcessId);
+        emissionStatuses.set(conflictingProcessId, 'idle');
+      }
+    }
+
     // Si ya hay un proceso corriendo para este ID, detenerlo primero
     const existingProcess = ffmpegProcesses.get(process_id);
     if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
@@ -258,7 +286,8 @@ app.post('/api/emit', async (req, res) => {
     const processInfo = { 
       process: ffmpegProcess, 
       status: 'starting',
-      startTime: Date.now()
+      startTime: Date.now(),
+      target_rtmp: target_rtmp
     };
     ffmpegProcesses.set(process_id, processInfo);
 
@@ -379,6 +408,21 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       });
     }
 
+    // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP
+    const conflictingProcessId = checkRTMPConflict(target_rtmp, process_id);
+    if (conflictingProcessId) {
+      const conflictingProcess = ffmpegProcesses.get(conflictingProcessId);
+      sendLog(process_id, 'error', `⚠️ CONFLICTO: El destino RTMP ya está en uso por Proceso ${conflictingProcessId}`);
+      sendLog(conflictingProcessId, 'warn', `⚠️ Otro proceso (${process_id}) intenta usar el mismo destino RTMP - deteniendo este proceso`);
+      
+      // Detener el proceso conflictivo
+      if (conflictingProcess && conflictingProcess.process && !conflictingProcess.process.killed) {
+        conflictingProcess.process.kill('SIGTERM');
+        ffmpegProcesses.delete(conflictingProcessId);
+        emissionStatuses.set(conflictingProcessId, 'idle');
+      }
+    }
+
     // Si ya hay un proceso corriendo para este ID, detenerlo primero
     const existingProcess = ffmpegProcesses.get(process_id);
     if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
@@ -472,6 +516,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       process: ffmpegProcess, 
       status: 'starting',
       startTime: Date.now(),
+      target_rtmp: target_rtmp,
       cleanupFiles: cleanupFiles.concat(files.map(f => f.path))
     };
     ffmpegProcesses.set(process_id, processInfo);
