@@ -395,7 +395,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     } else {
       // Crear archivo concat para múltiples videos
       const concatFilePath = path.join(__dirname, 'uploads', `concat-${process_id}-${Date.now()}.txt`);
-      const concatContent = files.map(f => `file '${path.basename(f.path)}'`).join('\n');
+      const concatContent = files.map(f => `file '${f.path}'`).join('\n');
       fs.writeFileSync(concatFilePath, concatContent);
       inputSource = concatFilePath;
       cleanupFiles.push(concatFilePath);
@@ -420,10 +420,11 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     } else {
       // Múltiples archivos - usar concat demuxer con loop
       ffmpegArgs = [
+        '-re',
         '-f', 'concat',
         '-safe', '0',
         '-stream_loop', '-1', // Loop infinito de la playlist
-        '-i', inputSource,
+        '-i', path.basename(inputSource), // Usar nombre relativo ya que trabajamos en uploads/
         '-c:v', 'copy',
         '-c:a', 'copy',
         '-f', 'flv',
@@ -582,6 +583,60 @@ app.post('/api/emit/stop', (req, res) => {
   }
 });
 
+// Endpoint para borrar archivos subidos
+app.delete('/api/emit/files', (req, res) => {
+  try {
+    const { process_id = '3' } = req.body;
+    sendLog(process_id, 'info', `Solicitada eliminación de archivos`);
+    
+    // Detener proceso si está activo
+    const processData = ffmpegProcesses.get(process_id);
+    if (processData && processData.process && !processData.process.killed) {
+      processData.process.kill('SIGTERM');
+      ffmpegProcesses.delete(process_id);
+    }
+    
+    // Eliminar archivos del directorio uploads para este proceso
+    const uploadsDir = path.join(__dirname, 'uploads');
+    if (fs.existsSync(uploadsDir)) {
+      const files = fs.readdirSync(uploadsDir);
+      let deletedCount = 0;
+      
+      files.forEach(file => {
+        const filePath = path.join(uploadsDir, file);
+        try {
+          fs.unlinkSync(filePath);
+          deletedCount++;
+          sendLog(process_id, 'info', `Archivo eliminado: ${file}`);
+        } catch (e) {
+          console.error(`Error eliminando archivo ${file}:`, e);
+        }
+      });
+      
+      sendLog(process_id, 'success', `${deletedCount} archivos eliminados`);
+      res.json({ 
+        success: true, 
+        message: `${deletedCount} archivos eliminados`,
+        deletedCount 
+      });
+    } else {
+      res.json({ 
+        success: true, 
+        message: 'No hay archivos para eliminar',
+        deletedCount: 0 
+      });
+    }
+    
+  } catch (error) {
+    const process_id = req.body.process_id || '3';
+    console.error(`❌ Error eliminando archivos [${process_id}]:`, error);
+    res.status(500).json({ 
+      error: 'Error interno del servidor', 
+      details: error.message 
+    });
+  }
+});
+
 // Endpoint para verificar estado
 app.get('/api/status', (req, res) => {
   const { process_id } = req.query;
@@ -599,7 +654,7 @@ app.get('/api/status', (req, res) => {
   } else {
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       const id = i.toString();
       const processData = ffmpegProcesses.get(id);
       allStatuses[id] = {

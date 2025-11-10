@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -62,6 +63,7 @@ export default function EmisorM3U8Panel() {
   
   // Estado específico para el proceso 4 (archivos locales)
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
 
   // Limpieza de caché programada del lado del cliente (4am Costa Rica)
   useEffect(() => {
@@ -537,23 +539,52 @@ export default function EmisorM3U8Panel() {
         reconnectAttempts: 0,
         lastReconnectTime: 0
       });
+      setUploadProgress(0);
       
       try {
-        // Subir archivos al servidor
+        // Subir archivos al servidor con tracking de progreso usando XMLHttpRequest
         const formData = new FormData();
-        uploadedFiles.forEach((file, index) => {
+        uploadedFiles.forEach((file) => {
           formData.append('files', file);
         });
         formData.append('target_rtmp', process.rtmp);
         formData.append('process_id', processIndex.toString());
         
-        const resp = await fetch("/api/emit/files", {
-          method: "POST",
-          body: formData,
+        // Usar XMLHttpRequest para poder trackear progreso
+        const resp = await new Promise<any>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          
+          xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+              const percentComplete = Math.round((e.loaded / e.total) * 100);
+              setUploadProgress(percentComplete);
+              updateProcess(processIndex, {
+                emitMsg: `Subiendo archivos... ${percentComplete}%`
+              });
+            }
+          });
+          
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                resolve(JSON.parse(xhr.responseText));
+              } catch (e) {
+                resolve({ success: true });
+              }
+            } else {
+              reject(new Error(`HTTP ${xhr.status}: ${xhr.statusText}`));
+            }
+          });
+          
+          xhr.addEventListener('error', () => reject(new Error('Network error')));
+          xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
+          
+          xhr.open('POST', '/api/emit/files');
+          xhr.send(formData);
         });
         
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json().catch(() => ({}));
+        setUploadProgress(100);
+        const data = resp;
         
         updateProcess(processIndex, {
           emitStatus: "running",
@@ -693,6 +724,18 @@ export default function EmisorM3U8Panel() {
       stopEmit(processIndex);
     }
     
+    // Para el proceso 4 (archivos locales), borrar archivos del servidor
+    if (processIndex === 3 && uploadedFiles.length > 0) {
+      fetch('/api/emit/files', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ process_id: processIndex.toString() })
+      }).catch((e) => console.error('Error borrando archivos:', e));
+      
+      setUploadedFiles([]);
+      setUploadProgress(0);
+    }
+    
     // Limpiar campos
     updateProcess(processIndex, {
       m3u8: "",
@@ -773,6 +816,15 @@ export default function EmisorM3U8Panel() {
                         </li>
                       ))}
                     </ul>
+                    {uploadProgress > 0 && uploadProgress < 100 && (
+                      <div className="mt-3">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-xs text-muted-foreground">Subiendo...</span>
+                          <span className="text-xs font-semibold text-primary">{uploadProgress}%</span>
+                        </div>
+                        <Progress value={uploadProgress} className="h-2" />
+                      </div>
+                    )}
                   </div>
                 )}
               </>
