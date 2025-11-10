@@ -393,11 +393,12 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       inputSource = files[0].path;
       sendLog(process_id, 'info', `Emitiendo archivo único: ${files[0].originalname}`);
     } else {
-      // Crear archivo concat para múltiples videos
+      // Crear archivo concat para múltiples videos usando rutas relativas
       const concatFilePath = path.join(__dirname, 'uploads', `concat-${process_id}-${Date.now()}.txt`);
-      const concatContent = files.map(f => `file '${f.path}'`).join('\n');
+      // Usar solo el nombre del archivo (basename) ya que ffmpeg trabajará en el directorio uploads
+      const concatContent = files.map(f => `file '${path.basename(f.path)}'`).join('\n');
       fs.writeFileSync(concatFilePath, concatContent);
-      inputSource = concatFilePath;
+      inputSource = path.basename(concatFilePath);
       cleanupFiles.push(concatFilePath);
       sendLog(process_id, 'info', `Creada playlist con ${files.length} archivos`);
     }
@@ -410,7 +411,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       ffmpegArgs = [
         '-re',
         '-stream_loop', '-1', // Loop infinito
-        '-i', inputSource,
+        '-i', path.basename(inputSource),
         '-c:v', 'copy',
         '-c:a', 'copy',
         '-f', 'flv',
@@ -424,7 +425,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-f', 'concat',
         '-safe', '0',
         '-stream_loop', '-1', // Loop infinito de la playlist
-        '-i', path.basename(inputSource), // Usar nombre relativo ya que trabajamos en uploads/
+        '-i', inputSource,
         '-c:v', 'copy',
         '-c:a', 'copy',
         '-f', 'flv',
