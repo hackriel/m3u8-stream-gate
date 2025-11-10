@@ -1,15 +1,13 @@
-import express from 'express';
-import cors from 'cors';
-import { spawn } from 'child_process';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { WebSocketServer } from 'ws';
-import { createServer } from 'http';
-import multer from 'multer';
-import fs from 'fs';
+const express = require('express');
+const cors = require('cors');
+const { spawn } = require('child_process');
+const path = require('path');
+const { WebSocketServer } = require('ws');
+const { createServer } = require('http');
+const multer = require('multer');
+const fs = require('fs');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = __dirname || path.resolve();
 
 // Configurar multer para subida de archivos
 const storage = multer.diskStorage({
@@ -754,5 +752,3 @@ server.listen(PORT, () => {
   console.log(`📋 WebSocket logs disponibles en: ws://localhost:${PORT}/ws`);
   sendLog('system', 'success', `Servidor iniciado en puerto ${PORT}`);
 });
-
-export default app;
