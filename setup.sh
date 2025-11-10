@@ -1,38 +1,47 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Instalación automática - Emisor M3U8 to RTMP"
+echo "🧹 Limpiando instalación anterior..."
+rm -rf node_modules
+rm -f package-lock.json
 
-# Verificar e instalar Node.js 20
-if ! command -v node &> /dev/null || [ "$(node --version | cut -d'v' -f2 | cut -d'.' -f1)" -lt 18 ]; then
-    echo "📦 Instalando Node.js 20..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-    sudo apt-get install -y nodejs
-fi
-
-# Verificar e instalar FFmpeg
-if ! command -v ffmpeg &> /dev/null; then
-    echo "🎥 Instalando FFmpeg..."
-    sudo apt update && sudo apt install -y ffmpeg
-fi
-
-# Limpiar e instalar dependencias
-echo "📚 Instalando dependencias..."
+echo "📦 Limpiando caché de npm..."
 npm cache clean --force
-rm -rf node_modules package-lock.json
+
+echo "📥 Instalando dependencias..."
 npm install
 
-# Construir aplicación
-echo "🔨 Construyendo aplicación..."
-npm run build
+echo "✅ Verificando instalación de paquetes críticos del servidor..."
+if [ -d "node_modules/ws" ]; then
+    echo "  ✓ ws instalado"
+else
+    echo "  ❌ ERROR: ws NO instalado"
+    exit 1
+fi
 
-# Dar permisos
-chmod +x server.js start-server.js 2>/dev/null || true
+if [ -d "node_modules/express" ]; then
+    echo "  ✓ express instalado"
+else
+    echo "  ❌ ERROR: express NO instalado"
+    exit 1
+fi
 
-# Matar procesos en puerto 3001 si existen
-sudo fuser -k 3001/tcp 2>/dev/null || true
+if [ -d "node_modules/multer" ]; then
+    echo "  ✓ multer instalado"
+else
+    echo "  ❌ ERROR: multer NO instalado"
+    exit 1
+fi
 
-echo "✅ ¡Listo! Iniciando servidor en puerto 3001..."
-echo "🌐 Accede desde: http://$(hostname -I | awk '{print $1}'):3001"
+if [ -d "node_modules/cors" ]; then
+    echo "  ✓ cors instalado"
+else
+    echo "  ❌ ERROR: cors NO instalado"
+    exit 1
+fi
 
-NODE_ENV=production PORT=3001 node server.js
+echo ""
+echo "🎉 ¡Instalación completada exitosamente!"
+echo ""
+echo "Para iniciar el servidor, ejecuta:"
+echo "  node server.js"
