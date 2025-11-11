@@ -1034,25 +1034,16 @@ export default function EmisorM3U8Panel() {
               </button>
             </div>
 
-            {process.emitStatus !== "idle" && (
+            {process.emitStatus !== "idle" && process.emitStatus !== 'error' && (
               <div className={`mt-4 p-3 rounded-xl border ${
-                process.emitStatus === 'error' 
-                  ? 'bg-destructive/10 border-destructive/50' 
-                  : process.emitStatus === 'running' 
+                process.emitStatus === 'running' 
                   ? 'bg-primary/10 border-primary/50' 
                   : 'bg-card/50 border-border'
               }`}>
                 <div className="flex items-center gap-2 text-sm">
                   <span className={`inline-flex h-2.5 w-2.5 rounded-full ${getStatusColor(process.emitStatus)} ${process.emitStatus === 'running' ? 'animate-pulse' : ''}`} />
-                  <span className={`${process.emitStatus === 'error' ? 'text-destructive font-semibold' : 'text-foreground'}`}>
-                    {process.emitMsg}
-                  </span>
+                  <span className="text-foreground">{process.emitMsg}</span>
                 </div>
-                {process.failureReason && (
-                  <div className="mt-2 pl-5 text-xs text-muted-foreground">
-                    Tipo: {getFailureLabel(process.failureReason)}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -1101,24 +1092,6 @@ export default function EmisorM3U8Panel() {
                 <span className="text-muted-foreground">Tiempo emitiendo:</span>
                 <span className="font-mono text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
               </div>
-              {process.failureReason && (
-                <div className="mt-3 p-4 rounded-xl bg-destructive/20 border-2 border-destructive shadow-lg animate-pulse">
-                  <div className="flex items-start gap-3">
-                    <span className="text-2xl">{getFailureIcon(process.failureReason)}</span>
-                    <div className="flex-1">
-                      <p className="text-base font-bold text-destructive mb-2">
-                        {getFailureLabel(process.failureReason)}
-                      </p>
-                      <p className="text-sm text-foreground font-medium mb-1">
-                        {process.failureDetails}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        La emisión se detuvo automáticamente. Revisa la configuración y vuelve a intentar.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </section>
@@ -1232,6 +1205,9 @@ export default function EmisorM3U8Panel() {
     );
   };
 
+  // Proceso activo actual
+  const activeProcess = processes[parseInt(activeTab)];
+
   return (
     <div className="min-h-screen w-full bg-background text-foreground p-6">
       <div className="max-w-6xl mx-auto">
@@ -1243,6 +1219,33 @@ export default function EmisorM3U8Panel() {
             Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/4</span>
           </div>
         </header>
+
+        {/* Sistema de alertas global - solo proceso activo */}
+        {activeProcess.failureReason && (
+          <div className="mb-6 bg-destructive/10 border-2 border-destructive rounded-xl p-5 shadow-lg animate-in fade-in duration-300">
+            <div className="flex items-start gap-4">
+              <span className="text-3xl flex-shrink-0">{getFailureIcon(activeProcess.failureReason)}</span>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-lg font-bold text-destructive mb-2">
+                  {getFailureLabel(activeProcess.failureReason)} - Proceso {parseInt(activeTab) + 1}
+                </h3>
+                <p className="text-sm text-foreground font-medium mb-2">
+                  {activeProcess.failureDetails}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  La emisión se detuvo automáticamente. Revisa la configuración y vuelve a intentar.
+                </p>
+              </div>
+              <button
+                onClick={() => updateProcess(parseInt(activeTab), { failureReason: undefined, failureDetails: undefined })}
+                className="text-muted-foreground hover:text-foreground transition-colors text-xl leading-none flex-shrink-0"
+                aria-label="Cerrar alerta"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-4 mb-6">
