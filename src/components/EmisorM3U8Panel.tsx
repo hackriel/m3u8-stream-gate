@@ -40,7 +40,13 @@ export default function EmisorM3U8Panel() {
   const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
-  const [globalHealthPoints, setGlobalHealthPoints] = useState<Array<{ t: number; up: number }>>([]);
+  const [globalHealthPoints, setGlobalHealthPoints] = useState<Array<{ 
+    t: number; 
+    p1: number; 
+    p2: number; 
+    p3: number; 
+    p4: number;
+  }>>([]);
 
   // Estado para 4 procesos independientes
   const [processes, setProcesses] = useState<EmissionProcess[]>(() => {
@@ -287,20 +293,18 @@ export default function EmisorM3U8Panel() {
     };
   }, []);
 
-  // Cada 5s registramos un punto de salud GLOBAL (combinando todos los procesos)
+  // Cada 5s registramos un punto de salud INDIVIDUAL para cada proceso
   useEffect(() => {
     const id = setInterval(() => {
-      let totalUp = 0;
-      let totalActive = 0;
+      const uptimeValues = [0, 0, 0, 0];
       
       processesRef.current.forEach((process, index) => {
         const video = videoRefs[index].current;
         const up = video && video.readyState >= 2 && video.networkState !== 3 ? 1 : 0;
         
-        // Solo contar procesos que están emitiendo
+        // Calcular porcentaje individual de uptime (100 = arriba, 0 = caído)
         if (process.isEmitiendo) {
-          totalActive++;
-          totalUp += up;
+          uptimeValues[index] = up * 100;
           
           // Lógica de reconexión simple
           if (up === 0 && process.emitStatus === 'running') {
@@ -359,15 +363,21 @@ export default function EmisorM3U8Panel() {
               failureDetails: undefined
             });
           }
+        } else {
+          // Si no está emitiendo, valor null para que no se dibuje la línea
+          uptimeValues[index] = 0;
         }
       });
       
-      // Calcular porcentaje de uptime global (100 = todos arriba, 0 = todos caídos)
-      const uptimePercentage = totalActive > 0 ? (totalUp / totalActive) * 100 : 0;
-      
       setGlobalHealthPoints(prev => [
         ...prev.slice(-119),
-        { t: Math.floor(Date.now() / 1000), up: uptimePercentage }
+        { 
+          t: Math.floor(Date.now() / 1000), 
+          p1: uptimeValues[0],
+          p2: uptimeValues[1],
+          p3: uptimeValues[2],
+          p4: uptimeValues[3]
+        }
       ]);
     }, 5000);
     return () => clearInterval(id);
@@ -1301,10 +1311,10 @@ export default function EmisorM3U8Panel() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={globalHealthPoints.map((p) => ({
                   name: new Date(p.t * 1000).toLocaleTimeString(),
-                  "Proceso 1": processes[0].isEmitiendo ? p.up : 0,
-                  "Proceso 2": processes[1].isEmitiendo ? p.up : 0,
-                  "Proceso 3": processes[2].isEmitiendo ? p.up : 0,
-                  "Proceso 4": processes[3].isEmitiendo ? p.up : 0,
+                  "Proceso 1": p.p1,
+                  "Proceso 2": p.p2,
+                  "Proceso 3": p.p3,
+                  "Proceso 4": p.p4,
                 }))} margin={{ left: 6, right: 16, top: 10, bottom: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
                   <XAxis 
@@ -1332,9 +1342,10 @@ export default function EmisorM3U8Panel() {
                       type="monotone" 
                       dataKey="Proceso 1" 
                       dot={false} 
-                      strokeWidth={2.5} 
+                      strokeWidth={3} 
                       stroke={getProcessColor(0).stroke}
                       strokeLinecap="round"
+                      strokeDasharray="0"
                     />
                   )}
                   {processes[1].isEmitiendo && (
@@ -1342,9 +1353,10 @@ export default function EmisorM3U8Panel() {
                       type="monotone" 
                       dataKey="Proceso 2" 
                       dot={false} 
-                      strokeWidth={2.5} 
+                      strokeWidth={3} 
                       stroke={getProcessColor(1).stroke}
                       strokeLinecap="round"
+                      strokeDasharray="8 4"
                     />
                   )}
                   {processes[2].isEmitiendo && (
@@ -1352,9 +1364,10 @@ export default function EmisorM3U8Panel() {
                       type="monotone" 
                       dataKey="Proceso 3" 
                       dot={false} 
-                      strokeWidth={2.5} 
+                      strokeWidth={3} 
                       stroke={getProcessColor(2).stroke}
                       strokeLinecap="round"
+                      strokeDasharray="2 2"
                     />
                   )}
                   {processes[3].isEmitiendo && (
@@ -1362,9 +1375,10 @@ export default function EmisorM3U8Panel() {
                       type="monotone" 
                       dataKey="Proceso 4" 
                       dot={false} 
-                      strokeWidth={2.5} 
+                      strokeWidth={3} 
                       stroke={getProcessColor(3).stroke}
                       strokeLinecap="round"
+                      strokeDasharray="12 2 2 2"
                     />
                   )}
                 </LineChart>
@@ -1375,16 +1389,27 @@ export default function EmisorM3U8Panel() {
               </div>
             )}
           </div>
-          {/* Leyenda de colores */}
+          {/* Leyenda de colores con estilos de línea */}
           <div className="flex gap-6 justify-center mt-4 flex-wrap">
-            {processes.map((proc, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <span className={`inline-flex h-3 w-3 rounded-full ${getProcessColor(idx).bg}`} />
-                <span className={`text-xs font-medium ${proc.isEmitiendo ? getProcessColor(idx).text : 'text-muted-foreground'}`}>
-                  {getProcessColor(idx).name}
-                </span>
-              </div>
-            ))}
+            {processes.map((proc, idx) => {
+              const lineStyles = [
+                { display: "━━━━", desc: "Sólida" },
+                { display: "╍╍╍╍", desc: "Guiones largos" },
+                { display: "┄┄┄┄", desc: "Puntos" },
+                { display: "╍┄┄╍", desc: "Guión-punto" }
+              ];
+              return (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className={`inline-flex h-3 w-3 rounded-full ${getProcessColor(idx).bg}`} />
+                  <span className={`text-xs font-medium ${proc.isEmitiendo ? getProcessColor(idx).text : 'text-muted-foreground'}`}>
+                    {getProcessColor(idx).name}
+                  </span>
+                  <span className="text-xs text-muted-foreground ml-1">
+                    {lineStyles[idx].display}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </section>
 
