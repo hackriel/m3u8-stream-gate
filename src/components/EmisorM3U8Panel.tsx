@@ -700,10 +700,18 @@ export default function EmisorM3U8Panel() {
           }, 2000);
         }
       } catch (e: any) {
+        const errorMsg = `No se pudo iniciar la emisión: ${e.message}`;
+        
+        toast.error(`❌ Error en Proceso ${processIndex + 1} (Archivos)`, {
+          description: errorMsg,
+        });
+        
         updateProcess(processIndex, {
           emitStatus: "error",
-          emitMsg: `No se pudo iniciar la emisión: ${e.message}`,
-          isEmitiendo: false
+          emitMsg: errorMsg,
+          isEmitiendo: false,
+          failureReason: "server",
+          failureDetails: `Error al procesar archivos: ${e.message}`
         });
       }
       return;
@@ -761,10 +769,18 @@ export default function EmisorM3U8Panel() {
         }, 2000);
       }
     } catch (e: any) {
+      const errorMsg = `No se pudo iniciar la emisión: ${e.message}`;
+      
+      toast.error(`❌ Error en Proceso ${processIndex + 1}`, {
+        description: errorMsg,
+      });
+      
       updateProcess(processIndex, {
         emitStatus: "error",
-        emitMsg: `No se pudo iniciar la emisión: ${e.message}`,
-        isEmitiendo: false
+        emitMsg: errorMsg,
+        isEmitiendo: false,
+        failureReason: "server",
+        failureDetails: `Error al iniciar stream M3U8: ${e.message}`
       });
     }
   }
