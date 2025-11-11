@@ -177,7 +177,59 @@ export default function EmisorM3U8Panel() {
     processesRef.current = processes;
   }, [processes]);
 
-  // WebSocket para recibir notificaciones de fallo
+  // Verificación periódica del estado real del proceso en el servidor
+  useEffect(() => {
+    const checkProcessStatus = async () => {
+      for (let i = 0; i < 4; i++) {
+        const process = processesRef.current[i];
+        
+        // Solo verificar procesos que están marcados como emitiendo
+        if (process.isEmitiendo) {
+          try {
+            const resp = await fetch(`/api/emit/status?process_id=${i}`);
+            if (resp.ok) {
+              const data = await resp.json();
+              
+              // Si el servidor dice que NO está emitiendo pero nosotros creemos que sí,
+              // entonces realmente se detuvo
+              if (!data.isEmitting && process.isEmitiendo) {
+                console.log(`⚠️ Proceso ${i + 1} se detuvo en el servidor`);
+                updateProcess(i, {
+                  isEmitiendo: false,
+                  emitStatus: 'error',
+                  failureReason: data.failureReason || 'unknown',
+                  failureDetails: data.failureDetails || 'El proceso se detuvo inesperadamente'
+                });
+              }
+              // Si el servidor dice que SÍ está emitiendo y estamos en error, corregir
+              else if (data.isEmitting && process.emitStatus === 'error') {
+                console.log(`✅ Proceso ${i + 1} sigue emitiendo correctamente`);
+                updateProcess(i, {
+                  isEmitiendo: true,
+                  emitStatus: 'running',
+                  emitMsg: 'Emitiendo correctamente',
+                  failureReason: undefined,
+                  failureDetails: undefined
+                });
+              }
+            }
+          } catch (e) {
+            console.error(`Error verificando estado del proceso ${i + 1}:`, e);
+          }
+        }
+      }
+    };
+    
+    // Verificar cada 10 segundos
+    const interval = setInterval(checkProcessStatus, 10000);
+    
+    // Verificar inmediatamente al montar
+    checkProcessStatus();
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  // WebSocket para recibir notificaciones de fallo (solo para alertas, no cambia estado definitivo)
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -198,7 +250,7 @@ export default function EmisorM3U8Panel() {
           const failureType = data.failureType; // 'source', 'rtmp', 'server'
           const details = data.details;
           
-          console.log(`❌ Fallo detectado en proceso ${processIndex + 1}:`, failureType, details);
+          console.log(`❌ Fallo reportado en proceso ${processIndex + 1}:`, failureType, details);
           
           const failureMessages = {
             source: '🔗 Fallo en URL Fuente',
@@ -206,16 +258,15 @@ export default function EmisorM3U8Panel() {
             server: '🖥️ Fallo en Servidor'
           };
           
-          // Mostrar toast de error
-          toast.error(`❌ Error en Proceso ${processIndex + 1}`, {
-            description: `${failureMessages[failureType as keyof typeof failureMessages] || 'Error desconocido'}: ${details}`,
+          // Mostrar toast de advertencia (el estado se verificará con la consulta periódica)
+          toast.warning(`⚠️ Advertencia en Proceso ${processIndex + 1}`, {
+            description: `${failureMessages[failureType as keyof typeof failureMessages] || 'Advertencia'}: ${details}. Verificando estado...`,
           });
           
+          // Marcar advertencia pero no detener inmediatamente
           updateProcess(processIndex, {
             failureReason: failureType,
-            failureDetails: details,
-            emitStatus: 'error',
-            isEmitiendo: false
+            failureDetails: details
           });
         }
       } catch (e) {
