@@ -910,11 +910,33 @@ export default function EmisorM3U8Panel() {
 
   const getFailureLabel = (failureType?: string) => {
     switch (failureType) {
-      case "source": return "Fallo en URL Fuente";
-      case "rtmp": return "Fallo en Destino RTMP";
-      case "server": return "Fallo en Servidor";
-      default: return "Error desconocido";
+      case "source": return "Error de Conexión con la Fuente";
+      case "rtmp": return "Error de Conexión RTMP";
+      case "server": return "Error del Servidor de Emisión";
+      default: return "Error de Emisión";
     }
+  };
+
+  const getFailureDescription = (failureType?: string, failureDetails?: string) => {
+    if (failureDetails) return failureDetails;
+    
+    switch (failureType) {
+      case "source": return "No se pudo conectar con la URL de origen. Verifica que la URL sea correcta y esté accesible.";
+      case "rtmp": return "No se pudo establecer conexión con el servidor RTMP. Verifica la URL RTMP y las credenciales.";
+      case "server": return "El servidor de emisión encontró un problema inesperado. Intenta reiniciar la emisión.";
+      default: return "Ocurrió un error durante la emisión. Revisa la configuración e intenta nuevamente.";
+    }
+  };
+
+  // Colores únicos para cada proceso
+  const getProcessColor = (processIndex: number) => {
+    const colors = [
+      { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "Proceso 1" },
+      { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Proceso 2" },
+      { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "Proceso 3" },
+      { bg: "bg-red-500", text: "text-red-500", stroke: "#ef4444", name: "Proceso 4" }
+    ];
+    return colors[processIndex];
   };
 
   // Función para renderizar un tab de proceso
@@ -1097,7 +1119,7 @@ export default function EmisorM3U8Panel() {
         </section>
 
         {/* Resumen del proceso */}
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
             <h3 className="text-base font-medium mb-4 text-accent">📈 Resumen - Proceso {processIndex + 1}</h3>
             <ul className="space-y-3 text-sm">
@@ -1121,84 +1143,15 @@ export default function EmisorM3U8Panel() {
                 <span className="text-muted-foreground">Reconexiones:</span>
                 <span className="text-foreground font-semibold">{process.reconnectAttempts}/3</span>
               </li>
-            </ul>
-            {process.failureReason && (
-              <div className="mt-4 p-4 rounded-xl bg-destructive/20 border-2 border-destructive shadow-lg">
-                <div className="flex items-start gap-2">
-                  <span className="text-xl">{getFailureIcon(process.failureReason)}</span>
-                  <div className="flex-1">
-                    <p className="text-sm font-bold text-destructive mb-1">
-                      {getFailureLabel(process.failureReason)}
-                    </p>
-                    <p className="text-xs text-foreground font-medium leading-tight">
-                      {process.failureDetails}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 col-span-2 transition-all duration-300 hover:shadow-xl">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-base font-medium text-accent">📊 Monitor de Rendimiento del Servidor</h3>
-              <span className="text-xs text-muted-foreground">Combinado de todos los procesos activos</span>
-            </div>
-            <p className="text-xs text-muted-foreground mb-2">
-              {processes.filter(p => p.isEmitiendo).length > 0 
-                ? `${processes.filter(p => p.isEmitiendo).length} proceso(s) activo(s) - Uptime combinado en tiempo real`
-                : "Ningún proceso activo - Gráfico se actualizará cuando inicies emisión"}
-            </p>
-            <div className="h-48">
-              {globalHealthPoints.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={globalHealthPoints.map((p) => ({
-                    name: new Date(p.t * 1000).toLocaleTimeString(),
-                    Uptime: p.up,
-                  }))} margin={{ left: 6, right: 16, top: 10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                    <XAxis 
-                      dataKey="name" 
-                      tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} 
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis 
-                      domain={[0, 100]} 
-                      tickFormatter={(v) => `${v}%`} 
-                      width={40} 
-                      tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} 
-                    />
-                    <Tooltip 
-                      formatter={(v) => [`${Number(v).toFixed(1)}%`, "Uptime"]} 
-                      contentStyle={{ 
-                        backgroundColor: "hsl(var(--card))", 
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "0.75rem",
-                        color: "hsl(var(--foreground))"
-                      }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="Uptime" 
-                      dot={false} 
-                      strokeWidth={2} 
-                      stroke="hsl(var(--primary))"
-                      strokeLinecap="round"
-                      fill="url(#uptimeGradient)"
-                    />
-                    <defs>
-                      <linearGradient id="uptimeGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  <span className="text-sm">📡 Esperando datos de rendimiento global...</span>
-                </div>
+              {process.failureReason && (
+                <li className="flex justify-between">
+                  <span className="text-muted-foreground">Tipo de fallo:</span>
+                  <span className="text-destructive font-semibold flex items-center gap-1">
+                    {getFailureIcon(process.failureReason)} {getFailureLabel(process.failureReason)}
+                  </span>
+                </li>
               )}
-            </div>
+            </ul>
           </div>
         </section>
       </div>
@@ -1230,7 +1183,7 @@ export default function EmisorM3U8Panel() {
                   {getFailureLabel(activeProcess.failureReason)} - Proceso {parseInt(activeTab) + 1}
                 </h3>
                 <p className="text-sm text-foreground font-medium mb-2">
-                  {activeProcess.failureDetails}
+                  {getFailureDescription(activeProcess.failureReason, activeProcess.failureDetails)}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   La emisión se detuvo automáticamente. Revisa la configuración y vuelve a intentar.
@@ -1250,19 +1203,19 @@ export default function EmisorM3U8Panel() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-4 mb-6">
             <TabsTrigger value="0" className="flex items-center gap-2">
-              <span className={`inline-flex h-2 w-2 rounded-full ${processes[0].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[0].isEmitiendo ? getProcessColor(0).bg + " animate-pulse" : "bg-muted"}`} />
               Proceso 1
             </TabsTrigger>
             <TabsTrigger value="1" className="flex items-center gap-2">
-              <span className={`inline-flex h-2 w-2 rounded-full ${processes[1].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[1].isEmitiendo ? getProcessColor(1).bg + " animate-pulse" : "bg-muted"}`} />
               Proceso 2
             </TabsTrigger>
             <TabsTrigger value="2" className="flex items-center gap-2">
-              <span className={`inline-flex h-2 w-2 rounded-full ${processes[2].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[2].isEmitiendo ? getProcessColor(2).bg + " animate-pulse" : "bg-muted"}`} />
               Proceso 3
             </TabsTrigger>
             <TabsTrigger value="3" className="flex items-center gap-2">
-              <span className={`inline-flex h-2 w-2 rounded-full ${processes[3].isEmitiendo ? "bg-status-live animate-pulse" : "bg-status-idle"}`} />
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[3].isEmitiendo ? getProcessColor(3).bg + " animate-pulse" : "bg-muted"}`} />
               Archivos
             </TabsTrigger>
           </TabsList>
@@ -1284,6 +1237,105 @@ export default function EmisorM3U8Panel() {
           </TabsContent>
         </Tabs>
 
+        {/* Monitor de Rendimiento Global - Siempre visible */}
+        <section className="mt-8 bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-broadcast-border/50">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-medium text-accent">📊 Monitor de Rendimiento Global</h3>
+            <p className="text-xs text-muted-foreground">
+              {processes.filter(p => p.isEmitiendo).length} proceso(s) activo(s) - Uptime combinado en tiempo real
+            </p>
+          </div>
+          <div className="h-64">
+            {globalHealthPoints.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={globalHealthPoints.map((p) => ({
+                  name: new Date(p.t * 1000).toLocaleTimeString(),
+                  "Proceso 1": processes[0].isEmitiendo ? p.up : 0,
+                  "Proceso 2": processes[1].isEmitiendo ? p.up : 0,
+                  "Proceso 3": processes[2].isEmitiendo ? p.up : 0,
+                  "Proceso 4": processes[3].isEmitiendo ? p.up : 0,
+                }))} margin={{ left: 6, right: 16, top: 10, bottom: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+                  <XAxis 
+                    dataKey="name" 
+                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} 
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis 
+                    domain={[0, 100]} 
+                    tickFormatter={(v) => `${v}%`} 
+                    width={40} 
+                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} 
+                  />
+                  <Tooltip 
+                    formatter={(v) => [`${Number(v).toFixed(1)}%`, ""]} 
+                    contentStyle={{ 
+                      backgroundColor: "hsl(var(--card))", 
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "0.75rem",
+                      color: "hsl(var(--foreground))"
+                    }}
+                  />
+                  {processes[0].isEmitiendo && (
+                    <Line 
+                      type="monotone" 
+                      dataKey="Proceso 1" 
+                      dot={false} 
+                      strokeWidth={2.5} 
+                      stroke={getProcessColor(0).stroke}
+                      strokeLinecap="round"
+                    />
+                  )}
+                  {processes[1].isEmitiendo && (
+                    <Line 
+                      type="monotone" 
+                      dataKey="Proceso 2" 
+                      dot={false} 
+                      strokeWidth={2.5} 
+                      stroke={getProcessColor(1).stroke}
+                      strokeLinecap="round"
+                    />
+                  )}
+                  {processes[2].isEmitiendo && (
+                    <Line 
+                      type="monotone" 
+                      dataKey="Proceso 3" 
+                      dot={false} 
+                      strokeWidth={2.5} 
+                      stroke={getProcessColor(2).stroke}
+                      strokeLinecap="round"
+                    />
+                  )}
+                  {processes[3].isEmitiendo && (
+                    <Line 
+                      type="monotone" 
+                      dataKey="Proceso 4" 
+                      dot={false} 
+                      strokeWidth={2.5} 
+                      stroke={getProcessColor(3).stroke}
+                      strokeLinecap="round"
+                    />
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                <span className="text-sm">📡 Esperando datos de rendimiento...</span>
+              </div>
+            )}
+          </div>
+          {/* Leyenda de colores */}
+          <div className="flex gap-6 justify-center mt-4 flex-wrap">
+            {processes.map((proc, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <span className={`inline-flex h-3 w-3 rounded-full ${getProcessColor(idx).bg}`} />
+                <span className={`text-xs font-medium ${proc.isEmitiendo ? getProcessColor(idx).text : 'text-muted-foreground'}`}>
+                  {getProcessColor(idx).name}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
 
         <footer className="mt-10 text-xs text-muted-foreground space-y-4">
           <div className="bg-card/30 border border-border rounded-xl p-4">
