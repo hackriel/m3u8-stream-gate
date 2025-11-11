@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/hooks/use-toast";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -35,6 +36,7 @@ interface EmissionProcess {
 }
 
 export default function EmisorM3U8Panel() {
+  const { toast } = useToast();
   const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
   const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
@@ -199,6 +201,19 @@ export default function EmisorM3U8Panel() {
           
           console.log(`❌ Fallo detectado en proceso ${processIndex + 1}:`, failureType, details);
           
+          const failureMessages = {
+            source: '🔗 Fallo en URL Fuente',
+            rtmp: '📡 Fallo en Destino RTMP',
+            server: '🖥️ Fallo en Servidor'
+          };
+          
+          // Mostrar toast de error
+          toast({
+            title: `❌ Error en Proceso ${processIndex + 1}`,
+            description: `${failureMessages[failureType as keyof typeof failureMessages] || 'Error desconocido'}: ${details}`,
+            variant: "destructive",
+          });
+          
           updateProcess(processIndex, {
             failureReason: failureType,
             failureDetails: details,
@@ -256,20 +271,50 @@ export default function EmisorM3U8Panel() {
                 emitMsg: `Verificando conexión... (${process.reconnectAttempts + 1}/${maxAttempts})`
               });
               
+              // Notificar al usuario
+              if (process.reconnectAttempts === 0) {
+                toast({
+                  title: `⚠️ Proceso ${index + 1}: Señal perdida`,
+                  description: `Intentando reconectar... (1/${maxAttempts})`,
+                  variant: "default",
+                });
+              }
+              
               const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
               if (previewUrl) {
                 setTimeout(() => loadPreview(previewUrl, index), 5000);
               }
             } else if (process.reconnectAttempts >= maxAttempts) {
+              const errorMsg = "Stream caído - máximo de reconexiones alcanzado";
               updateProcess(index, {
-                emitMsg: "Stream caído - máximo de reconexiones alcanzado"
+                emitMsg: errorMsg,
+                emitStatus: 'error',
+                failureReason: 'source',
+                failureDetails: 'La señal se perdió y no pudo recuperarse automáticamente'
+              });
+              
+              // Notificar fallo definitivo
+              toast({
+                title: `❌ Proceso ${index + 1}: Fallo de conexión`,
+                description: errorMsg,
+                variant: "destructive",
               });
             }
           } else if (up === 1 && process.reconnectAttempts > 0) {
             console.log(`✅ Proceso ${index + 1}: Stream recuperado después de ${process.reconnectAttempts} intentos`);
+            
+            // Notificar recuperación exitosa
+            toast({
+              title: `✅ Proceso ${index + 1}: Señal recuperada`,
+              description: `Conexión restablecida después de ${process.reconnectAttempts} intentos`,
+              variant: "default",
+            });
+            
             updateProcess(index, {
               reconnectAttempts: 0,
-              emitMsg: process.emitStatus === 'running' ? "Emitiendo correctamente" : process.emitMsg
+              emitMsg: process.emitStatus === 'running' ? "Emitiendo correctamente" : process.emitMsg,
+              failureReason: undefined,
+              failureDetails: undefined
             });
           }
         }
@@ -983,11 +1028,24 @@ export default function EmisorM3U8Panel() {
             </div>
 
             {process.emitStatus !== "idle" && (
-              <div className="mt-4 p-3 rounded-xl bg-card/50 border border-border">
+              <div className={`mt-4 p-3 rounded-xl border ${
+                process.emitStatus === 'error' 
+                  ? 'bg-destructive/10 border-destructive/50' 
+                  : process.emitStatus === 'running' 
+                  ? 'bg-primary/10 border-primary/50' 
+                  : 'bg-card/50 border-border'
+              }`}>
                 <div className="flex items-center gap-2 text-sm">
-                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${getStatusColor(process.emitStatus)}`} />
-                  <span className="text-foreground">{process.emitMsg}</span>
+                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${getStatusColor(process.emitStatus)} ${process.emitStatus === 'running' ? 'animate-pulse' : ''}`} />
+                  <span className={`${process.emitStatus === 'error' ? 'text-destructive font-semibold' : 'text-foreground'}`}>
+                    {process.emitMsg}
+                  </span>
                 </div>
+                {process.failureReason && (
+                  <div className="mt-2 pl-5 text-xs text-muted-foreground">
+                    Tipo: {getFailureLabel(process.failureReason)}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1037,15 +1095,18 @@ export default function EmisorM3U8Panel() {
                 <span className="font-mono text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
               </div>
               {process.failureReason && (
-                <div className="mt-3 p-3 rounded-xl bg-destructive/10 border border-destructive/30">
-                  <div className="flex items-start gap-2">
-                    <span className="text-lg">{getFailureIcon(process.failureReason)}</span>
+                <div className="mt-3 p-4 rounded-xl bg-destructive/20 border-2 border-destructive shadow-lg animate-pulse">
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl">{getFailureIcon(process.failureReason)}</span>
                     <div className="flex-1">
-                      <p className="text-sm font-semibold text-destructive mb-1">
+                      <p className="text-base font-bold text-destructive mb-2">
                         {getFailureLabel(process.failureReason)}
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-sm text-foreground font-medium mb-1">
                         {process.failureDetails}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        La emisión se detuvo automáticamente. Revisa la configuración y vuelve a intentar.
                       </p>
                     </div>
                   </div>
@@ -1082,14 +1143,14 @@ export default function EmisorM3U8Panel() {
               </li>
             </ul>
             {process.failureReason && (
-              <div className="mt-4 p-3 rounded-xl bg-destructive/10 border border-destructive/30">
+              <div className="mt-4 p-4 rounded-xl bg-destructive/20 border-2 border-destructive shadow-lg">
                 <div className="flex items-start gap-2">
-                  <span className="text-base">{getFailureIcon(process.failureReason)}</span>
+                  <span className="text-xl">{getFailureIcon(process.failureReason)}</span>
                   <div className="flex-1">
-                    <p className="text-xs font-semibold text-destructive mb-1">
+                    <p className="text-sm font-bold text-destructive mb-1">
                       {getFailureLabel(process.failureReason)}
                     </p>
-                    <p className="text-[10px] text-muted-foreground leading-tight">
+                    <p className="text-xs text-foreground font-medium leading-tight">
                       {process.failureDetails}
                     </p>
                   </div>
