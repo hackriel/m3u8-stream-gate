@@ -3,7 +3,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -36,7 +36,6 @@ interface EmissionProcess {
 }
 
 export default function EmisorM3U8Panel() {
-  const { toast } = useToast();
   const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
   const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
@@ -208,10 +207,8 @@ export default function EmisorM3U8Panel() {
           };
           
           // Mostrar toast de error
-          toast({
-            title: `❌ Error en Proceso ${processIndex + 1}`,
+          toast.error(`❌ Error en Proceso ${processIndex + 1}`, {
             description: `${failureMessages[failureType as keyof typeof failureMessages] || 'Error desconocido'}: ${details}`,
-            variant: "destructive",
           });
           
           updateProcess(processIndex, {
@@ -273,10 +270,8 @@ export default function EmisorM3U8Panel() {
               
               // Notificar al usuario
               if (process.reconnectAttempts === 0) {
-                toast({
-                  title: `⚠️ Proceso ${index + 1}: Señal perdida`,
+                toast.warning(`⚠️ Proceso ${index + 1}: Señal perdida`, {
                   description: `Intentando reconectar... (1/${maxAttempts})`,
-                  variant: "default",
                 });
               }
               
@@ -294,20 +289,16 @@ export default function EmisorM3U8Panel() {
               });
               
               // Notificar fallo definitivo
-              toast({
-                title: `❌ Proceso ${index + 1}: Fallo de conexión`,
+              toast.error(`❌ Proceso ${index + 1}: Fallo de conexión`, {
                 description: errorMsg,
-                variant: "destructive",
               });
             }
           } else if (up === 1 && process.reconnectAttempts > 0) {
             console.log(`✅ Proceso ${index + 1}: Stream recuperado después de ${process.reconnectAttempts} intentos`);
             
             // Notificar recuperación exitosa
-            toast({
-              title: `✅ Proceso ${index + 1}: Señal recuperada`,
+            toast.success(`✅ Proceso ${index + 1}: Señal recuperada`, {
               description: `Conexión restablecida después de ${process.reconnectAttempts} intentos`,
-              variant: "default",
             });
             
             updateProcess(index, {
