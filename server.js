@@ -82,6 +82,30 @@ const sendLog = (processId, level, message, details = null) => {
   });
 };
 
+// Función para enviar notificación de fallo específico
+const sendFailureNotification = (processId, failureType, details) => {
+  const failureData = {
+    type: 'failure',
+    processId,
+    failureType, // 'source', 'rtmp', 'server'
+    timestamp: Date.now(),
+    details
+  };
+  
+  const message = JSON.stringify(failureData);
+  
+  connectedClients.forEach((client) => {
+    if (client.readyState === 1) {
+      try {
+        client.send(message);
+      } catch (e) {
+        console.error('Error enviando notificación de fallo:', e);
+        connectedClients.delete(client);
+      }
+    }
+  });
+};
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -104,37 +128,54 @@ const checkRTMPConflict = (target_rtmp, current_process_id) => {
   return null;
 };
 
-// Función mejorada para detectar problemas de RTMP
-const detectRTMPIssues = (output, processId) => {
-  const issues = [];
-  
-  if (output.includes('Connection to tcp://') && output.includes('failed')) {
-    issues.push('Error de conexión TCP');
-  }
-  if (output.includes('RTMP handshake failed')) {
-    issues.push('Fallo en handshake RTMP');
-  }
-  if (output.includes('Server rejected our application')) {
-    issues.push('Servidor RTMP rechazó la aplicación');
-  }
-  if (output.includes('Stream key invalid')) {
-    issues.push('Clave de stream inválida');
-  }
-  if (output.includes('Bandwidth limit exceeded')) {
-    issues.push('Límite de ancho de banda excedido');
-  }
-  if (output.includes('Connection reset by peer')) {
-    issues.push('Conexión resetteada por el servidor');
-  }
-  if (output.includes('I/O error')) {
-    issues.push('Error de entrada/salida');
+// Función mejorada para detectar y categorizar problemas
+const detectAndCategorizeError = (output, processId) => {
+  // Detectar errores de fuente M3U8
+  if (output.includes('Invalid data found') || 
+      output.includes('Server returned 404') ||
+      output.includes('Server returned 403') ||
+      output.includes('Server returned 5') ||
+      output.includes('Connection refused') && output.includes('http')) {
+    const reason = output.includes('404') ? 'URL Fuente M3U8 no encontrada (404)' :
+                   output.includes('403') ? 'URL Fuente M3U8 prohibida (403)' :
+                   output.includes('Invalid data') ? 'URL Fuente M3U8 inválida o corrupta' :
+                   'URL Fuente M3U8 no accesible';
+    sendLog(processId, 'error', `ERROR DE FUENTE: ${reason}`);
+    sendFailureNotification(processId, 'source', reason);
+    return true;
   }
   
-  issues.forEach(issue => {
-    sendLog(processId, 'error', `RTMP Issue: ${issue}`, { output: output.substring(0, 200) });
-  });
+  // Detectar errores de destino RTMP
+  if (output.includes('Connection to tcp://') && output.includes('failed') ||
+      output.includes('RTMP handshake failed') ||
+      output.includes('rtmp://') && output.includes('failed') ||
+      output.includes('Server rejected') ||
+      output.includes('Connection reset by peer') ||
+      output.includes('Unable to publish')) {
+    const reason = output.includes('Connection to tcp://') && output.includes('failed') ? 'Destino RTMP no responde o URL incorrecta' :
+                   output.includes('RTMP handshake failed') ? 'Fallo en handshake RTMP (verificar URL)' :
+                   output.includes('Server rejected') ? 'Servidor RTMP rechazó la conexión' :
+                   output.includes('Connection reset') ? 'Conexión RTMP resetteada por el servidor' :
+                   'No se pudo publicar al destino RTMP';
+    sendLog(processId, 'error', `ERROR DE RTMP: ${reason}`);
+    sendFailureNotification(processId, 'rtmp', reason);
+    return true;
+  }
   
-  return issues.length > 0;
+  // Detectar errores del servidor/FFmpeg
+  if (output.includes('Cannot allocate memory') ||
+      output.includes('Killed') ||
+      output.includes('Segmentation fault') ||
+      output.includes('out of memory')) {
+    const reason = output.includes('memory') ? 'Servidor sin memoria suficiente' :
+                   output.includes('Killed') ? 'Proceso FFmpeg terminado por el sistema' :
+                   'Fallo crítico del servidor';
+    sendLog(processId, 'error', `ERROR DEL SERVIDOR: ${reason}`);
+    sendFailureNotification(processId, 'server', reason);
+    return true;
+  }
+  
+  return false;
 };
 
 // Función auxiliar para detectar resolución de un M3U8
@@ -338,9 +379,9 @@ app.post('/api/emit', async (req, res) => {
           sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}, bitrate=${bitrateMatch ? bitrateMatch[1] + 'kbps' : 'N/A'}`);
         }
       } else if (output.includes('error') || output.includes('Error') || output.includes('failed') || output.includes('Failed')) {
-        // Error detectado
-        const hasRTMPIssues = detectRTMPIssues(output, process_id);
-        if (!hasRTMPIssues) {
+        // Error detectado - categorizar y notificar
+        const wasHandled = detectAndCategorizeError(output, process_id);
+        if (!wasHandled) {
           sendLog(process_id, 'error', `FFmpeg error: ${output.trim()}`);
         }
       } else if (output.includes('warning') || output.includes('Warning')) {
@@ -363,6 +404,8 @@ app.post('/api/emit', async (req, res) => {
         sendLog(process_id, 'success', `FFmpeg terminó exitosamente (código: ${code}, runtime: ${Math.floor(runtime/1000)}s)`);
       } else {
         sendLog(process_id, 'error', `FFmpeg terminó con error (código: ${code}, runtime: ${Math.floor(runtime/1000)}s)`);
+        // Si no se envió una notificación específica de fallo, enviar una genérica
+        sendFailureNotification(process_id, 'server', `Proceso terminado con código de error ${code}`);
       }
       
       emissionStatuses.set(process_id, 'idle');
@@ -372,6 +415,7 @@ app.post('/api/emit', async (req, res) => {
     // Manejar error del proceso
     ffmpegProcess.on('error', (error) => {
       sendLog(process_id, 'error', `Error crítico de FFmpeg: ${error.message}`, { error: error.toString() });
+      sendFailureNotification(process_id, 'server', `Error crítico del servidor: ${error.message}`);
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
     });
@@ -596,7 +640,10 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
           sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}`);
         }
       } else if (output.includes('error') || output.includes('Error')) {
-        sendLog(process_id, 'error', `FFmpeg error: ${output.trim()}`);
+        const wasHandled = detectAndCategorizeError(output, process_id);
+        if (!wasHandled) {
+          sendLog(process_id, 'error', `FFmpeg error: ${output.trim()}`);
+        }
       }
     });
 
@@ -622,6 +669,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         sendLog(process_id, 'success', `FFmpeg terminó exitosamente (runtime: ${Math.floor(runtime/1000)}s)`);
       } else {
         sendLog(process_id, 'error', `FFmpeg terminó con error (código: ${code}, runtime: ${Math.floor(runtime/1000)}s)`);
+        sendFailureNotification(process_id, 'server', `Proceso de archivos terminado con código de error ${code}`);
       }
       
       emissionStatuses.set(process_id, 'idle');
@@ -630,6 +678,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
 
     ffmpegProcess.on('error', (error) => {
       sendLog(process_id, 'error', `Error crítico de FFmpeg: ${error.message}`);
+      sendFailureNotification(process_id, 'server', `Error crítico del servidor: ${error.message}`);
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
     });

@@ -30,6 +30,8 @@ interface EmissionProcess {
   emitMsg: string;
   reconnectAttempts: number;
   lastReconnectTime: number;
+  failureReason?: string; // Razón del fallo (source, rtmp, server)
+  failureDetails?: string; // Detalles específicos del fallo
 }
 
 export default function EmisorM3U8Panel() {
@@ -53,7 +55,9 @@ export default function EmisorM3U8Panel() {
         emitStatus: (localStorage.getItem(`emisor_status_${i}`) as any) || "idle",
         emitMsg: localStorage.getItem(`emisor_msg_${i}`) || "",
         reconnectAttempts: 0,
-        lastReconnectTime: 0
+        lastReconnectTime: 0,
+        failureReason: localStorage.getItem(`emisor_failure_reason_${i}`) || undefined,
+        failureDetails: localStorage.getItem(`emisor_failure_details_${i}`) || undefined
       });
     }
     return savedProcesses;
@@ -121,6 +125,12 @@ export default function EmisorM3U8Panel() {
       localStorage.setItem(`emisor_start_time_${index}`, process.startTime.toString());
       localStorage.setItem(`emisor_status_${index}`, process.emitStatus);
       localStorage.setItem(`emisor_msg_${index}`, process.emitMsg);
+      if (process.failureReason) {
+        localStorage.setItem(`emisor_failure_reason_${index}`, process.failureReason);
+      }
+      if (process.failureDetails) {
+        localStorage.setItem(`emisor_failure_details_${index}`, process.failureDetails);
+      }
     });
   }, [processes]);
 
@@ -165,6 +175,54 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     processesRef.current = processes;
   }, [processes]);
+
+  // WebSocket para recibir notificaciones de fallo
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    
+    const ws = new WebSocket(wsUrl);
+    
+    ws.onopen = () => {
+      console.log('📡 Conectado al sistema de notificaciones');
+    };
+    
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        // Escuchar notificaciones de fallo
+        if (data.type === 'failure') {
+          const processIndex = parseInt(data.processId);
+          const failureType = data.failureType; // 'source', 'rtmp', 'server'
+          const details = data.details;
+          
+          console.log(`❌ Fallo detectado en proceso ${processIndex + 1}:`, failureType, details);
+          
+          updateProcess(processIndex, {
+            failureReason: failureType,
+            failureDetails: details,
+            emitStatus: 'error',
+            isEmitiendo: false
+          });
+        }
+      } catch (e) {
+        console.error('Error procesando mensaje WebSocket:', e);
+      }
+    };
+    
+    ws.onerror = (error) => {
+      console.error('❌ Error en WebSocket:', error);
+    };
+    
+    ws.onclose = () => {
+      console.log('📡 Desconectado del sistema de notificaciones');
+    };
+    
+    return () => {
+      ws.close();
+    };
+  }, []);
 
   // Cada 5s registramos un punto de salud GLOBAL (combinando todos los procesos)
   useEffect(() => {
@@ -522,7 +580,6 @@ export default function EmisorM3U8Panel() {
     }
   }
 
-  // --- Acciones de emisión hacia RTMP (vía backend) ---
   async function startEmitToRTMP(processIndex: number) {
     const process = processes[processIndex];
     
@@ -540,7 +597,9 @@ export default function EmisorM3U8Panel() {
         emitStatus: "starting",
         emitMsg: "Subiendo archivos al servidor...",
         reconnectAttempts: 0,
-        lastReconnectTime: 0
+        lastReconnectTime: 0,
+        failureReason: undefined,
+        failureDetails: undefined
       });
       setUploadProgress(0);
       
@@ -627,7 +686,9 @@ export default function EmisorM3U8Panel() {
       emitStatus: "starting",
       emitMsg: "Iniciando emisión en el servidor...",
       reconnectAttempts: 0,
-      lastReconnectTime: 0
+      lastReconnectTime: 0,
+      failureReason: undefined,
+      failureDetails: undefined
     });
 
     console.log(`🚀 Iniciando emisión ${processIndex + 1}: ${process.m3u8} → ${process.rtmp}`);
@@ -708,7 +769,9 @@ export default function EmisorM3U8Panel() {
       elapsed: 0,
       startTime: 0,
       emitStatus: "idle",
-      emitMsg: ""
+      emitMsg: "",
+      failureReason: undefined,
+      failureDetails: undefined
     });
     
     // Limpiar localStorage de emisión pero mantener datos de entrada
@@ -717,6 +780,8 @@ export default function EmisorM3U8Panel() {
     localStorage.removeItem(`emisor_start_time_${processIndex}`);
     localStorage.removeItem(`emisor_status_${processIndex}`);
     localStorage.removeItem(`emisor_msg_${processIndex}`);
+    localStorage.removeItem(`emisor_failure_reason_${processIndex}`);
+    localStorage.removeItem(`emisor_failure_details_${processIndex}`);
   }
 
   function onBorrar(processIndex: number) {
@@ -750,6 +815,8 @@ export default function EmisorM3U8Panel() {
     localStorage.removeItem(`emisor_m3u8_${processIndex}`);
     localStorage.removeItem(`emisor_rtmp_${processIndex}`);
     localStorage.removeItem(`emisor_preview_suffix_${processIndex}`);
+    localStorage.removeItem(`emisor_failure_reason_${processIndex}`);
+    localStorage.removeItem(`emisor_failure_details_${processIndex}`);
     
     // Limpiar el reproductor
     try {
@@ -777,6 +844,24 @@ export default function EmisorM3U8Panel() {
       case "stopping": return "bg-warning";
       case "error": return "bg-status-error";
       default: return "bg-status-idle";
+    }
+  };
+
+  const getFailureIcon = (failureType?: string) => {
+    switch (failureType) {
+      case "source": return "🔗";
+      case "rtmp": return "📡";
+      case "server": return "🖥️";
+      default: return "⚠️";
+    }
+  };
+
+  const getFailureLabel = (failureType?: string) => {
+    switch (failureType) {
+      case "source": return "Fallo en URL Fuente";
+      case "rtmp": return "Fallo en Destino RTMP";
+      case "server": return "Fallo en Servidor";
+      default: return "Error desconocido";
     }
   };
 
@@ -951,6 +1036,21 @@ export default function EmisorM3U8Panel() {
                 <span className="text-muted-foreground">Tiempo emitiendo:</span>
                 <span className="font-mono text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
               </div>
+              {process.failureReason && (
+                <div className="mt-3 p-3 rounded-xl bg-destructive/10 border border-destructive/30">
+                  <div className="flex items-start gap-2">
+                    <span className="text-lg">{getFailureIcon(process.failureReason)}</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-destructive mb-1">
+                        {getFailureLabel(process.failureReason)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {process.failureDetails}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -981,6 +1081,21 @@ export default function EmisorM3U8Panel() {
                 <span className="text-foreground font-semibold">{process.reconnectAttempts}/3</span>
               </li>
             </ul>
+            {process.failureReason && (
+              <div className="mt-4 p-3 rounded-xl bg-destructive/10 border border-destructive/30">
+                <div className="flex items-start gap-2">
+                  <span className="text-base">{getFailureIcon(process.failureReason)}</span>
+                  <div className="flex-1">
+                    <p className="text-xs font-semibold text-destructive mb-1">
+                      {getFailureLabel(process.failureReason)}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground leading-tight">
+                      {process.failureDetails}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 col-span-2 transition-all duration-300 hover:shadow-xl">
             <div className="flex items-center justify-between mb-2">
