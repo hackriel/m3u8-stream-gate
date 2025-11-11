@@ -243,40 +243,57 @@ app.post('/api/emit', async (req, res) => {
 
     emissionStatuses.set(process_id, 'starting');
     
-    // === RECODIFICACIÓN SIMPLE Y DIRECTA A 720p30 ===
-    sendLog(process_id, 'info', `Configurando recodificación a 720p30...`);
+    // Detectar resolución para optimizar CPU
+    sendLog(process_id, 'info', `Detectando resolución de la fuente...`);
+    const resolution = await detectM3U8Resolution(source_m3u8);
+    const needsRecode = resolution.height > 720;
     
-    const ffmpegArgs = [
-      // Entrada simple y rápida
-      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      '-reconnect', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
-      '-re',
-      '-i', source_m3u8,
-      
-      // Video: 720p30 simple
-      '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-b:v', '2800k',
-      '-maxrate', '3800k',
-      '-bufsize', '5600k',
-      '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
-      '-g', '60',
-      '-keyint_min', '60',
-      '-sc_threshold', '0',
-      
-      // Audio: AAC simple
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-ac', '2',
-      '-ar', '48000',
-      
-      // Salida RTMP simple
-      '-f', 'flv',
-      '-flvflags', 'no_duration_filesize',
-      target_rtmp
-    ];
+    let ffmpegArgs;
+    
+    if (needsRecode) {
+      // Solo recodificar si es necesario (>720p)
+      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 720p30...`);
+      ffmpegArgs = [
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        '-re',
+        '-i', source_m3u8,
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-b:v', '2800k',
+        '-maxrate', '3800k',
+        '-bufsize', '5600k',
+        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
+        '-g', '60',
+        '-keyint_min', '60',
+        '-sc_threshold', '0',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ac', '2',
+        '-ar', '48000',
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        target_rtmp
+      ];
+    } else {
+      // Copy directo - MUY bajo CPU (8-10%)
+      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, usando copy (bajo CPU)...`);
+      ffmpegArgs = [
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        '-re',
+        '-i', source_m3u8,
+        '-c:v', 'copy',
+        '-c:a', 'copy',
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        target_rtmp
+      ];
+    }
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 100)}...`);
@@ -443,7 +460,6 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     } else {
       // Crear archivo concat para múltiples videos usando rutas relativas
       const concatFilePath = path.join(__dirname, 'uploads', `concat-${process_id}-${Date.now()}.txt`);
-      // Usar solo el nombre del archivo (basename) ya que ffmpeg trabajará en el directorio uploads
       const concatContent = files.map(f => `file '${path.basename(f.path)}'`).join('\n');
       fs.writeFileSync(concatFilePath, concatContent);
       inputSource = path.basename(concatFilePath);
@@ -451,57 +467,88 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `Creada playlist con ${files.length} archivos`);
     }
 
-    // === RECODIFICACIÓN SIMPLE A 720p30 ===
-    sendLog(process_id, 'info', `Configurando recodificación a 720p30...`);
+    // Detectar resolución del primer archivo para optimizar CPU
+    sendLog(process_id, 'info', `Detectando resolución...`);
+    const firstFilePath = files[0].path;
+    const resolution = await detectFileResolution(firstFilePath);
+    const needsRecode = resolution.height > 720;
     
     let ffmpegArgs;
     
     if (files.length === 1) {
-      // Archivo único simple
-      ffmpegArgs = [
-        '-re',
-        '-stream_loop', '-1',
-        '-i', path.basename(inputSource),
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-b:v', '2800k',
-        '-maxrate', '3800k',
-        '-bufsize', '5600k',
-        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
-        '-g', '60',
-        '-keyint_min', '60',
-        '-sc_threshold', '0',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ac', '2',
-        '-ar', '48000',
-        '-f', 'flv',
-        target_rtmp
-      ];
+      if (needsRecode) {
+        sendLog(process_id, 'info', `Archivo ${resolution.width}x${resolution.height}, recodificando a 720p30...`);
+        ffmpegArgs = [
+          '-re',
+          '-stream_loop', '-1',
+          '-i', path.basename(inputSource),
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-b:v', '2800k',
+          '-maxrate', '3800k',
+          '-bufsize', '5600k',
+          '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
+          '-g', '60',
+          '-keyint_min', '60',
+          '-sc_threshold', '0',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ac', '2',
+          '-ar', '48000',
+          '-f', 'flv',
+          target_rtmp
+        ];
+      } else {
+        sendLog(process_id, 'info', `Archivo ${resolution.width}x${resolution.height}, usando copy (bajo CPU)...`);
+        ffmpegArgs = [
+          '-re',
+          '-stream_loop', '-1',
+          '-i', path.basename(inputSource),
+          '-c:v', 'copy',
+          '-c:a', 'copy',
+          '-f', 'flv',
+          target_rtmp
+        ];
+      }
     } else {
-      // Múltiples archivos simple
-      ffmpegArgs = [
-        '-re',
-        '-f', 'concat',
-        '-safe', '0',
-        '-stream_loop', '-1',
-        '-i', inputSource,
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-b:v', '2800k',
-        '-maxrate', '3800k',
-        '-bufsize', '5600k',
-        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
-        '-g', '60',
-        '-keyint_min', '60',
-        '-sc_threshold', '0',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ac', '2',
+      if (needsRecode) {
+        sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, recodificando a 720p30...`);
+        ffmpegArgs = [
+          '-re',
+          '-f', 'concat',
+          '-safe', '0',
+          '-stream_loop', '-1',
+          '-i', inputSource,
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-b:v', '2800k',
+          '-maxrate', '3800k',
+          '-bufsize', '5600k',
+          '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
+          '-g', '60',
+          '-keyint_min', '60',
+          '-sc_threshold', '0',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ac', '2',
         '-ar', '48000',
         '-f', 'flv',
         target_rtmp
       ];
+      } else {
+        sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, usando copy (bajo CPU)...`);
+        ffmpegArgs = [
+          '-re',
+          '-f', 'concat',
+          '-safe', '0',
+          '-stream_loop', '-1',
+          '-i', inputSource,
+          '-c:v', 'copy',
+          '-c:a', 'copy',
+          '-f', 'flv',
+          target_rtmp
+        ];
+      }
     }
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
