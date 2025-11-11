@@ -251,8 +251,8 @@ app.post('/api/emit', async (req, res) => {
     let ffmpegArgs;
     
     if (needsRecode) {
-      // Solo recodificar si es necesario (>720p)
-      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 720p30...`);
+      // Recodificación estable: preset fast + CBR + baseline profile
+      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 720p30 (modo estable)...`);
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         '-reconnect', '1',
@@ -261,10 +261,12 @@ app.post('/api/emit', async (req, res) => {
         '-re',
         '-i', source_m3u8,
         '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-b:v', '2800k',
-        '-maxrate', '3800k',
-        '-bufsize', '5600k',
+        '-preset', 'fast',
+        '-profile:v', 'baseline',
+        '-b:v', '2500k',
+        '-minrate', '2500k',
+        '-maxrate', '2500k',
+        '-bufsize', '5000k',
         '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
         '-g', '60',
         '-keyint_min', '60',
@@ -477,16 +479,18 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     
     if (files.length === 1) {
       if (needsRecode) {
-        sendLog(process_id, 'info', `Archivo ${resolution.width}x${resolution.height}, recodificando a 720p30...`);
+        sendLog(process_id, 'info', `Archivo ${resolution.width}x${resolution.height}, recodificando a 720p30 (modo estable)...`);
         ffmpegArgs = [
           '-re',
           '-stream_loop', '-1',
           '-i', path.basename(inputSource),
           '-c:v', 'libx264',
-          '-preset', 'veryfast',
-          '-b:v', '2800k',
-          '-maxrate', '3800k',
-          '-bufsize', '5600k',
+          '-preset', 'fast',
+          '-profile:v', 'baseline',
+          '-b:v', '2500k',
+          '-minrate', '2500k',
+          '-maxrate', '2500k',
+          '-bufsize', '5000k',
           '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
           '-g', '60',
           '-keyint_min', '60',
@@ -512,7 +516,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       }
     } else {
       if (needsRecode) {
-        sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, recodificando a 720p30...`);
+        sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, recodificando a 720p30 (modo estable)...`);
         ffmpegArgs = [
           '-re',
           '-f', 'concat',
@@ -520,10 +524,12 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
           '-stream_loop', '-1',
           '-i', inputSource,
           '-c:v', 'libx264',
-          '-preset', 'veryfast',
-          '-b:v', '2800k',
-          '-maxrate', '3800k',
-          '-bufsize', '5600k',
+          '-preset', 'fast',
+          '-profile:v', 'baseline',
+          '-b:v', '2500k',
+          '-minrate', '2500k',
+          '-maxrate', '2500k',
+          '-bufsize', '5000k',
           '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
           '-g', '60',
           '-keyint_min', '60',
