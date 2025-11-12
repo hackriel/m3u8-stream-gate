@@ -995,7 +995,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "Proceso 1" },
       { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Proceso 2" },
       { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "Proceso 3" },
-      { bg: "bg-red-500", text: "text-red-500", stroke: "#ef4444", name: "Proceso 4" }
+      { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Proceso 4" }
     ];
     return colors[processIndex];
   };
@@ -1179,42 +1179,6 @@ export default function EmisorM3U8Panel() {
           </div>
         </section>
 
-        {/* Resumen del proceso */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <h3 className="text-base font-medium mb-4 text-accent">📈 Resumen - Proceso {processIndex + 1}</h3>
-            <ul className="space-y-3 text-sm">
-              <li className="flex justify-between">
-                <span className="text-muted-foreground">Tiempo emitiendo:</span>
-                <span className="font-mono text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
-              </li>
-              <li className="flex justify-between">
-                <span className="text-muted-foreground">Estado actual:</span>
-                <span className={`font-semibold ${
-                  process.emitStatus === 'running' ? "text-status-live" : 
-                  process.emitStatus === 'error' ? "text-status-error" : 
-                  "text-muted-foreground"
-                }`}>
-                  {process.emitStatus === 'running' ? "🟢 Emitiendo" : 
-                   process.emitStatus === 'error' ? "🔴 Error" : 
-                   "⚫ Detenido"}
-                </span>
-              </li>
-              <li className="flex justify-between">
-                <span className="text-muted-foreground">Reconexiones:</span>
-                <span className="text-foreground font-semibold">{process.reconnectAttempts}/3</span>
-              </li>
-              {process.failureReason && (
-                <li className="flex justify-between">
-                  <span className="text-muted-foreground">Tipo de fallo:</span>
-                  <span className="text-destructive font-semibold flex items-center gap-1">
-                    {getFailureIcon(process.failureReason)} {getFailureLabel(process.failureReason)}
-                  </span>
-                </li>
-              )}
-            </ul>
-          </div>
-        </section>
       </div>
     );
   };
@@ -1234,32 +1198,6 @@ export default function EmisorM3U8Panel() {
           </div>
         </header>
 
-        {/* Sistema de alertas global - solo proceso activo */}
-        {activeProcess.failureReason && (
-          <div className="mb-6 bg-destructive/10 border-2 border-destructive rounded-xl p-5 shadow-lg animate-in fade-in duration-300">
-            <div className="flex items-start gap-4">
-              <span className="text-3xl flex-shrink-0">{getFailureIcon(activeProcess.failureReason)}</span>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-lg font-bold text-destructive mb-2">
-                  {getFailureLabel(activeProcess.failureReason)} - Proceso {parseInt(activeTab) + 1}
-                </h3>
-                <p className="text-sm text-foreground font-medium mb-2">
-                  {getFailureDescription(activeProcess.failureReason, activeProcess.failureDetails)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  La emisión se detuvo automáticamente. Revisa la configuración y vuelve a intentar.
-                </p>
-              </div>
-              <button
-                onClick={() => updateProcess(parseInt(activeTab), { failureReason: undefined, failureDetails: undefined })}
-                className="text-muted-foreground hover:text-foreground transition-colors text-xl leading-none flex-shrink-0"
-                aria-label="Cerrar alerta"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-4 mb-6">
@@ -1298,115 +1236,58 @@ export default function EmisorM3U8Panel() {
           </TabsContent>
         </Tabs>
 
-        {/* Monitor de Rendimiento Global - Siempre visible */}
+        {/* Monitor de Estado Global - Siempre visible */}
         <section className="mt-8 bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-broadcast-border/50">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-medium text-accent">📊 Monitor de Rendimiento Global</h3>
-            <p className="text-xs text-muted-foreground">
-              {processes.filter(p => p.isEmitiendo).length} proceso(s) activo(s) - Uptime combinado en tiempo real
-            </p>
+            <h3 className="text-lg font-medium text-accent">📊 Estado Global de Procesos</h3>
           </div>
-          <div className="h-64">
-            {globalHealthPoints.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={globalHealthPoints.map((p) => ({
-                  name: new Date(p.t * 1000).toLocaleTimeString(),
-                  "Proceso 1": p.p1,
-                  "Proceso 2": p.p2,
-                  "Proceso 3": p.p3,
-                  "Proceso 4": p.p4,
-                }))} margin={{ left: 6, right: 16, top: 10, bottom: 10 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                  <XAxis 
-                    dataKey="name" 
-                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} 
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis 
-                    domain={[0, 100]} 
-                    tickFormatter={(v) => `${v}%`} 
-                    width={40} 
-                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} 
-                  />
-                  <Tooltip 
-                    formatter={(v) => [`${Number(v).toFixed(1)}%`, ""]} 
-                    contentStyle={{ 
-                      backgroundColor: "hsl(var(--card))", 
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "0.75rem",
-                      color: "hsl(var(--foreground))"
-                    }}
-                  />
-                  {processes[0].isEmitiendo && (
-                    <Line 
-                      type="monotone" 
-                      dataKey="Proceso 1" 
-                      dot={false} 
-                      strokeWidth={3} 
-                      stroke={getProcessColor(0).stroke}
-                      strokeLinecap="round"
-                      strokeDasharray="0"
-                    />
-                  )}
-                  {processes[1].isEmitiendo && (
-                    <Line 
-                      type="monotone" 
-                      dataKey="Proceso 2" 
-                      dot={false} 
-                      strokeWidth={3} 
-                      stroke={getProcessColor(1).stroke}
-                      strokeLinecap="round"
-                      strokeDasharray="8 4"
-                    />
-                  )}
-                  {processes[2].isEmitiendo && (
-                    <Line 
-                      type="monotone" 
-                      dataKey="Proceso 3" 
-                      dot={false} 
-                      strokeWidth={3} 
-                      stroke={getProcessColor(2).stroke}
-                      strokeLinecap="round"
-                      strokeDasharray="2 2"
-                    />
-                  )}
-                  {processes[3].isEmitiendo && (
-                    <Line 
-                      type="monotone" 
-                      dataKey="Proceso 4" 
-                      dot={false} 
-                      strokeWidth={3} 
-                      stroke={getProcessColor(3).stroke}
-                      strokeLinecap="round"
-                      strokeDasharray="12 2 2 2"
-                    />
-                  )}
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                <span className="text-sm">📡 Esperando datos de rendimiento...</span>
-              </div>
-            )}
-          </div>
-          {/* Leyenda de colores con estilos de línea */}
-          <div className="flex gap-6 justify-center mt-4 flex-wrap">
-            {processes.map((proc, idx) => {
-              const lineStyles = [
-                { display: "━━━━", desc: "Sólida" },
-                { display: "╍╍╍╍", desc: "Guiones largos" },
-                { display: "┄┄┄┄", desc: "Puntos" },
-                { display: "╍┄┄╍", desc: "Guión-punto" }
-              ];
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {processes.map((process, index) => {
+              const color = getProcessColor(index);
+              const isOnline = process.isEmitiendo && process.emitStatus === 'running';
+              const isFailed = process.emitStatus === 'error' || (process.failureReason && !process.isEmitiendo);
+              
               return (
-                <div key={idx} className="flex items-center gap-2">
-                  <span className={`inline-flex h-3 w-3 rounded-full ${getProcessColor(idx).bg}`} />
-                  <span className={`text-xs font-medium ${proc.isEmitiendo ? getProcessColor(idx).text : 'text-muted-foreground'}`}>
-                    {getProcessColor(idx).name}
-                  </span>
-                  <span className="text-xs text-muted-foreground ml-1">
-                    {lineStyles[idx].display}
-                  </span>
+                <div 
+                  key={index} 
+                  className={`p-4 rounded-xl border-2 transition-all duration-300 ${
+                    isOnline ? 'bg-green-500/10 border-green-500/50' :
+                    isFailed ? 'bg-red-500/10 border-red-500/50' :
+                    'bg-card/50 border-border'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className={`font-semibold ${color.text}`}>{color.name}</h4>
+                    <span className={`inline-flex h-3 w-3 rounded-full ${
+                      isOnline ? 'bg-green-500 animate-pulse' :
+                      isFailed ? 'bg-red-500' :
+                      'bg-muted'
+                    }`} />
+                  </div>
+                  
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Estado:</span>
+                      <span className={`font-semibold ${
+                        isOnline ? 'text-green-500' : 
+                        isFailed ? 'text-red-500' : 
+                        'text-muted-foreground'
+                      }`}>
+                        {isOnline ? '✓ En línea' : 
+                         isFailed ? '✗ Sin transmisión' : 
+                         '○ Inactivo'}
+                      </span>
+                    </div>
+                    
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">
+                        {isOnline ? 'Tiempo activo:' : isFailed ? 'Tiempo caído:' : 'Tiempo inactivo:'}
+                      </span>
+                      <span className="font-mono font-semibold text-foreground">
+                        {formatSeconds(process.elapsed)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               );
             })}
