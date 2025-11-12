@@ -1214,7 +1214,7 @@ export default function EmisorM3U8Panel() {
                 <div 
                   key={index} 
                   className={`p-4 rounded-xl border-2 transition-all duration-300 ${
-                    isActive ? 'bg-green-500/10 border-green-500/50' : 'bg-red-500/10 border-red-500/50'
+                    isActive ? 'bg-green-500/10 border-green-500/50' : 'bg-muted/30 border-border'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-3">
