@@ -41,19 +41,19 @@ export default function EmisorM3U8Panel() {
   
   const [activeTab, setActiveTab] = useState("0");
   
-  // Estado global independiente del tab activo
+  // Estado global independiente - se sincroniza con el estado local de cada proceso
   const [globalProcessStatus, setGlobalProcessStatus] = useState<{
     [key: number]: {
-      isOnline: boolean;
-      activeTime: number; // segundos activo
-      downTime: number; // segundos caído
-      lastCheck: number; // timestamp
+      isActive: boolean;
+      startTime: number; // timestamp cuando inició
+      activeTime: number; // segundos activo acumulados
+      downTime: number; // segundos caído acumulados
     }
   }>({
-    0: { isOnline: false, activeTime: 0, downTime: 0, lastCheck: Date.now() },
-    1: { isOnline: false, activeTime: 0, downTime: 0, lastCheck: Date.now() },
-    2: { isOnline: false, activeTime: 0, downTime: 0, lastCheck: Date.now() },
-    3: { isOnline: false, activeTime: 0, downTime: 0, lastCheck: Date.now() }
+    0: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
+    1: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
+    2: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
+    3: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 }
   });
 
   // Estado para 4 procesos independientes
@@ -251,100 +251,68 @@ export default function EmisorM3U8Panel() {
     };
   }, []);
 
-  // Sistema de monitoreo global independiente del tab activo
-  // Consulta el servidor directamente para verificar el estado real
+  // Sincronizar el estado global con el estado local de cada proceso
   useEffect(() => {
-    const checkAllProcesses = async () => {
-      const now = Date.now();
-      
-      for (let i = 0; i < 4; i++) {
-        try {
-          const resp = await fetch(`/api/emit/status?process_id=${i}`);
-          
-          if (resp.ok) {
-            const data = await resp.json();
-            const isEmitting = data.isEmitting === true;
-            
-            setGlobalProcessStatus(prev => {
-              const timeDiff = (now - prev[i].lastCheck) / 1000; // segundos desde última verificación
-              
-              if (isEmitting) {
-                // Proceso está emitiendo correctamente
-                return {
-                  ...prev,
-                  [i]: {
-                    isOnline: true,
-                    activeTime: prev[i].isOnline ? prev[i].activeTime + timeDiff : timeDiff,
-                    downTime: 0,
-                    lastCheck: now
-                  }
-                };
-              } else {
-                // Proceso NO está emitiendo
-                const process = processesRef.current[i];
-                const wasSupposedToEmit = process.isEmitiendo; // ¿Se esperaba que estuviera emitiendo?
-                
-                if (wasSupposedToEmit) {
-                  // Se cayó - está en error
-                  return {
-                    ...prev,
-                    [i]: {
-                      isOnline: false,
-                      activeTime: prev[i].activeTime,
-                      downTime: !prev[i].isOnline ? prev[i].downTime + timeDiff : timeDiff,
-                      lastCheck: now
-                    }
-                  };
-                } else {
-                  // Simplemente no está activo (inactivo normal)
-                  return {
-                    ...prev,
-                    [i]: {
-                      isOnline: false,
-                      activeTime: 0,
-                      downTime: 0,
-                      lastCheck: now
-                    }
-                  };
-                }
-              }
-            });
-            
-            // También actualizar el estado local del proceso si es necesario
-            const process = processesRef.current[i];
-            if (!data.isEmitting && process.isEmitiendo) {
-              console.log(`⚠️ Proceso ${i + 1} se detuvo en el servidor`);
-              updateProcess(i, {
-                isEmitiendo: false,
-                emitStatus: 'error',
-                failureReason: data.failureReason || 'unknown',
-                failureDetails: data.failureDetails || 'El proceso se detuvo inesperadamente'
-              });
-            } else if (data.isEmitting && process.emitStatus === 'error') {
-              console.log(`✅ Proceso ${i + 1} sigue emitiendo correctamente`);
-              updateProcess(i, {
-                isEmitiendo: true,
-                emitStatus: 'running',
-                emitMsg: 'Emitiendo correctamente',
-                failureReason: undefined,
-                failureDetails: undefined
-              });
+    const interval = setInterval(() => {
+      setGlobalProcessStatus((prev) => {
+        const newStatus = { ...prev };
+        
+        processes.forEach((process, i) => {
+          if (process.isEmitiendo && process.emitStatus === 'running') {
+            // Proceso activo - incrementar tiempo activo
+            if (!prev[i].isActive) {
+              // Acabamos de activarnos
+              newStatus[i] = {
+                isActive: true,
+                startTime: Date.now(),
+                activeTime: 0,
+                downTime: 0
+              };
+            } else {
+              // Ya estábamos activos - incrementar contador
+              const elapsed = Math.floor((Date.now() - prev[i].startTime) / 1000);
+              newStatus[i] = {
+                ...prev[i],
+                activeTime: elapsed
+              };
+            }
+          } else if (process.isEmitiendo && process.emitStatus === 'error') {
+            // Proceso caído - incrementar tiempo caído
+            if (prev[i].isActive) {
+              // Acabamos de caer
+              newStatus[i] = {
+                isActive: false,
+                startTime: Date.now(),
+                activeTime: prev[i].activeTime,
+                downTime: 0
+              };
+            } else {
+              // Ya estábamos caídos - incrementar contador
+              const elapsed = Math.floor((Date.now() - prev[i].startTime) / 1000);
+              newStatus[i] = {
+                ...prev[i],
+                downTime: elapsed
+              };
+            }
+          } else {
+            // Proceso inactivo (nunca se ha iniciado o se detuvo limpiamente)
+            if (prev[i].isActive || prev[i].activeTime > 0 || prev[i].downTime > 0) {
+              newStatus[i] = {
+                isActive: false,
+                startTime: 0,
+                activeTime: 0,
+                downTime: 0
+              };
             }
           }
-        } catch (e) {
-          console.error(`Error verificando estado del proceso ${i + 1}:`, e);
-        }
-      }
-    };
-    
-    // Verificar cada 5 segundos
-    const interval = setInterval(checkAllProcesses, 5000);
-    
-    // Verificar inmediatamente al montar
-    checkAllProcesses();
+        });
+        
+        return newStatus;
+      });
+    }, 1000); // Actualizar cada segundo
     
     return () => clearInterval(interval);
-  }, []);
+  }, [processes]);
 
   // Función para verificar estado del proceso en el backend
   const checkProcessStatus = async (processIndex: number) => {
@@ -1208,7 +1176,7 @@ export default function EmisorM3U8Panel() {
             {processes.map((process, index) => {
               const color = getProcessColor(index);
               const status = globalProcessStatus[index];
-              const isActive = status.isOnline;
+              const isActive = status.isActive;
               
               return (
                 <div 
