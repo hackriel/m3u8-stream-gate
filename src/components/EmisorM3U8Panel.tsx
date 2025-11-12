@@ -49,11 +49,22 @@ export default function EmisorM3U8Panel() {
       activeTime: number; // segundos activo acumulados
       downTime: number; // segundos caído acumulados
     }
-  }>({
-    0: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
-    1: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
-    2: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
-    3: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 }
+  }>(() => {
+    // Restaurar estado global desde localStorage
+    const saved = localStorage.getItem('global_process_status');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Error parsing global status:', e);
+      }
+    }
+    return {
+      0: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
+      1: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
+      2: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
+      3: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 }
+    };
   });
 
   // Estado para 4 procesos independientes
@@ -313,6 +324,26 @@ export default function EmisorM3U8Panel() {
     
     return () => clearInterval(interval);
   }, [processes]);
+
+  // Guardar el estado global en localStorage cada vez que cambie
+  useEffect(() => {
+    localStorage.setItem('global_process_status', JSON.stringify(globalProcessStatus));
+  }, [globalProcessStatus]);
+
+  // Restaurar previews al cargar la página si hay procesos activos
+  useEffect(() => {
+    processes.forEach((process, index) => {
+      if (process.isEmitiendo && process.emitStatus === 'running') {
+        const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
+        if (previewUrl) {
+          console.log(`🔄 Restaurando preview ${index + 1} al cargar página:`, previewUrl);
+          setTimeout(() => {
+            loadPreview(previewUrl, index);
+          }, 1000); // Esperar 1 segundo en lugar de 2 para cargar más rápido
+        }
+      }
+    });
+  }, []); // Solo ejecutar al montar el componente
 
   // Función para verificar estado del proceso en el backend
   const checkProcessStatus = async (processIndex: number) => {
