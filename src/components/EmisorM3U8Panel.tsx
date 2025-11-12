@@ -40,13 +40,21 @@ export default function EmisorM3U8Panel() {
   const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
-  const [globalHealthPoints, setGlobalHealthPoints] = useState<Array<{ 
-    t: number; 
-    p1: number; 
-    p2: number; 
-    p3: number; 
-    p4: number;
-  }>>([]);
+  
+  // Estado global independiente del tab activo
+  const [globalProcessStatus, setGlobalProcessStatus] = useState<{
+    [key: number]: {
+      isOnline: boolean;
+      activeTime: number; // segundos activo
+      downTime: number; // segundos caído
+      lastCheck: number; // timestamp
+    }
+  }>({
+    0: { isOnline: false, activeTime: 0, downTime: 0, lastCheck: Date.now() },
+    1: { isOnline: false, activeTime: 0, downTime: 0, lastCheck: Date.now() },
+    2: { isOnline: false, activeTime: 0, downTime: 0, lastCheck: Date.now() },
+    3: { isOnline: false, activeTime: 0, downTime: 0, lastCheck: Date.now() }
+  });
 
   // Estado para 4 procesos independientes
   const [processes, setProcesses] = useState<EmissionProcess[]>(() => {
@@ -183,57 +191,7 @@ export default function EmisorM3U8Panel() {
     processesRef.current = processes;
   }, [processes]);
 
-  // Verificación periódica del estado real del proceso en el servidor
-  useEffect(() => {
-    const checkProcessStatus = async () => {
-      for (let i = 0; i < 4; i++) {
-        const process = processesRef.current[i];
-        
-        // Solo verificar procesos que están marcados como emitiendo
-        if (process.isEmitiendo) {
-          try {
-            const resp = await fetch(`/api/emit/status?process_id=${i}`);
-            if (resp.ok) {
-              const data = await resp.json();
-              
-              // Si el servidor dice que NO está emitiendo pero nosotros creemos que sí,
-              // entonces realmente se detuvo
-              if (!data.isEmitting && process.isEmitiendo) {
-                console.log(`⚠️ Proceso ${i + 1} se detuvo en el servidor`);
-                updateProcess(i, {
-                  isEmitiendo: false,
-                  emitStatus: 'error',
-                  failureReason: data.failureReason || 'unknown',
-                  failureDetails: data.failureDetails || 'El proceso se detuvo inesperadamente'
-                });
-              }
-              // Si el servidor dice que SÍ está emitiendo y estamos en error, corregir
-              else if (data.isEmitting && process.emitStatus === 'error') {
-                console.log(`✅ Proceso ${i + 1} sigue emitiendo correctamente`);
-                updateProcess(i, {
-                  isEmitiendo: true,
-                  emitStatus: 'running',
-                  emitMsg: 'Emitiendo correctamente',
-                  failureReason: undefined,
-                  failureDetails: undefined
-                });
-              }
-            }
-          } catch (e) {
-            console.error(`Error verificando estado del proceso ${i + 1}:`, e);
-          }
-        }
-      }
-    };
-    
-    // Verificar cada 10 segundos
-    const interval = setInterval(checkProcessStatus, 10000);
-    
-    // Verificar inmediatamente al montar
-    checkProcessStatus();
-    
-    return () => clearInterval(interval);
-  }, []);
+  // Verificación periódica eliminada - ahora se usa el sistema de monitoreo global
 
   // WebSocket para recibir notificaciones de fallo (solo para alertas, no cambia estado definitivo)
   useEffect(() => {
@@ -293,94 +251,99 @@ export default function EmisorM3U8Panel() {
     };
   }, []);
 
-  // Cada 5s registramos un punto de salud INDIVIDUAL para cada proceso
+  // Sistema de monitoreo global independiente del tab activo
+  // Consulta el servidor directamente para verificar el estado real
   useEffect(() => {
-    const id = setInterval(() => {
-      const uptimeValues = [0, 0, 0, 0];
+    const checkAllProcesses = async () => {
+      const now = Date.now();
       
-      processesRef.current.forEach((process, index) => {
-        const video = videoRefs[index].current;
-        const up = video && video.readyState >= 2 && video.networkState !== 3 ? 1 : 0;
-        
-        // Calcular porcentaje individual de uptime (100 = arriba, 0 = caído)
-        if (process.isEmitiendo) {
-          uptimeValues[index] = up * 100;
+      for (let i = 0; i < 4; i++) {
+        try {
+          const resp = await fetch(`/api/emit/status?process_id=${i}`);
           
-          // Lógica de reconexión simple
-          if (up === 0 && process.emitStatus === 'running') {
-            const now = Date.now();
-            const timeSinceLastReconnect = now - process.lastReconnectTime;
+          if (resp.ok) {
+            const data = await resp.json();
+            const isEmitting = data.isEmitting === true;
             
-            const maxAttempts = 5;
-            const reconnectDelay = 10000; // 10 segundos entre intentos
+            setGlobalProcessStatus(prev => {
+              const timeDiff = (now - prev[i].lastCheck) / 1000; // segundos desde última verificación
+              
+              if (isEmitting) {
+                // Proceso está emitiendo correctamente
+                return {
+                  ...prev,
+                  [i]: {
+                    isOnline: true,
+                    activeTime: prev[i].isOnline ? prev[i].activeTime + timeDiff : timeDiff,
+                    downTime: 0,
+                    lastCheck: now
+                  }
+                };
+              } else {
+                // Proceso NO está emitiendo
+                const process = processesRef.current[i];
+                const wasSupposedToEmit = process.isEmitiendo; // ¿Se esperaba que estuviera emitiendo?
+                
+                if (wasSupposedToEmit) {
+                  // Se cayó - está en error
+                  return {
+                    ...prev,
+                    [i]: {
+                      isOnline: false,
+                      activeTime: prev[i].activeTime,
+                      downTime: !prev[i].isOnline ? prev[i].downTime + timeDiff : timeDiff,
+                      lastCheck: now
+                    }
+                  };
+                } else {
+                  // Simplemente no está activo (inactivo normal)
+                  return {
+                    ...prev,
+                    [i]: {
+                      isOnline: false,
+                      activeTime: 0,
+                      downTime: 0,
+                      lastCheck: now
+                    }
+                  };
+                }
+              }
+            });
             
-            if (timeSinceLastReconnect > reconnectDelay && process.reconnectAttempts < maxAttempts) {
-              console.log(`⚠️ Proceso ${index + 1}: Verificando stream... (${process.reconnectAttempts + 1}/${maxAttempts})`);
-              
-              updateProcess(index, {
-                reconnectAttempts: process.reconnectAttempts + 1,
-                lastReconnectTime: now,
-                emitMsg: `Verificando conexión... (${process.reconnectAttempts + 1}/${maxAttempts})`
-              });
-              
-              // Notificar al usuario
-              if (process.reconnectAttempts === 0) {
-                toast.warning(`⚠️ Proceso ${index + 1}: Señal perdida`, {
-                  description: `Intentando reconectar... (1/${maxAttempts})`,
-                });
-              }
-              
-              const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
-              if (previewUrl) {
-                setTimeout(() => loadPreview(previewUrl, index), 5000);
-              }
-            } else if (process.reconnectAttempts >= maxAttempts) {
-              const errorMsg = "Stream caído - máximo de reconexiones alcanzado";
-              updateProcess(index, {
-                emitMsg: errorMsg,
+            // También actualizar el estado local del proceso si es necesario
+            const process = processesRef.current[i];
+            if (!data.isEmitting && process.isEmitiendo) {
+              console.log(`⚠️ Proceso ${i + 1} se detuvo en el servidor`);
+              updateProcess(i, {
+                isEmitiendo: false,
                 emitStatus: 'error',
-                failureReason: 'source',
-                failureDetails: 'La señal se perdió y no pudo recuperarse automáticamente'
+                failureReason: data.failureReason || 'unknown',
+                failureDetails: data.failureDetails || 'El proceso se detuvo inesperadamente'
               });
-              
-              // Notificar fallo definitivo
-              toast.error(`❌ Proceso ${index + 1}: Fallo de conexión`, {
-                description: errorMsg,
+            } else if (data.isEmitting && process.emitStatus === 'error') {
+              console.log(`✅ Proceso ${i + 1} sigue emitiendo correctamente`);
+              updateProcess(i, {
+                isEmitiendo: true,
+                emitStatus: 'running',
+                emitMsg: 'Emitiendo correctamente',
+                failureReason: undefined,
+                failureDetails: undefined
               });
             }
-          } else if (up === 1 && process.reconnectAttempts > 0) {
-            console.log(`✅ Proceso ${index + 1}: Stream recuperado después de ${process.reconnectAttempts} intentos`);
-            
-            // Notificar recuperación exitosa
-            toast.success(`✅ Proceso ${index + 1}: Señal recuperada`, {
-              description: `Conexión restablecida después de ${process.reconnectAttempts} intentos`,
-            });
-            
-            updateProcess(index, {
-              reconnectAttempts: 0,
-              emitMsg: process.emitStatus === 'running' ? "Emitiendo correctamente" : process.emitMsg,
-              failureReason: undefined,
-              failureDetails: undefined
-            });
           }
-        } else {
-          // Si no está emitiendo, valor null para que no se dibuje la línea
-          uptimeValues[index] = 0;
+        } catch (e) {
+          console.error(`Error verificando estado del proceso ${i + 1}:`, e);
         }
-      });
-      
-      setGlobalHealthPoints(prev => [
-        ...prev.slice(-119),
-        { 
-          t: Math.floor(Date.now() / 1000), 
-          p1: uptimeValues[0],
-          p2: uptimeValues[1],
-          p3: uptimeValues[2],
-          p4: uptimeValues[3]
-        }
-      ]);
-    }, 5000);
-    return () => clearInterval(id);
+      }
+    };
+    
+    // Verificar cada 5 segundos
+    const interval = setInterval(checkAllProcesses, 5000);
+    
+    // Verificar inmediatamente al montar
+    checkAllProcesses();
+    
+    return () => clearInterval(interval);
   }, []);
 
   // Función para verificar estado del proceso en el backend
@@ -1244,8 +1207,10 @@ export default function EmisorM3U8Panel() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {processes.map((process, index) => {
               const color = getProcessColor(index);
-              const isOnline = process.isEmitiendo && process.emitStatus === 'running';
-              const isFailed = process.emitStatus === 'error' || (process.failureReason && !process.isEmitiendo);
+              const status = globalProcessStatus[index];
+              const isOnline = status.isOnline;
+              const isFailed = !status.isOnline && status.downTime > 0;
+              const isInactive = !status.isOnline && status.downTime === 0 && status.activeTime === 0;
               
               return (
                 <div 
@@ -1281,10 +1246,16 @@ export default function EmisorM3U8Panel() {
                     
                     <div className="flex justify-between items-center">
                       <span className="text-muted-foreground">
-                        {isOnline ? 'Tiempo activo:' : isFailed ? 'Tiempo caído:' : 'Tiempo inactivo:'}
+                        {isOnline ? 'Tiempo activo:' : 
+                         isFailed ? 'Tiempo caído:' : 
+                         'Tiempo inactivo:'}
                       </span>
                       <span className="font-mono font-semibold text-foreground">
-                        {formatSeconds(process.elapsed)}
+                        {formatSeconds(
+                          isOnline ? Math.floor(status.activeTime) : 
+                          isFailed ? Math.floor(status.downTime) : 
+                          0
+                        )}
                       </span>
                     </div>
                   </div>
