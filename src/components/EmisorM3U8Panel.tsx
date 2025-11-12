@@ -1208,54 +1208,36 @@ export default function EmisorM3U8Panel() {
             {processes.map((process, index) => {
               const color = getProcessColor(index);
               const status = globalProcessStatus[index];
-              const isOnline = status.isOnline;
-              const isFailed = !status.isOnline && status.downTime > 0;
-              const isInactive = !status.isOnline && status.downTime === 0 && status.activeTime === 0;
+              const isActive = status.isOnline;
               
               return (
                 <div 
                   key={index} 
                   className={`p-4 rounded-xl border-2 transition-all duration-300 ${
-                    isOnline ? 'bg-green-500/10 border-green-500/50' :
-                    isFailed ? 'bg-red-500/10 border-red-500/50' :
-                    'bg-card/50 border-border'
+                    isActive ? 'bg-green-500/10 border-green-500/50' : 'bg-red-500/10 border-red-500/50'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-3">
                     <h4 className={`font-semibold ${color.text}`}>{color.name}</h4>
                     <span className={`inline-flex h-3 w-3 rounded-full ${
-                      isOnline ? 'bg-green-500 animate-pulse' :
-                      isFailed ? 'bg-red-500' :
-                      'bg-muted'
+                      isActive ? 'bg-green-500 animate-pulse' : 'bg-red-500'
                     }`} />
                   </div>
                   
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between items-center">
                       <span className="text-muted-foreground">Estado:</span>
-                      <span className={`font-semibold ${
-                        isOnline ? 'text-green-500' : 
-                        isFailed ? 'text-red-500' : 
-                        'text-muted-foreground'
-                      }`}>
-                        {isOnline ? '✓ En línea' : 
-                         isFailed ? '✗ Sin transmisión' : 
-                         '○ Inactivo'}
+                      <span className={`font-semibold ${isActive ? 'text-green-500' : 'text-red-500'}`}>
+                        {isActive ? 'Activo' : 'Inactivo'}
                       </span>
                     </div>
                     
                     <div className="flex justify-between items-center">
                       <span className="text-muted-foreground">
-                        {isOnline ? 'Tiempo activo:' : 
-                         isFailed ? 'Tiempo caído:' : 
-                         'Tiempo inactivo:'}
+                        {isActive ? 'Tiempo activo:' : 'Tiempo caído:'}
                       </span>
                       <span className="font-mono font-semibold text-foreground">
-                        {formatSeconds(
-                          isOnline ? Math.floor(status.activeTime) : 
-                          isFailed ? Math.floor(status.downTime) : 
-                          0
-                        )}
+                        {formatSeconds(Math.floor(isActive ? status.activeTime : status.downTime))}
                       </span>
                     </div>
                   </div>
