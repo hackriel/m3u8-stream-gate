@@ -886,12 +886,27 @@ export default function EmisorM3U8Panel() {
       previewSuffix: "/video.m3u8"
     });
     
-    // Limpiar localStorage de todos los datos
+    // Limpiar localStorage de todos los datos del proceso
     localStorage.removeItem(`emisor_m3u8_${processIndex}`);
     localStorage.removeItem(`emisor_rtmp_${processIndex}`);
     localStorage.removeItem(`emisor_preview_suffix_${processIndex}`);
     localStorage.removeItem(`emisor_failure_reason_${processIndex}`);
     localStorage.removeItem(`emisor_failure_details_${processIndex}`);
+    localStorage.removeItem(`emisor_is_emitting_${processIndex}`);
+    localStorage.removeItem(`emisor_elapsed_${processIndex}`);
+    localStorage.removeItem(`emisor_start_time_${processIndex}`);
+    localStorage.removeItem(`emisor_status_${processIndex}`);
+    localStorage.removeItem(`emisor_msg_${processIndex}`);
+    
+    // Limpiar el estado global del proceso
+    setGlobalProcessStatus(prev => {
+      const updated = {
+        ...prev,
+        [processIndex]: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 }
+      };
+      localStorage.setItem('global_process_status', JSON.stringify(updated));
+      return updated;
+    });
     
     // Limpiar el reproductor
     try {
@@ -909,7 +924,7 @@ export default function EmisorM3U8Panel() {
       console.error("Error limpiando reproductor:", e);
     }
     
-    console.log(`🧹 Proceso ${processIndex + 1} limpiado, listo para nueva configuración`);
+    console.log(`🧹 Proceso ${processIndex + 1} limpiado completamente, listo para nueva configuración`);
   }
 
   const getStatusColor = (status: string) => {
@@ -1151,12 +1166,26 @@ export default function EmisorM3U8Panel() {
   return (
     <div className="min-h-screen w-full bg-background text-foreground p-6">
       <div className="max-w-6xl mx-auto">
-        <header className="mb-6 flex items-center justify-between">
+        <header className="mb-6 flex items-center justify-between flex-wrap gap-4">
           <h1 className="text-2xl md:text-3xl font-semibold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
             Emisor M3U8 → RTMP – Panel Multi-Proceso
           </h1>
-          <div className="text-sm text-muted-foreground">
-            Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/4</span>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => {
+                if (confirm('¿Estás seguro de que deseas limpiar TODO el caché y localStorage? Esto eliminará toda la información guardada.')) {
+                  localStorage.clear();
+                  toast.success('Caché global limpiado exitosamente');
+                  setTimeout(() => window.location.reload(), 500);
+                }
+              }}
+              className="px-4 py-2 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive text-sm font-medium transition-all duration-200 flex items-center gap-2"
+            >
+              🗑️ Borrar caché global
+            </button>
+            <div className="text-sm text-muted-foreground">
+              Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/4</span>
+            </div>
           </div>
         </header>
 
