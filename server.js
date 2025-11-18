@@ -901,6 +901,11 @@ const scheduleCacheClear = () => {
 
 scheduleCacheClear();
 
+// Ruta catch-all para servir la aplicación React (debe ir después de todas las rutas API)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
 // Manejo de cierre limpio
 process.on('SIGINT', () => {
   sendLog('system', 'warn', 'Cerrando servidor...');
