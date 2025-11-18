@@ -76,7 +76,11 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      increment_active_time: {
+        Args: { process_id: number }
+        Returns: undefined
+      }
+      increment_down_time: { Args: { process_id: number }; Returns: undefined }
     }
     Enums: {
       [_ in never]: never
