@@ -29,7 +29,7 @@ print_status "Caché limpiado"
 
 # 3. Instalar dependencias
 echo "📦 Instalando dependencias..."
-npm install --no-package-lock --legacy-peer-deps
+npm install --legacy-peer-deps
 
 if [ $? -ne 0 ]; then
     print_error "Error instalando dependencias"
@@ -37,6 +37,13 @@ if [ $? -ne 0 ]; then
 fi
 
 print_status "Dependencias instaladas"
+
+# 3.5. Verificar que @supabase/supabase-js esté instalado
+if [ ! -d "node_modules/@supabase/supabase-js" ]; then
+    print_error "@supabase/supabase-js no se instaló correctamente"
+    exit 1
+fi
+print_status "@supabase/supabase-js verificado"
 
 # 4. Build de la aplicación
 echo "🔨 Construyendo aplicación..."
