@@ -14,7 +14,63 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      emission_processes: {
+        Row: {
+          active_time: number
+          created_at: string
+          down_time: number
+          elapsed: number
+          emit_msg: string
+          emit_status: string
+          failure_details: string | null
+          failure_reason: string | null
+          id: number
+          is_active: boolean
+          is_emitting: boolean
+          m3u8: string
+          preview_suffix: string
+          rtmp: string
+          start_time: number
+          updated_at: string
+        }
+        Insert: {
+          active_time?: number
+          created_at?: string
+          down_time?: number
+          elapsed?: number
+          emit_msg?: string
+          emit_status?: string
+          failure_details?: string | null
+          failure_reason?: string | null
+          id: number
+          is_active?: boolean
+          is_emitting?: boolean
+          m3u8?: string
+          preview_suffix?: string
+          rtmp?: string
+          start_time?: number
+          updated_at?: string
+        }
+        Update: {
+          active_time?: number
+          created_at?: string
+          down_time?: number
+          elapsed?: number
+          emit_msg?: string
+          emit_status?: string
+          failure_details?: string | null
+          failure_reason?: string | null
+          id?: number
+          is_active?: boolean
+          is_emitting?: boolean
+          m3u8?: string
+          preview_suffix?: string
+          rtmp?: string
+          start_time?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
