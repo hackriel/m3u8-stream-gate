@@ -457,7 +457,9 @@ export default function EmisorM3U8Panel() {
     return `${baseUrl}${joiner}${previewSuffix}`;
   };
 
-  // --- Control de preview local (HLS.js / nativo) mejorado ---
+  // --- Control de preview local (HLS.js / nativo) optimizado ---
+  // IMPORTANTE: Solo cargamos el preview del RTMP de salida, NUNCA del M3U8 fuente
+  // para evitar múltiples consultas que pueden causar caídas de transmisión
   async function loadPreview(url: string, processIndex: number) {
     const video = videoRefs[processIndex].current;
     if (!video || !url) {
@@ -465,7 +467,7 @@ export default function EmisorM3U8Panel() {
       return;
     }
 
-    console.log("🎥 Cargando preview URL:", url);
+    console.log("🎥 Cargando preview RTMP (no M3U8 fuente):", url);
 
     // Limpia reproducción previa si existe
     try {
@@ -519,20 +521,24 @@ export default function EmisorM3U8Panel() {
             liveMaxLatencyDurationCount: 5,
             liveDurationInfinity: true,
             
-            // Buffer configuration para live
-            maxBufferLength: 10,
-            maxMaxBufferLength: 20,
-            backBufferLength: 30,
+            // Buffer configuration optimizada para reducir requests
+            maxBufferLength: 15,
+            maxMaxBufferLength: 30,
+            backBufferLength: 20,
+            maxBufferSize: 30 * 1000 * 1000, // 30MB max buffer
             
             // Fragment loading
             maxFragLookUpTolerance: 0.25,
             fragLoadingTimeOut: 10000,
             manifestLoadingTimeOut: 10000,
             
-            // Retry configuration
-            fragLoadingMaxRetry: 4,
-            manifestLoadingMaxRetry: 4,
-            levelLoadingMaxRetry: 4,
+            // Retry configuration optimizada para evitar múltiples requests
+            fragLoadingMaxRetry: 2,
+            manifestLoadingMaxRetry: 2,
+            levelLoadingMaxRetry: 2,
+            fragLoadingMaxRetryTimeout: 2000,
+            manifestLoadingMaxRetryTimeout: 2000,
+            levelLoadingMaxRetryTimeout: 2000,
             
             // CORS and headers
             xhrSetup: (xhr: XMLHttpRequest, url: string) => {
@@ -754,12 +760,12 @@ export default function EmisorM3U8Panel() {
           isEmitiendo: true
         });
         
-        // Cargar preview desde RTMP
+        // Cargar preview desde RTMP con delay mayor para evitar conflictos
         const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
         if (previewUrl) {
           setTimeout(() => {
             loadPreview(previewUrl, processIndex);
-          }, 2000);
+          }, 5000); // 5 segundos para asegurar que FFmpeg ya está emitiendo
         }
       } catch (e: any) {
         const errorMsg = `No se pudo iniciar la emisión: ${e.message}`;
@@ -822,13 +828,13 @@ export default function EmisorM3U8Panel() {
         isEmitiendo: true
       });
 
-      // Cargar preview desde RTMP
+      // Cargar preview desde RTMP con delay mayor para evitar conflictos
       const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
       console.log(`🔄 Iniciando preview ${processIndex + 1} con URL:`, previewUrl);
       if (previewUrl) {
         setTimeout(() => {
           loadPreview(previewUrl, processIndex);
-        }, 2000);
+        }, 5000); // 5 segundos para asegurar que FFmpeg ya está emitiendo
       }
     } catch (e: any) {
       const errorMsg = `No se pudo iniciar la emisión: ${e.message}`;

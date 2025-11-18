@@ -285,7 +285,8 @@ app.post('/api/emit', async (req, res) => {
     emissionStatuses.set(process_id, 'starting');
     
     // Detectar resolución para optimizar CPU
-    sendLog(process_id, 'info', `Detectando resolución de la fuente...`);
+    // OPTIMIZACIÓN: Solo detectamos resolución si realmente es necesario
+    sendLog(process_id, 'info', `Verificando resolución de la fuente...`);
     const resolution = await detectM3U8Resolution(source_m3u8);
     const needsRecode = resolution.height > 720;
     
@@ -298,7 +299,9 @@ app.post('/api/emit', async (req, res) => {
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
+        '-reconnect_delay_max', '10', // Aumentado de 5 a 10 segundos para reducir requests
+        '-reconnect_at_eof', '1',
+        '-multiple_requests', '0', // Evitar múltiples requests paralelos
         '-re',
         '-i', source_m3u8,
         '-c:v', 'libx264',
@@ -321,13 +324,15 @@ app.post('/api/emit', async (req, res) => {
         target_rtmp
       ];
     } else {
-      // Copy directo - MUY bajo CPU (8-10%)
+      // Copy directo - MUY bajo CPU (8-10%) - Optimizado para evitar múltiples requests
       sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, usando copy (bajo CPU)...`);
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
+        '-reconnect_delay_max', '10', // Aumentado de 5 a 10 segundos para reducir requests
+        '-reconnect_at_eof', '1',
+        '-multiple_requests', '0', // Evitar múltiples requests paralelos
         '-re',
         '-i', source_m3u8,
         '-c:v', 'copy',
