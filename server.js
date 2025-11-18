@@ -9,10 +9,18 @@ import multer from 'multer';
 import fs from 'fs';
 import { createClient } from '@supabase/supabase-js';
 
-// Configurar cliente de Supabase
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Configurar cliente de Supabase (opcional, solo si hay variables de entorno)
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+let supabase = null;
+
+if (supabaseUrl && supabaseKey) {
+  supabase = createClient(supabaseUrl, supabaseKey);
+  console.log('✅ Cliente de Supabase inicializado correctamente.');
+} else {
+  console.warn('⚠️ Supabase no está configurado (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY). Se desactivan logs persistentes en base de datos.');
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -287,43 +295,52 @@ app.post('/api/emit', async (req, res) => {
       existingProcess.process.kill('SIGTERM');
       ffmpegProcesses.delete(process_id);
       
-      // Actualizar el registro anterior como finalizado
-      await supabase
-        .from('emission_processes')
-        .update({ 
-          is_active: false, 
-          is_emitting: false, 
-          ended_at: new Date().toISOString(),
-          emit_status: 'stopped'
-        })
-        .eq('id', parseInt(process_id))
-        .eq('is_emitting', true);
+      // Actualizar el registro anterior como finalizado (solo si Supabase está disponible)
+      if (supabase) {
+        await supabase
+          .from('emission_processes')
+          .update({ 
+            is_active: false, 
+            is_emitting: false, 
+            ended_at: new Date().toISOString(),
+            emit_status: 'stopped'
+          })
+          .eq('id', parseInt(process_id))
+          .eq('is_emitting', true);
+      }
     }
 
     emissionStatuses.set(process_id, 'starting');
     
-    // Crear o actualizar registro en base de datos
-    const { data: dbRecord, error: dbError } = await supabase
-      .from('emission_processes')
-      .upsert({
-        id: parseInt(process_id),
-        m3u8: source_m3u8,
-        rtmp: target_rtmp,
-        is_active: true,
-        is_emitting: true,
-        emit_status: 'starting',
-        start_time: Date.now(),
-        process_logs: `[${new Date().toISOString()}] Iniciando emisión desde M3U8\n`,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'id' })
-      .select()
-      .single();
-    
-    if (dbError) {
-      sendLog(process_id, 'warn', `Error guardando en DB: ${dbError.message}`);
+    // Crear o actualizar registro en base de datos (solo si Supabase está disponible)
+    let dbRecord = null;
+    if (supabase) {
+      const { data, error: dbError } = await supabase
+        .from('emission_processes')
+        .upsert({
+          id: parseInt(process_id),
+          m3u8: source_m3u8,
+          rtmp: target_rtmp,
+          is_active: true,
+          is_emitting: true,
+          emit_status: 'starting',
+          start_time: Date.now(),
+          process_logs: `[${new Date().toISOString()}] Iniciando emisión desde M3U8\n`,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' })
+        .select()
+        .single();
+
+      dbRecord = data || null;
+
+      if (dbError) {
+        sendLog(process_id, 'warn', `Error guardando en DB: ${dbError.message}`);
+      } else {
+        sendLog(process_id, 'info', `✅ Proceso guardado en base de datos (ID: ${process_id})`);
+      }
     } else {
-      sendLog(process_id, 'info', `✅ Proceso guardado en base de datos (ID: ${process_id})`);
+      sendLog(process_id, 'warn', 'Supabase no configurado: no se guardará el proceso en base de datos.');
     }
     
     // Detectar resolución para optimizar CPU
@@ -459,18 +476,20 @@ app.post('/api/emit', async (req, res) => {
         sendFailureNotification(process_id, 'server', `Proceso terminado con código de error ${code}`);
       }
       
-      // Actualizar base de datos
-      await supabase
-        .from('emission_processes')
-        .update({
-          is_active: false,
-          is_emitting: false,
-          emit_status: finalStatus,
-          ended_at: new Date().toISOString(),
-          process_logs: `[${new Date().toISOString()}] ${logMessage}\n`,
-          elapsed: Math.floor(runtime / 1000)
-        })
-        .eq('id', parseInt(process_id));
+      // Actualizar base de datos (solo si Supabase está disponible)
+      if (supabase) {
+        await supabase
+          .from('emission_processes')
+          .update({
+            is_active: false,
+            is_emitting: false,
+            emit_status: finalStatus,
+            ended_at: new Date().toISOString(),
+            process_logs: `[${new Date().toISOString()}] ${logMessage}\n`,
+            elapsed: Math.floor(runtime / 1000)
+          })
+          .eq('id', parseInt(process_id));
+      }
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
@@ -481,19 +500,21 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'error', `Error crítico de FFmpeg: ${error.message}`, { error: error.toString() });
       sendFailureNotification(process_id, 'server', `Error crítico del servidor: ${error.message}`);
       
-      // Actualizar base de datos
-      await supabase
-        .from('emission_processes')
-        .update({
-          is_active: false,
-          is_emitting: false,
-          emit_status: 'error',
-          ended_at: new Date().toISOString(),
-          failure_reason: 'server',
-          failure_details: error.message,
-          process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`
-        })
-        .eq('id', parseInt(process_id));
+      // Actualizar base de datos (solo si Supabase está disponible)
+      if (supabase) {
+        await supabase
+          .from('emission_processes')
+          .update({
+            is_active: false,
+            is_emitting: false,
+            emit_status: 'error',
+            ended_at: new Date().toISOString(),
+            failure_reason: 'server',
+            failure_details: error.message,
+            process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`
+          })
+          .eq('id', parseInt(process_id));
+      }
       
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
@@ -572,17 +593,19 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       existingProcess.process.kill('SIGTERM');
       ffmpegProcesses.delete(process_id);
       
-      // Actualizar el registro anterior como finalizado
-      await supabase
-        .from('emission_processes')
-        .update({ 
-          is_active: false, 
-          is_emitting: false, 
-          ended_at: new Date().toISOString(),
-          emit_status: 'stopped'
-        })
-        .eq('id', parseInt(process_id))
-        .eq('is_emitting', true);
+      // Actualizar el registro anterior como finalizado (solo si Supabase está disponible)
+      if (supabase) {
+        await supabase
+          .from('emission_processes')
+          .update({ 
+            is_active: false, 
+            is_emitting: false, 
+            ended_at: new Date().toISOString(),
+            emit_status: 'stopped'
+          })
+          .eq('id', parseInt(process_id))
+          .eq('is_emitting', true);
+      }
     }
 
     emissionStatuses.set(process_id, 'starting');
@@ -793,18 +816,20 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         sendFailureNotification(process_id, 'server', `Proceso de archivos terminado con código de error ${code}`);
       }
       
-      // Actualizar base de datos
-      await supabase
-        .from('emission_processes')
-        .update({
-          is_active: false,
-          is_emitting: false,
-          emit_status: finalStatus,
-          ended_at: new Date().toISOString(),
-          process_logs: `[${new Date().toISOString()}] ${logMessage}\n`,
-          elapsed: Math.floor(runtime / 1000)
-        })
-        .eq('id', parseInt(process_id));
+      // Actualizar base de datos (solo si Supabase está disponible)
+      if (supabase) {
+        await supabase
+          .from('emission_processes')
+          .update({
+            is_active: false,
+            is_emitting: false,
+            emit_status: finalStatus,
+            ended_at: new Date().toISOString(),
+            process_logs: `[${new Date().toISOString()}] ${logMessage}\n`,
+            elapsed: Math.floor(runtime / 1000)
+          })
+          .eq('id', parseInt(process_id));
+      }
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
@@ -814,19 +839,21 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'error', `Error crítico de FFmpeg: ${error.message}`);
       sendFailureNotification(process_id, 'server', `Error crítico del servidor: ${error.message}`);
       
-      // Actualizar base de datos
-      await supabase
-        .from('emission_processes')
-        .update({
-          is_active: false,
-          is_emitting: false,
-          emit_status: 'error',
-          ended_at: new Date().toISOString(),
-          failure_reason: 'server',
-          failure_details: error.message,
-          process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`
-        })
-        .eq('id', parseInt(process_id));
+      // Actualizar base de datos (solo si Supabase está disponible)
+      if (supabase) {
+        await supabase
+          .from('emission_processes')
+          .update({
+            is_active: false,
+            is_emitting: false,
+            emit_status: 'error',
+            ended_at: new Date().toISOString(),
+            failure_reason: 'server',
+            failure_details: error.message,
+            process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`
+          })
+          .eq('id', parseInt(process_id));
+      }
       
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
@@ -868,17 +895,19 @@ app.post('/api/emit/stop', async (req, res) => {
     if (processData && processData.process && !processData.process.killed) {
       emissionStatuses.set(process_id, 'stopping');
       
-      // Actualizar base de datos antes de detener
-      await supabase
-        .from('emission_processes')
-        .update({
-          is_active: false,
-          is_emitting: false,
-          emit_status: 'stopped',
-          ended_at: new Date().toISOString(),
-          process_logs: `[${new Date().toISOString()}] Emisión detenida manualmente\n`
-        })
-        .eq('id', parseInt(process_id));
+      // Actualizar base de datos antes de detener (solo si Supabase está disponible)
+      if (supabase) {
+        await supabase
+          .from('emission_processes')
+          .update({
+            is_active: false,
+            is_emitting: false,
+            emit_status: 'stopped',
+            ended_at: new Date().toISOString(),
+            process_logs: `[${new Date().toISOString()}] Emisión detenida manualmente\n`
+          })
+          .eq('id', parseInt(process_id));
+      }
       
       // Intentar terminar graciosamente
       processData.process.kill('SIGTERM');
@@ -932,21 +961,26 @@ app.delete('/api/emit/:process_id', async (req, res) => {
       emissionStatuses.set(process_id, 'idle');
     }
     
-    // Eliminar de la base de datos solo este proceso específico
-    const { error } = await supabase
-      .from('emission_processes')
-      .delete()
-      .eq('id', parseInt(process_id));
-    
-    if (error) {
-      sendLog(process_id, 'error', `Error eliminando de DB: ${error.message}`);
-      return res.status(500).json({ 
-        error: 'Error eliminando proceso', 
-        details: error.message 
-      });
+    // Eliminar de la base de datos solo este proceso específico (solo si Supabase está disponible)
+    if (supabase) {
+      const { error } = await supabase
+        .from('emission_processes')
+        .delete()
+        .eq('id', parseInt(process_id));
+      
+      if (error) {
+        sendLog(process_id, 'error', `Error eliminando de DB: ${error.message}`);
+        return res.status(500).json({ 
+          error: 'Error eliminando proceso', 
+          details: error.message 
+        });
+      }
+      
+      sendLog(process_id, 'success', `✅ Proceso ${process_id} eliminado completamente de la base de datos`);
+    } else {
+      sendLog(process_id, 'warn', 'Supabase no configurado: solo se detuvo el proceso en memoria, no se eliminó de la base de datos.');
     }
     
-    sendLog(process_id, 'success', `✅ Proceso ${process_id} eliminado completamente de la base de datos`);
     res.json({ 
       success: true, 
       message: `Proceso ${process_id} eliminado correctamente` 
