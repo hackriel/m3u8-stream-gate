@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -40,56 +41,161 @@ export default function EmisorM3U8Panel() {
   const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
+  const [isLoading, setIsLoading] = useState(true);
   
-  // Estado global independiente - se sincroniza con el estado local de cada proceso
-  const [globalProcessStatus, setGlobalProcessStatus] = useState<{
-    [key: number]: {
-      isActive: boolean;
-      startTime: number; // timestamp cuando inició
-      activeTime: number; // segundos activo acumulados
-      downTime: number; // segundos caído acumulados
+  // Estado para 4 procesos independientes - ahora carga desde Supabase
+  const [processes, setProcesses] = useState<EmissionProcess[]>([
+    {
+      m3u8: "",
+      rtmp: "",
+      previewSuffix: "/video.m3u8",
+      isEmitiendo: false,
+      elapsed: 0,
+      startTime: 0,
+      emitStatus: "idle",
+      emitMsg: "",
+      reconnectAttempts: 0,
+      lastReconnectTime: 0
+    },
+    {
+      m3u8: "",
+      rtmp: "",
+      previewSuffix: "/video.m3u8",
+      isEmitiendo: false,
+      elapsed: 0,
+      startTime: 0,
+      emitStatus: "idle",
+      emitMsg: "",
+      reconnectAttempts: 0,
+      lastReconnectTime: 0
+    },
+    {
+      m3u8: "",
+      rtmp: "",
+      previewSuffix: "/video.m3u8",
+      isEmitiendo: false,
+      elapsed: 0,
+      startTime: 0,
+      emitStatus: "idle",
+      emitMsg: "",
+      reconnectAttempts: 0,
+      lastReconnectTime: 0
+    },
+    {
+      m3u8: "",
+      rtmp: "",
+      previewSuffix: "/video.m3u8",
+      isEmitiendo: false,
+      elapsed: 0,
+      startTime: 0,
+      emitStatus: "idle",
+      emitMsg: "",
+      reconnectAttempts: 0,
+      lastReconnectTime: 0
     }
-  }>(() => {
-    // Restaurar estado global desde localStorage
-    const saved = localStorage.getItem('global_process_status');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error('Error parsing global status:', e);
-      }
-    }
-    return {
-      0: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
-      1: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
-      2: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 },
-      3: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 }
-    };
-  });
-
-  // Estado para 4 procesos independientes
-  const [processes, setProcesses] = useState<EmissionProcess[]>(() => {
-    const savedProcesses = [];
-    for (let i = 0; i < 4; i++) {
-      savedProcesses.push({
-        m3u8: localStorage.getItem(`emisor_m3u8_${i}`) || "",
-        rtmp: localStorage.getItem(`emisor_rtmp_${i}`) || "",
-        previewSuffix: localStorage.getItem(`emisor_preview_suffix_${i}`) || "/video.m3u8",
-        isEmitiendo: localStorage.getItem(`emisor_is_emitting_${i}`) === "true",
-        elapsed: parseInt(localStorage.getItem(`emisor_elapsed_${i}`) || "0"),
-        startTime: parseInt(localStorage.getItem(`emisor_start_time_${i}`) || "0"),
-        emitStatus: (localStorage.getItem(`emisor_status_${i}`) as any) || "idle",
-        emitMsg: localStorage.getItem(`emisor_msg_${i}`) || "",
-        reconnectAttempts: 0,
-        lastReconnectTime: 0,
-        failureReason: localStorage.getItem(`emisor_failure_reason_${i}`) || undefined,
-        failureDetails: localStorage.getItem(`emisor_failure_details_${i}`) || undefined
-      });
-    }
-    return savedProcesses;
-  });
+  ]);
 
   const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
+  
+  // Cargar datos desde Supabase al montar el componente
+  useEffect(() => {
+    const loadFromDatabase = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('emission_processes')
+          .select('*')
+          .order('id');
+        
+        if (error) throw error;
+        
+        if (data) {
+          const loadedProcesses = data.map(row => ({
+            m3u8: row.m3u8,
+            rtmp: row.rtmp,
+            previewSuffix: row.preview_suffix,
+            isEmitiendo: row.is_emitting,
+            elapsed: row.elapsed,
+            startTime: row.start_time,
+            emitStatus: row.emit_status as "idle" | "starting" | "running" | "stopping" | "error",
+            emitMsg: row.emit_msg,
+            reconnectAttempts: 0,
+            lastReconnectTime: 0,
+            failureReason: row.failure_reason || undefined,
+            failureDetails: row.failure_details || undefined
+          }));
+          setProcesses(loadedProcesses);
+          
+          // Cargar previews de procesos activos
+          loadedProcesses.forEach((process, index) => {
+            if (process.isEmitiendo && process.emitStatus === 'running') {
+              const previewUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
+              if (previewUrl) {
+                setTimeout(() => loadPreview(previewUrl, index), 1000);
+              }
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error cargando procesos:', error);
+        toast.error('Error al cargar procesos desde la base de datos');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadFromDatabase();
+    
+    // Suscribirse a cambios en tiempo real
+    const channel = supabase
+      .channel('emission_processes_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'emission_processes'
+        },
+        (payload) => {
+          console.log('🔄 Cambio detectado en base de datos:', payload);
+          if (payload.eventType === 'UPDATE') {
+            const row = payload.new as any;
+            setProcesses(prev => {
+              const newProcesses = [...prev];
+              if (row.id >= 0 && row.id <= 3) {
+                newProcesses[row.id] = {
+                  m3u8: row.m3u8,
+                  rtmp: row.rtmp,
+                  previewSuffix: row.preview_suffix,
+                  isEmitiendo: row.is_emitting,
+                  elapsed: row.elapsed,
+                  startTime: row.start_time,
+                  emitStatus: row.emit_status,
+                  emitMsg: row.emit_msg,
+                  reconnectAttempts: 0,
+                  lastReconnectTime: 0,
+                  failureReason: row.failure_reason,
+                  failureDetails: row.failure_details
+                };
+                
+                // Si un proceso se activó en otro navegador, cargar su preview
+                if (row.is_emitting && row.emit_status === 'running') {
+                  const previewUrl = previewFromRTMP(row.rtmp, row.preview_suffix);
+                  if (previewUrl) {
+                    setTimeout(() => loadPreview(previewUrl, row.id), 500);
+                  }
+                }
+              }
+              return newProcesses;
+            });
+          }
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
   
   // Estado específico para el proceso 4 (archivos locales)
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
@@ -262,73 +368,6 @@ export default function EmisorM3U8Panel() {
     };
   }, []);
 
-  // Sincronizar el estado global con el estado local de cada proceso
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setGlobalProcessStatus((prev) => {
-        const newStatus = { ...prev };
-        
-        processes.forEach((process, i) => {
-          if (process.isEmitiendo && process.emitStatus === 'running') {
-            // Proceso activo - incrementar tiempo activo
-            if (!prev[i].isActive) {
-              // Acabamos de activarnos
-              newStatus[i] = {
-                isActive: true,
-                startTime: Date.now(),
-                activeTime: 0,
-                downTime: 0
-              };
-            } else {
-              // Ya estábamos activos - incrementar contador
-              const elapsed = Math.floor((Date.now() - prev[i].startTime) / 1000);
-              newStatus[i] = {
-                ...prev[i],
-                activeTime: elapsed
-              };
-            }
-          } else if (process.isEmitiendo && process.emitStatus === 'error') {
-            // Proceso caído - incrementar tiempo caído
-            if (prev[i].isActive) {
-              // Acabamos de caer
-              newStatus[i] = {
-                isActive: false,
-                startTime: Date.now(),
-                activeTime: prev[i].activeTime,
-                downTime: 0
-              };
-            } else {
-              // Ya estábamos caídos - incrementar contador
-              const elapsed = Math.floor((Date.now() - prev[i].startTime) / 1000);
-              newStatus[i] = {
-                ...prev[i],
-                downTime: elapsed
-              };
-            }
-          } else {
-            // Proceso inactivo (nunca se ha iniciado o se detuvo limpiamente)
-            if (prev[i].isActive || prev[i].activeTime > 0 || prev[i].downTime > 0) {
-              newStatus[i] = {
-                isActive: false,
-                startTime: 0,
-                activeTime: 0,
-                downTime: 0
-              };
-            }
-          }
-        });
-        
-        return newStatus;
-      });
-    }, 1000); // Actualizar cada segundo
-    
-    return () => clearInterval(interval);
-  }, [processes]);
-
-  // Guardar el estado global en localStorage cada vez que cambie
-  useEffect(() => {
-    localStorage.setItem('global_process_status', JSON.stringify(globalProcessStatus));
-  }, [globalProcessStatus]);
 
   // Restaurar previews al cargar la página si hay procesos activos
   useEffect(() => {
@@ -859,12 +898,12 @@ export default function EmisorM3U8Panel() {
     localStorage.removeItem(`emisor_failure_details_${processIndex}`);
   }
 
-  function onBorrar(processIndex: number) {
+  async function onBorrar(processIndex: number) {
     const process = processes[processIndex];
     
     // Primero detener emisión si está activa
     if (process.isEmitiendo) {
-      stopEmit(processIndex);
+      await stopEmit(processIndex);
     }
     
     // Para el proceso 4 (archivos locales), borrar archivos del servidor
@@ -879,33 +918,18 @@ export default function EmisorM3U8Panel() {
       setUploadProgress(0);
     }
     
-    // Limpiar campos
-    updateProcess(processIndex, {
+    // Limpiar campos en base de datos
+    await updateProcess(processIndex, {
       m3u8: "",
       rtmp: "",
-      previewSuffix: "/video.m3u8"
-    });
-    
-    // Limpiar localStorage de todos los datos del proceso
-    localStorage.removeItem(`emisor_m3u8_${processIndex}`);
-    localStorage.removeItem(`emisor_rtmp_${processIndex}`);
-    localStorage.removeItem(`emisor_preview_suffix_${processIndex}`);
-    localStorage.removeItem(`emisor_failure_reason_${processIndex}`);
-    localStorage.removeItem(`emisor_failure_details_${processIndex}`);
-    localStorage.removeItem(`emisor_is_emitting_${processIndex}`);
-    localStorage.removeItem(`emisor_elapsed_${processIndex}`);
-    localStorage.removeItem(`emisor_start_time_${processIndex}`);
-    localStorage.removeItem(`emisor_status_${processIndex}`);
-    localStorage.removeItem(`emisor_msg_${processIndex}`);
-    
-    // Limpiar el estado global del proceso
-    setGlobalProcessStatus(prev => {
-      const updated = {
-        ...prev,
-        [processIndex]: { isActive: false, startTime: 0, activeTime: 0, downTime: 0 }
-      };
-      localStorage.setItem('global_process_status', JSON.stringify(updated));
-      return updated;
+      previewSuffix: "/video.m3u8",
+      isEmitiendo: false,
+      elapsed: 0,
+      startTime: 0,
+      emitStatus: "idle",
+      emitMsg: "",
+      failureReason: undefined,
+      failureDetails: undefined
     });
     
     // Limpiar el reproductor
@@ -924,6 +948,7 @@ export default function EmisorM3U8Panel() {
       console.error("Error limpiando reproductor:", e);
     }
     
+    toast.success(`Proceso ${processIndex + 1} eliminado`);
     console.log(`🧹 Proceso ${processIndex + 1} limpiado completamente, listo para nueva configuración`);
   }
 
@@ -1232,47 +1257,51 @@ export default function EmisorM3U8Panel() {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-medium text-accent">📊 Estado Global de Procesos</h3>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {processes.map((process, index) => {
-              const color = getProcessColor(index);
-              const status = globalProcessStatus[index];
-              const isActive = status.isActive;
-              
-              return (
-                <div 
-                  key={index} 
-                  className={`p-4 rounded-xl border-2 transition-all duration-300 ${
-                    isActive ? 'bg-green-500/10 border-green-500/50' : 'bg-muted/30 border-border'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className={`font-semibold ${color.text}`}>{color.name}</h4>
-                    <span className={`inline-flex h-3 w-3 rounded-full ${
-                      isActive ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-                    }`} />
-                  </div>
-                  
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Estado:</span>
-                      <span className={`font-semibold ${isActive ? 'text-green-500' : 'text-red-500'}`}>
-                        {isActive ? 'Activo' : 'Inactivo'}
-                      </span>
+          {isLoading ? (
+            <div className="text-center text-muted-foreground py-8">Cargando procesos...</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {processes.map((process, index) => {
+                const color = getProcessColor(index);
+                const isActive = process.isEmitiendo && process.emitStatus === 'running';
+                const isError = process.isEmitiendo && process.emitStatus === 'error';
+                
+                return (
+                  <div 
+                    key={index} 
+                    className={`p-4 rounded-xl border-2 transition-all duration-300 ${
+                      isActive ? 'bg-green-500/10 border-green-500/50' : isError ? 'bg-red-500/10 border-red-500/50' : 'bg-muted/30 border-border'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className={`font-semibold ${color.text}`}>{color.name}</h4>
+                      <span className={`inline-flex h-3 w-3 rounded-full ${
+                        isActive ? 'bg-green-500 animate-pulse' : isError ? 'bg-red-500 animate-pulse' : 'bg-muted'
+                      }`} />
                     </div>
                     
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">
-                        {isActive ? 'Tiempo activo:' : 'Tiempo caído:'}
-                      </span>
-                      <span className="font-mono font-semibold text-foreground">
-                        {formatSeconds(Math.floor(isActive ? status.activeTime : status.downTime))}
-                      </span>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Estado:</span>
+                        <span className={`font-semibold ${isActive ? 'text-green-500' : isError ? 'text-red-500' : 'text-muted-foreground'}`}>
+                          {isActive ? 'Activo' : isError ? 'Error' : 'Inactivo'}
+                        </span>
+                      </div>
+                      
+                      {process.isEmitiendo && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-muted-foreground">Tiempo:</span>
+                          <span className="font-mono font-semibold text-foreground">
+                            {formatSeconds(process.elapsed)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         <footer className="mt-10 text-xs text-muted-foreground space-y-4">
