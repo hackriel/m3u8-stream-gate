@@ -22,7 +22,8 @@ fi
 
 # 2. Limpiar caché y dependencias
 echo "🧹 Limpiando proyecto..."
-rm -rf node_modules package-lock.json dist .vite 2>/dev/null || true
+rm -rf node_modules package-lock.json dist .vite vite.config.ts.timestamp-* 2>/dev/null || true
+rm -rf ~/.npm ~/.cache/vite 2>/dev/null || true
 npm cache clean --force
 print_status "Caché limpiado"
 
