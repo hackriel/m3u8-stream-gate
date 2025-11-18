@@ -22,13 +22,16 @@ export type Database = {
           elapsed: number
           emit_msg: string
           emit_status: string
+          ended_at: string | null
           failure_details: string | null
           failure_reason: string | null
+          ffmpeg_pid: number | null
           id: number
           is_active: boolean
           is_emitting: boolean
           m3u8: string
           preview_suffix: string
+          process_logs: string | null
           rtmp: string
           start_time: number
           updated_at: string
@@ -40,13 +43,16 @@ export type Database = {
           elapsed?: number
           emit_msg?: string
           emit_status?: string
+          ended_at?: string | null
           failure_details?: string | null
           failure_reason?: string | null
+          ffmpeg_pid?: number | null
           id: number
           is_active?: boolean
           is_emitting?: boolean
           m3u8?: string
           preview_suffix?: string
+          process_logs?: string | null
           rtmp?: string
           start_time?: number
           updated_at?: string
@@ -58,13 +64,16 @@ export type Database = {
           elapsed?: number
           emit_msg?: string
           emit_status?: string
+          ended_at?: string | null
           failure_details?: string | null
           failure_reason?: string | null
+          ffmpeg_pid?: number | null
           id?: number
           is_active?: boolean
           is_emitting?: boolean
           m3u8?: string
           preview_suffix?: string
+          process_logs?: string | null
           rtmp?: string
           start_time?: number
           updated_at?: string
