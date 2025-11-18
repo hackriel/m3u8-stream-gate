@@ -68,8 +68,31 @@ print_status "Aplicación construida"
 
 # 5. Liberar puerto 3001
 print_warning "Liberando puerto 3001..."
+
+# Método 1: fuser
 sudo fuser -k 3001/tcp 2>/dev/null || true
-sleep 2
+
+# Método 2: lsof y kill
+PORT_PID=$(lsof -ti:3001 2>/dev/null || true)
+if [ ! -z "$PORT_PID" ]; then
+    print_warning "Matando proceso $PORT_PID en puerto 3001..."
+    kill -9 $PORT_PID 2>/dev/null || true
+fi
+
+# Método 3: Buscar procesos node/server
+pkill -f "node.*server.js" 2>/dev/null || true
+pkill -f "PORT=3001" 2>/dev/null || true
+
+# Esperar a que se libere el puerto
+sleep 3
+
+# Verificar que el puerto esté libre
+if lsof -ti:3001 >/dev/null 2>&1; then
+    print_error "El puerto 3001 sigue ocupado. Intenta manualmente: sudo lsof -ti:3001 | xargs kill -9"
+    exit 1
+fi
+
+print_status "Puerto 3001 liberado"
 
 # 6. Iniciar servidor
 echo ""
