@@ -55,24 +55,18 @@ fi
 
 print_status "Verificaciones completadas"
 
-# 3.6. Verificar que el archivo .env exista con las variables de Supabase
+# 3.6. Crear archivo .env si no existe (necesario para el build)
 if [ ! -f ".env" ]; then
-    print_error "Archivo .env no encontrado"
-    exit 1
+    print_warning "Archivo .env no encontrado, creándolo..."
+    cat > .env << 'EOF'
+VITE_SUPABASE_PROJECT_ID="zbrkijgnkckcutydsmkt"
+VITE_SUPABASE_PUBLISHABLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpicmtpamdua2NrY3V0eWRzbWt0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4OTE3NzMsImV4cCI6MjA3ODQ2Nzc3M30.igte07DdM7xmA3A-nsWXOTIno89-15i2d0PlEiIC7L8"
+VITE_SUPABASE_URL="https://zbrkijgnkckcutydsmkt.supabase.co"
+EOF
+    print_status "Archivo .env creado"
+else
+    print_status "Archivo .env encontrado"
 fi
-
-# Verificar que las variables críticas existan
-if ! grep -q "VITE_SUPABASE_URL" .env; then
-    print_error "VITE_SUPABASE_URL no encontrada en .env"
-    exit 1
-fi
-
-if ! grep -q "VITE_SUPABASE_PUBLISHABLE_KEY" .env; then
-    print_error "VITE_SUPABASE_PUBLISHABLE_KEY no encontrada en .env"
-    exit 1
-fi
-
-print_status "Variables de entorno verificadas"
 
 # 4. Build de la aplicación
 echo "🔨 Construyendo aplicación..."
