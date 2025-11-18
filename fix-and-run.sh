@@ -55,12 +55,32 @@ fi
 
 print_status "Verificaciones completadas"
 
+# 3.6. Verificar que el archivo .env exista con las variables de Supabase
+if [ ! -f ".env" ]; then
+    print_error "Archivo .env no encontrado"
+    exit 1
+fi
+
+# Verificar que las variables críticas existan
+if ! grep -q "VITE_SUPABASE_URL" .env; then
+    print_error "VITE_SUPABASE_URL no encontrada en .env"
+    exit 1
+fi
+
+if ! grep -q "VITE_SUPABASE_PUBLISHABLE_KEY" .env; then
+    print_error "VITE_SUPABASE_PUBLISHABLE_KEY no encontrada en .env"
+    exit 1
+fi
+
+print_status "Variables de entorno verificadas"
+
 # 4. Build de la aplicación
 echo "🔨 Construyendo aplicación..."
 npm run build
 
 if [ $? -ne 0 ]; then
     print_error "Error en el build"
+    print_warning "Tip: Verifica que el archivo .env tenga las variables correctas"
     exit 1
 fi
 
