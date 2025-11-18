@@ -26,4 +26,12 @@ export default defineConfig(({ mode }) => ({
     },
     extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
   },
+  optimizeDeps: {
+    include: ['@supabase/supabase-js'],
+  },
+  build: {
+    commonjsOptions: {
+      include: [/node_modules/],
+    },
+  },
 }));
