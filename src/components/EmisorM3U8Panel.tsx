@@ -34,14 +34,27 @@ interface EmissionProcess {
   lastReconnectTime: number;
   failureReason?: string; // Razón del fallo (source, rtmp, server)
   failureDetails?: string; // Detalles específicos del fallo
+  logs: LogEntry[]; // Logs en tiempo real
+  processLogsFromDB?: string; // Logs guardados en DB
+}
+
+// Tipo para una entrada de log
+interface LogEntry {
+  id: string;
+  timestamp: number;
+  level: "info" | "success" | "warn" | "error";
+  message: string;
+  details?: any;
 }
 
 export default function EmisorM3U8Panel() {
   const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
   const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
+  const logContainerRefs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
+  const wsRef = useRef<WebSocket | null>(null);
   
   // Estado para 4 procesos independientes - ahora carga desde Supabase
   const [processes, setProcesses] = useState<EmissionProcess[]>([
@@ -55,7 +68,8 @@ export default function EmisorM3U8Panel() {
       emitStatus: "idle",
       emitMsg: "",
       reconnectAttempts: 0,
-      lastReconnectTime: 0
+      lastReconnectTime: 0,
+      logs: []
     },
     {
       m3u8: "",
@@ -67,7 +81,8 @@ export default function EmisorM3U8Panel() {
       emitStatus: "idle",
       emitMsg: "",
       reconnectAttempts: 0,
-      lastReconnectTime: 0
+      lastReconnectTime: 0,
+      logs: []
     },
     {
       m3u8: "",
@@ -79,7 +94,8 @@ export default function EmisorM3U8Panel() {
       emitStatus: "idle",
       emitMsg: "",
       reconnectAttempts: 0,
-      lastReconnectTime: 0
+      lastReconnectTime: 0,
+      logs: []
     },
     {
       m3u8: "",
@@ -91,7 +107,8 @@ export default function EmisorM3U8Panel() {
       emitStatus: "idle",
       emitMsg: "",
       reconnectAttempts: 0,
-      lastReconnectTime: 0
+      lastReconnectTime: 0,
+      logs: []
     }
   ]);
 
@@ -121,7 +138,9 @@ export default function EmisorM3U8Panel() {
             reconnectAttempts: 0,
             lastReconnectTime: 0,
             failureReason: row.failure_reason || undefined,
-            failureDetails: row.failure_details || undefined
+            failureDetails: row.failure_details || undefined,
+            logs: [],
+            processLogsFromDB: row.process_logs || ''
           }));
           setProcesses(loadedProcesses);
           
@@ -174,7 +193,9 @@ export default function EmisorM3U8Panel() {
                   reconnectAttempts: 0,
                   lastReconnectTime: 0,
                   failureReason: row.failure_reason,
-                  failureDetails: row.failure_details
+                  failureDetails: row.failure_details,
+                  logs: prev[row.id]?.logs || [],
+                  processLogsFromDB: row.process_logs || ''
                 };
                 
                 // Si un proceso se activó en otro navegador, cargar su preview
@@ -310,20 +331,51 @@ export default function EmisorM3U8Panel() {
 
   // Verificación periódica eliminada - ahora se usa el sistema de monitoreo global
 
-  // WebSocket para recibir notificaciones de fallo (solo para alertas, no cambia estado definitivo)
+  // WebSocket para recibir logs y notificaciones en tiempo real
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws`;
     
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
     
     ws.onopen = () => {
-      console.log('📡 Conectado al sistema de notificaciones');
+      console.log('📡 Conectado al sistema de logs en tiempo real');
     };
     
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        
+        // Capturar logs en tiempo real
+        if (data.timestamp && data.level && data.message) {
+          const processIndex = parseInt(data.processId);
+          if (processIndex >= 0 && processIndex <= 3) {
+            const logEntry: LogEntry = {
+              id: data.id || `${Date.now()}-${Math.random()}`,
+              timestamp: data.timestamp,
+              level: data.level,
+              message: data.message,
+              details: data.details
+            };
+            
+            setProcesses(prev => {
+              const newProcesses = [...prev];
+              newProcesses[processIndex] = {
+                ...newProcesses[processIndex],
+                logs: [...newProcesses[processIndex].logs, logEntry].slice(-100) // Mantener últimos 100 logs
+              };
+              return newProcesses;
+            });
+            
+            // Scroll automático al final
+            setTimeout(() => {
+              if (logContainerRefs[processIndex].current) {
+                logContainerRefs[processIndex].current!.scrollTop = logContainerRefs[processIndex].current!.scrollHeight;
+              }
+            }, 50);
+          }
+        }
         
         // Escuchar notificaciones de fallo
         if (data.type === 'failure') {
@@ -360,11 +412,12 @@ export default function EmisorM3U8Panel() {
     };
     
     ws.onclose = () => {
-      console.log('📡 Desconectado del sistema de notificaciones');
+      console.log('📡 Desconectado del sistema de logs');
     };
     
     return () => {
       ws.close();
+      wsRef.current = null;
     };
   }, []);
 
@@ -1184,6 +1237,81 @@ export default function EmisorM3U8Panel() {
                 <span className="font-mono text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* Panel de Logs en Tiempo Real */}
+        <section className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50">
+          <h3 className="text-lg font-medium mb-3 text-accent">📋 Logs en Tiempo Real</h3>
+          
+          <div 
+            ref={logContainerRefs[processIndex]}
+            className="bg-card/50 border border-border rounded-xl p-4 h-64 overflow-y-auto font-mono text-xs space-y-1 scroll-smooth"
+          >
+            {/* Logs guardados en DB */}
+            {process.processLogsFromDB && process.processLogsFromDB.trim() && (
+              <>
+                {process.processLogsFromDB.split('\n').filter(line => line.trim()).map((line, idx) => {
+                  const isError = line.includes('Error') || line.includes('error') || line.includes('❌');
+                  const isSuccess = line.includes('exitosamente') || line.includes('✅') || line.includes('✓');
+                  const isWarning = line.includes('warn') || line.includes('⚠️');
+                  
+                  return (
+                    <div 
+                      key={`db-${idx}`} 
+                      className={`p-2 rounded ${
+                        isError ? 'bg-destructive/10 text-destructive' :
+                        isSuccess ? 'bg-success/10 text-success' :
+                        isWarning ? 'bg-warning/10 text-warning' :
+                        'text-muted-foreground'
+                      }`}
+                    >
+                      {line}
+                    </div>
+                  );
+                })}
+                {process.logs.length > 0 && <div className="border-t border-border my-2" />}
+              </>
+            )}
+            
+            {/* Logs en tiempo real */}
+            {process.logs.map((log) => (
+              <div 
+                key={log.id} 
+                className={`p-2 rounded ${
+                  log.level === 'error' ? 'bg-destructive/10 text-destructive' :
+                  log.level === 'success' ? 'bg-success/10 text-success' :
+                  log.level === 'warn' ? 'bg-warning/10 text-warning' :
+                  'text-foreground/80'
+                }`}
+              >
+                <span className="text-muted-foreground/70">
+                  [{new Date(log.timestamp).toLocaleTimeString()}]
+                </span>
+                {' '}
+                <span className={`font-semibold ${
+                  log.level === 'error' ? 'text-destructive' :
+                  log.level === 'success' ? 'text-success' :
+                  log.level === 'warn' ? 'text-warning' :
+                  'text-primary'
+                }`}>
+                  [{log.level.toUpperCase()}]
+                </span>
+                {' '}
+                {log.message}
+                {log.details && (
+                  <div className="mt-1 text-[10px] opacity-75">
+                    {JSON.stringify(log.details, null, 2)}
+                  </div>
+                )}
+              </div>
+            ))}
+            
+            {!process.processLogsFromDB && process.logs.length === 0 && (
+              <div className="text-center text-muted-foreground py-8">
+                Sin logs todavía. Los logs aparecerán aquí cuando inicies la emisión.
+              </div>
+            )}
           </div>
         </section>
 
