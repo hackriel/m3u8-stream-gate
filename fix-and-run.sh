@@ -22,14 +22,14 @@ fi
 
 # 2. Limpiar caché y dependencias
 echo "🧹 Limpiando proyecto..."
-rm -rf node_modules package-lock.json dist .vite vite.config.ts.timestamp-* 2>/dev/null || true
-rm -rf ~/.npm ~/.cache/vite 2>/dev/null || true
+rm -rf node_modules dist .vite vite.config.ts.timestamp-* 2>/dev/null || true
+rm -rf ~/.cache/vite 2>/dev/null || true
 npm cache clean --force
 print_status "Caché limpiado"
 
 # 3. Instalar dependencias
 echo "📦 Instalando dependencias..."
-npm install --legacy-peer-deps
+npm install
 
 if [ $? -ne 0 ]; then
     print_error "Error instalando dependencias"
@@ -38,12 +38,22 @@ fi
 
 print_status "Dependencias instaladas"
 
-# 3.5. Verificar que @supabase/supabase-js esté instalado
+# 3.5. Verificar que archivos críticos existan
 if [ ! -d "node_modules/@supabase/supabase-js" ]; then
     print_error "@supabase/supabase-js no se instaló correctamente"
+    print_warning "Intentando reinstalar @supabase/supabase-js..."
+    npm install @supabase/supabase-js@^2.83.0
+    if [ ! -d "node_modules/@supabase/supabase-js" ]; then
+        exit 1
+    fi
+fi
+
+if [ ! -f "src/integrations/supabase/client.ts" ]; then
+    print_error "src/integrations/supabase/client.ts no existe"
     exit 1
 fi
-print_status "@supabase/supabase-js verificado"
+
+print_status "Verificaciones completadas"
 
 # 4. Build de la aplicación
 echo "🔨 Construyendo aplicación..."
