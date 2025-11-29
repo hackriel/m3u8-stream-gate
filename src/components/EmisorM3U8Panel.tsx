@@ -246,6 +246,21 @@ export default function EmisorM3U8Panel() {
     };
   }, []);
   
+  // Timer para actualizar elapsed cada segundo desde startTime
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setProcesses(prev => prev.map(p => {
+        if (p.isEmitiendo && p.emitStatus === 'running' && p.startTime > 0) {
+          const newElapsed = Math.floor((Date.now() - p.startTime) / 1000);
+          return { ...p, elapsed: newElapsed };
+        }
+        return p;
+      }));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+  
   // Estado específico para el proceso 4 (archivos locales)
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);

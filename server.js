@@ -447,6 +447,18 @@ app.post('/api/emit', async (req, res) => {
         if (currentStatus === 'starting') {
           emissionStatuses.set(process_id, 'running');
           sendLog(process_id, 'success', `Emisión iniciada exitosamente`);
+          
+          // Actualizar base de datos a estado 'running'
+          if (supabase) {
+            await supabase
+              .from('emission_processes')
+              .update({
+                emit_status: 'running',
+                is_active: true,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', parseInt(process_id));
+          }
         }
         
         // Extraer estadísticas básicas del progreso
