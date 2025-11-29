@@ -554,7 +554,7 @@ export default function EmisorM3U8Panel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          hls_source: process.m3u8,
+          source_m3u8: process.m3u8,
           target_rtmp: process.rtmp,
           process_id: processIndex.toString()
         })
