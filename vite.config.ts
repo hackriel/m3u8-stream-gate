@@ -33,5 +33,8 @@ export default defineConfig(({ mode }) => ({
     commonjsOptions: {
       include: [/node_modules/],
     },
+    rollupOptions: {
+      external: ['child_process', 'fs', 'path', 'url', 'http', 'https', 'stream', 'util', 'os', 'crypto', 'net', 'tls', 'zlib', 'events'],
+    },
   },
 }));
