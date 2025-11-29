@@ -47,7 +47,7 @@ interface LogEntry {
   details?: any;
 }
 
-export default function EmisorM3U8Panel() {
+function EmisorM3U8Panel() {
   const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
   const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
   const logContainerRefs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
@@ -1564,3 +1564,5 @@ export default function EmisorM3U8Panel() {
     </div>
   );
 }
+
+export default EmisorM3U8Panel;
