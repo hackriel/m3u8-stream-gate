@@ -1,13 +1,7 @@
-import React, { Suspense, lazy } from "react";
-
-const EmisorM3U8Panel = lazy(() => import("../components/EmisorM3U8Panel"));
+import EmisorM3U8Panel from "../components/EmisorM3U8Panel";
 
 const Index = () => {
-  return (
-    <Suspense fallback={<div>Cargando panel de emisión...</div>}>
-      <EmisorM3U8Panel />
-    </Suspense>
-  );
+  return <EmisorM3U8Panel />;
 };
 
 export default Index;
