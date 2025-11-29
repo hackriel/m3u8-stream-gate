@@ -48,16 +48,29 @@ interface LogEntry {
 }
 
 export default function EmisorM3U8Panel() {
-  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
-  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
-  const logContainerRefs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
+  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
+  const hlsRefs = [useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null), useRef<any>(null)];
+  const logContainerRefs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
   const wsRef = useRef<WebSocket | null>(null);
   
-  // Estado para 4 procesos independientes - ahora carga desde Supabase
+  // Estado para 5 procesos independientes - ahora carga desde Supabase
   const [processes, setProcesses] = useState<EmissionProcess[]>([
+    {
+      m3u8: "",
+      rtmp: "",
+      previewSuffix: "/video.m3u8",
+      isEmitiendo: false,
+      elapsed: 0,
+      startTime: 0,
+      emitStatus: "idle",
+      emitMsg: "",
+      reconnectAttempts: 0,
+      lastReconnectTime: 0,
+      logs: []
+    },
     {
       m3u8: "",
       rtmp: "",
@@ -112,7 +125,7 @@ export default function EmisorM3U8Panel() {
     }
   ]);
 
-  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
+  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
   
   // Cargar datos desde Supabase al montar el componente
   useEffect(() => {
@@ -126,7 +139,7 @@ export default function EmisorM3U8Panel() {
         if (error) throw error;
         
         if (data) {
-          const loadedProcesses = data.map(row => ({
+          const loadedProcesses = data.slice(0, 5).map(row => ({
             m3u8: row.m3u8,
             rtmp: row.rtmp,
             previewSuffix: row.preview_suffix,
@@ -142,6 +155,27 @@ export default function EmisorM3U8Panel() {
             logs: [],
             processLogsFromDB: row.process_logs || ''
           }));
+          
+          // Asegurar que siempre tengamos 5 procesos
+          while (loadedProcesses.length < 5) {
+            loadedProcesses.push({
+              m3u8: "",
+              rtmp: "",
+              previewSuffix: "/video.m3u8",
+              isEmitiendo: false,
+              elapsed: 0,
+              startTime: 0,
+              emitStatus: "idle",
+              emitMsg: "",
+              reconnectAttempts: 0,
+              lastReconnectTime: 0,
+              failureReason: undefined,
+              failureDetails: undefined,
+              logs: [],
+              processLogsFromDB: ''
+            });
+          }
+          
           setProcesses(loadedProcesses);
           
           // Cargar previews de procesos activos
@@ -180,7 +214,7 @@ export default function EmisorM3U8Panel() {
             const row = payload.new as any;
             setProcesses(prev => {
               const newProcesses = [...prev];
-              if (row.id >= 0 && row.id <= 3) {
+              if (row.id >= 0 && row.id <= 4) {
                 newProcesses[row.id] = {
                   m3u8: row.m3u8,
                   rtmp: row.rtmp,
@@ -241,7 +275,7 @@ export default function EmisorM3U8Panel() {
           
           // Guardar solo datos esenciales
           const essentialData: Record<string, string> = {};
-          for (let i = 0; i < 4; i++) {
+          for (let i = 0; i < 5; i++) {
             const m3u8 = localStorage.getItem(`emisor_m3u8_${i}`);
             const rtmp = localStorage.getItem(`emisor_rtmp_${i}`);
             if (m3u8) essentialData[`emisor_m3u8_${i}`] = m3u8;
@@ -350,7 +384,7 @@ export default function EmisorM3U8Panel() {
         // Capturar logs en tiempo real
         if (data.timestamp && data.level && data.message) {
           const processIndex = parseInt(data.processId);
-          if (processIndex >= 0 && processIndex <= 3) {
+          if (processIndex >= 0 && processIndex <= 4) {
             const logEntry: LogEntry = {
               id: data.id || `${Date.now()}-${Math.random()}`,
               timestamp: data.timestamp,
@@ -838,6 +872,68 @@ export default function EmisorM3U8Panel() {
       return;
     }
     
+    // Proceso 5 (índice 4) usa YouTube
+    if (processIndex === 4) {
+      if (!process.m3u8 || !process.rtmp) {
+        updateProcess(processIndex, {
+          emitStatus: "error",
+          emitMsg: "Falta URL de YouTube o RTMP"
+        });
+        return;
+      }
+      
+      updateProcess(processIndex, {
+        emitStatus: "starting",
+        emitMsg: "Extrayendo stream de YouTube...",
+        reconnectAttempts: 0,
+        lastReconnectTime: 0,
+        failureReason: undefined,
+        failureDetails: undefined
+      });
+
+      console.log(`🚀 Iniciando emisión YouTube ${processIndex + 1}: ${process.m3u8} → ${process.rtmp}`);
+
+      try {
+        const resp = await fetch("/api/emit/youtube", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ 
+            youtube_url: process.m3u8, 
+            target_rtmp: process.rtmp, 
+            process_id: processIndex.toString()
+          }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json().catch(() => ({}));
+        
+        updateProcess(processIndex, {
+          emitStatus: "running",
+          emitMsg: data?.message || "Emitiendo YouTube a RTMP",
+          elapsed: 0,
+          startTime: Math.floor(Date.now() / 1000),
+          isEmitiendo: true
+        });
+
+      } catch (e: any) {
+        const errorMsg = `No se pudo iniciar la emisión: ${e.message}`;
+        
+        toast.error(`❌ Error en Proceso YouTube`, {
+          description: errorMsg,
+        });
+        
+        updateProcess(processIndex, {
+          emitStatus: "error",
+          emitMsg: errorMsg,
+          isEmitiendo: false,
+          failureReason: "server",
+          failureDetails: `Error al iniciar stream YouTube: ${e.message}`
+        });
+      }
+      return;
+    }
+    
     // Procesos 1-3 usan M3U8
     if (!process.m3u8 || !process.rtmp) {
       updateProcess(processIndex, {
@@ -965,7 +1061,7 @@ export default function EmisorM3U8Panel() {
       await stopEmit(processIndex);
     }
     
-    // Para el proceso 4 (archivos locales), borrar archivos del servidor
+    // Para el proceso 4 (índice 3) (archivos locales), borrar archivos del servidor
     if (processIndex === 3 && uploadedFiles.length > 0) {
       fetch('/api/emit/files', {
         method: 'DELETE',
@@ -1056,7 +1152,8 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "Proceso 1" },
       { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Proceso 2" },
       { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "Proceso 3" },
-      { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Proceso 4" }
+      { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Proceso 4" },
+      { bg: "bg-red-500", text: "text-red-500", stroke: "#ef4444", name: "YouTube" }
     ];
     return colors[processIndex];
   };
@@ -1071,10 +1168,25 @@ export default function EmisorM3U8Panel() {
           {/* Panel de configuración */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
             <h2 className="text-lg font-medium mb-4 text-accent">
-              {processIndex === 3 ? "Archivos Locales" : "Fuente y Cabeceras"} - Proceso {processIndex + 1}
+              {processIndex === 3 ? "Archivos Locales" : processIndex === 4 ? "YouTube" : "Fuente y Cabeceras"} - {processIndex === 4 ? "YouTube" : `Proceso ${processIndex + 1}`}
             </h2>
 
-            {processIndex === 3 ? (
+            {processIndex === 4 ? (
+              // Proceso 5 (índice 4): URL de YouTube
+              <>
+                <label className="block text-sm mb-2 text-muted-foreground">URL de YouTube (video o stream en vivo)</label>
+                <input
+                  type="url"
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  value={process.m3u8}
+                  onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
+                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+                />
+                <p className="text-xs text-muted-foreground mb-4">
+                  📺 Soporta videos y streams en vivo de YouTube. Se utilizará la máxima calidad disponible.
+                </p>
+              </>
+            ) : processIndex === 3 ? (
               // Proceso 4: Upload de archivos
               <>
                 <label className="block text-sm mb-2 text-muted-foreground">Archivos de video (MP4, MKV, etc.)</label>
@@ -1192,50 +1304,32 @@ export default function EmisorM3U8Panel() {
             )}
           </div>
 
-          {/* Player */}
-          <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-4 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <h2 className="text-lg font-medium mb-4 text-accent">Vista previa - Proceso {processIndex + 1}</h2>
-            <div className="aspect-video w-full overflow-hidden rounded-xl bg-black border border-border shadow-inner">
-              <video
-                ref={videoRefs[processIndex]}
-                className="w-full h-full object-contain"
-                controls
-                playsInline
-                muted
-                onError={() => { /* El recolector de salud detectará caída */ }}
-              />
-            </div>
-            <div className="mt-3 text-sm flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-2">
-                <span className={`inline-flex h-2.5 w-2.5 rounded-full ${process.isEmitiendo ? "bg-status-live" : "bg-status-idle"} animate-pulse`}></span>
-                <span>Estado: <strong>{process.isEmitiendo ? "🔴 EN VIVO" : "⚫ Detenido"}</strong></span>
+          {/* Panel de Estado - Reemplaza el player de video */}
+          <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
+            <h2 className="text-lg font-medium mb-4 text-accent">Estado de Emisión</h2>
+            
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-card/50 border border-border">
+                <span className={`inline-flex h-4 w-4 rounded-full ${process.isEmitiendo ? "bg-status-live" : "bg-status-idle"} ${process.isEmitiendo ? "animate-pulse" : ""}`}></span>
+                <div>
+                  <div className="text-sm text-muted-foreground">Estado</div>
+                  <div className="text-lg font-semibold">{process.isEmitiendo ? "🔴 EN VIVO" : "⚫ Detenido"}</div>
+                </div>
               </div>
               
-              <button
-                onClick={() => {
-                  const testUrl = previewFromRTMP(process.rtmp, process.previewSuffix);
-                  if (testUrl) {
-                    console.log(`🧪 Probando reproducción manual de proceso ${processIndex + 1}:`, testUrl);
-                    loadPreview(testUrl, processIndex);
-                  } else {
-                    console.warn("⚠️ No hay URL de preview disponible");
-                  }
-                }}
-                className="px-3 py-1 rounded-lg bg-secondary hover:bg-secondary/90 text-secondary-foreground text-xs transition-all duration-200"
-              >
-                🔄 Probar reproducción
-              </button>
+              <div className="p-4 rounded-xl bg-card/50 border border-border">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Tiempo emitiendo:</span>
+                  <span className="font-mono text-xl text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
+                </div>
+              </div>
               
-              <div className="text-xs text-muted-foreground">
-                URL: <code className="bg-card px-1 rounded text-[10px]">{previewFromRTMP(process.rtmp, process.previewSuffix) || "No configurada"}</code>
-              </div>
-            </div>
-
-            <div className="mt-4 text-sm">
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Tiempo emitiendo:</span>
-                <span className="font-mono text-primary font-semibold">{formatSeconds(process.elapsed)}</span>
-              </div>
+              {process.rtmp && (
+                <div className="p-4 rounded-xl bg-card/50 border border-border">
+                  <div className="text-sm text-muted-foreground mb-2">Destino RTMP:</div>
+                  <code className="text-xs text-foreground break-all">{process.rtmp}</code>
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -1343,14 +1437,14 @@ export default function EmisorM3U8Panel() {
               🗑️ Borrar caché global
             </button>
             <div className="text-sm text-muted-foreground">
-              Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/4</span>
+              Procesos activos: <span className="font-mono text-primary">{processes.filter(p => p.isEmitiendo).length}/5</span>
             </div>
           </div>
         </header>
 
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="0" className="flex items-center gap-2">
               <span className={`inline-flex h-2 w-2 rounded-full ${processes[0].isEmitiendo ? getProcessColor(0).bg + " animate-pulse" : "bg-muted"}`} />
               Proceso 1
@@ -1366,6 +1460,10 @@ export default function EmisorM3U8Panel() {
             <TabsTrigger value="3" className="flex items-center gap-2">
               <span className={`inline-flex h-2 w-2 rounded-full ${processes[3].isEmitiendo ? getProcessColor(3).bg + " animate-pulse" : "bg-muted"}`} />
               Archivos
+            </TabsTrigger>
+            <TabsTrigger value="4" className="flex items-center gap-2">
+              <span className={`inline-flex h-2 w-2 rounded-full ${processes[4].isEmitiendo ? getProcessColor(4).bg + " animate-pulse" : "bg-muted"}`} />
+              YouTube
             </TabsTrigger>
           </TabsList>
 
@@ -1384,6 +1482,10 @@ export default function EmisorM3U8Panel() {
           <TabsContent value="3">
             {renderProcessTab(3)}
           </TabsContent>
+
+          <TabsContent value="4">
+            {renderProcessTab(4)}
+          </TabsContent>
         </Tabs>
 
         {/* Monitor de Estado Global - Siempre visible */}
@@ -1394,7 +1496,7 @@ export default function EmisorM3U8Panel() {
           {isLoading ? (
             <div className="text-center text-muted-foreground py-8">Cargando procesos...</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               {processes.map((process, index) => {
                 const color = getProcessColor(index);
                 const isActive = process.isEmitiendo && process.emitStatus === 'running';
