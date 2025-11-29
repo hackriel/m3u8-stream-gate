@@ -149,9 +149,12 @@ const detectAndCategorizeError = (output, processId) => {
       output.includes('Server returned 404') ||
       output.includes('Server returned 403') ||
       output.includes('Server returned 5') ||
-      output.includes('Connection refused') && output.includes('http')) {
+      output.includes('End of file') ||
+      output.includes('error=End of file') ||
+      (output.includes('Connection refused') && output.includes('http'))) {
     const reason = output.includes('404') ? 'URL Fuente M3U8 no encontrada (404)' :
                    output.includes('403') ? 'URL Fuente M3U8 prohibida (403)' :
+                   output.includes('End of file') ? 'Fuente M3U8 agotada o no disponible (End of file)' :
                    output.includes('Invalid data') ? 'URL Fuente M3U8 inválida o corrupta' :
                    'URL Fuente M3U8 no accesible';
     sendLog(processId, 'error', `ERROR DE FUENTE: ${reason}`);
@@ -355,12 +358,18 @@ app.post('/api/emit', async (req, res) => {
       // Recodificación estable: preset fast + CBR + baseline profile
       sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 720p30 (modo estable)...`);
       ffmpegArgs = [
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        // Headers y configuración de red optimizados para IPTV/HLS
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '-headers', 'Referer: https://www.teletica.com/',
+        '-timeout', '10000000', // 10 segundos en microsegundos
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '10', // Aumentado de 5 a 10 segundos para reducir requests
-        '-reconnect_at_eof', '1',
-        '-multiple_requests', '0', // Evitar múltiples requests paralelos
+        '-reconnect_delay_max', '5',
+        '-reconnect_on_network_error', '1',
+        '-reconnect_on_http_error', '5xx',
+        '-multiple_requests', '1', // Permitir requests paralelos para HLS
+        '-http_persistent', '1',
+        '-live_start_index', '-3', // Empezar 3 segmentos antes del final (para streams en vivo)
         '-re',
         '-i', source_m3u8,
         '-c:v', 'libx264',
@@ -383,15 +392,21 @@ app.post('/api/emit', async (req, res) => {
         target_rtmp
       ];
     } else {
-      // Copy directo - MUY bajo CPU (8-10%) - Optimizado para evitar múltiples requests
+      // Copy directo - MUY bajo CPU (8-10%) - Optimizado para IPTV/HLS
       sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, usando copy (bajo CPU)...`);
       ffmpegArgs = [
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        // Headers y configuración de red optimizados para IPTV/HLS
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '-headers', 'Referer: https://www.teletica.com/',
+        '-timeout', '10000000', // 10 segundos en microsegundos
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '10', // Aumentado de 5 a 10 segundos para reducir requests
-        '-reconnect_at_eof', '1',
-        '-multiple_requests', '0', // Evitar múltiples requests paralelos
+        '-reconnect_delay_max', '5',
+        '-reconnect_on_network_error', '1',
+        '-reconnect_on_http_error', '5xx',
+        '-multiple_requests', '1', // Permitir requests paralelos para HLS
+        '-http_persistent', '1',
+        '-live_start_index', '-3', // Empezar 3 segmentos antes del final (para streams en vivo)
         '-re',
         '-i', source_m3u8,
         '-c:v', 'copy',
