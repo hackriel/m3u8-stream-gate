@@ -973,35 +973,51 @@ app.post('/api/emit/youtube', async (req, res) => {
       }
     }
     
-    sendLog(process_id, 'info', `Extrayendo URL del stream de YouTube con yt-dlp...`);
+    sendLog(process_id, 'info', `Actualizando yt-dlp a la última versión...`);
     
-    // Usar yt-dlp para obtener la URL del stream en la máxima calidad
-    // Formato: bestvideo+bestaudio para obtener la mejor calidad de video y audio
-    const ytdlp = spawn('yt-dlp', [
-      '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-      '-g',
-      youtube_url
-    ]);
+    // Primero actualizar yt-dlp a la última versión
+    const updateYtdlp = spawn('pip3', ['install', '-U', 'yt-dlp']);
     
-    let streamUrl = '';
-    let ytdlpError = '';
+    updateYtdlp.stderr.on('data', (data) => {
+      sendLog(process_id, 'info', `Actualización yt-dlp: ${data.toString().trim()}`);
+    });
     
-    ytdlp.stdout.on('data', (data) => {
-      const output = data.toString().trim();
-      if (output && output.startsWith('http')) {
-        // yt-dlp puede devolver dos URLs (video y audio separados) o una sola
-        // Tomamos la primera URL que es la de video
-        if (!streamUrl) {
-          streamUrl = output.split('\n')[0];
-        }
+    updateYtdlp.on('close', (updateCode) => {
+      if (updateCode === 0) {
+        sendLog(process_id, 'success', `yt-dlp actualizado exitosamente`);
+      } else {
+        sendLog(process_id, 'warn', `No se pudo actualizar yt-dlp (código: ${updateCode}), continuando con versión actual...`);
       }
-    });
+      
+      sendLog(process_id, 'info', `Extrayendo URL del stream de YouTube con yt-dlp...`);
+      
+      // Usar yt-dlp para obtener la URL del stream en la máxima calidad
+      // Formato: bestvideo+bestaudio para obtener la mejor calidad de video y audio
+      const ytdlp = spawn('yt-dlp', [
+        '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        '-g',
+        youtube_url
+      ]);
     
-    ytdlp.stderr.on('data', (data) => {
-      ytdlpError += data.toString();
-    });
-    
-    ytdlp.on('close', async (code) => {
+      let streamUrl = '';
+      let ytdlpError = '';
+      
+      ytdlp.stdout.on('data', (data) => {
+        const output = data.toString().trim();
+        if (output && output.startsWith('http')) {
+          // yt-dlp puede devolver dos URLs (video y audio separados) o una sola
+          // Tomamos la primera URL que es la de video
+          if (!streamUrl) {
+            streamUrl = output.split('\n')[0];
+          }
+        }
+      });
+      
+      ytdlp.stderr.on('data', (data) => {
+        ytdlpError += data.toString();
+      });
+      
+      ytdlp.on('close', async (code) => {
       if (code !== 0 || !streamUrl) {
         const errorMsg = `Error extrayendo stream de YouTube: ${ytdlpError || 'URL no encontrada'}`;
         sendLog(process_id, 'error', errorMsg);
@@ -1155,28 +1171,29 @@ app.post('/api/emit/youtube', async (req, res) => {
       }, 2000);
     });
     
-    ytdlp.on('error', async (error) => {
-      const errorMsg = `Error ejecutando yt-dlp: ${error.message}. Asegúrate de que yt-dlp está instalado.`;
-      sendLog(process_id, 'error', errorMsg);
-      
-      if (supabase) {
-        await supabase
-          .from('emission_processes')
-          .update({
-            is_active: false,
-            is_emitting: false,
-            emit_status: 'error',
-            ended_at: new Date().toISOString(),
-            failure_reason: 'server',
-            failure_details: errorMsg
-          })
-          .eq('id', parseInt(process_id));
-      }
-      
-      emissionStatuses.set(process_id, 'error');
-      return res.status(500).json({ 
-        error: 'Error con yt-dlp', 
-        details: errorMsg 
+      ytdlp.on('error', async (error) => {
+        const errorMsg = `Error ejecutando yt-dlp: ${error.message}. Asegúrate de que yt-dlp está instalado.`;
+        sendLog(process_id, 'error', errorMsg);
+        
+        if (supabase) {
+          await supabase
+            .from('emission_processes')
+            .update({
+              is_active: false,
+              is_emitting: false,
+              emit_status: 'error',
+              ended_at: new Date().toISOString(),
+              failure_reason: 'server',
+              failure_details: errorMsg
+            })
+            .eq('id', parseInt(process_id));
+        }
+        
+        emissionStatuses.set(process_id, 'error');
+        return res.status(500).json({ 
+          error: 'Error con yt-dlp', 
+          details: errorMsg 
+        });
       });
     });
 
