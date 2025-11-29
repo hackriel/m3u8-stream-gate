@@ -28,6 +28,11 @@ export default defineConfig(({ mode }) => ({
   },
   optimizeDeps: {
     include: ['@supabase/supabase-js'],
+    exclude: ['express', 'ws', 'multer', 'cors', 'concurrently'],
+  },
+  ssr: {
+    noExternal: [],
+    external: ['express', 'ws', 'multer', 'cors', 'concurrently'],
   },
   build: {
     commonjsOptions: {
