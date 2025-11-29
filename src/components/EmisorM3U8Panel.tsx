@@ -117,24 +117,78 @@ export default function EmisorM3U8Panel() {
         
         if (error) throw error;
         
-        if (data) {
-          const loadedProcesses = data.map(row => ({
-            m3u8: row.m3u8,
-            rtmp: row.rtmp,
-            previewSuffix: row.preview_suffix,
-            isEmitiendo: row.is_emitting,
-            elapsed: row.elapsed,
-            startTime: row.start_time,
-            emitStatus: row.emit_status as "idle" | "starting" | "running" | "stopping" | "error",
-            emitMsg: row.emit_msg,
-            reconnectAttempts: 0,
-            lastReconnectTime: 0,
-            failureReason: row.failure_reason || undefined,
-            failureDetails: row.failure_details || undefined,
-            logs: [],
-            processLogsFromDB: row.process_logs || ''
-          }));
+        if (data && data.length > 0) {
+          // Asegurar que siempre tengamos 4 procesos
+          const loadedProcesses: EmissionProcess[] = [0, 1, 2, 3].map(index => {
+            const row = data.find(d => d.id === index);
+            if (row) {
+              return {
+                m3u8: row.m3u8 || '',
+                rtmp: row.rtmp || '',
+                previewSuffix: row.preview_suffix || '/video.m3u8',
+                isEmitiendo: row.is_emitting || false,
+                elapsed: row.elapsed || 0,
+                startTime: row.start_time || 0,
+                emitStatus: (row.emit_status as "idle" | "starting" | "running" | "stopping" | "error") || "idle",
+                emitMsg: row.emit_msg || '',
+                reconnectAttempts: 0,
+                lastReconnectTime: 0,
+                failureReason: row.failure_reason || undefined,
+                failureDetails: row.failure_details || undefined,
+                logs: [],
+                processLogsFromDB: row.process_logs || ''
+              };
+            } else {
+              // Si no existe, mantener valores por defecto pero crear en DB
+              return {
+                m3u8: '',
+                rtmp: '',
+                previewSuffix: '/video.m3u8',
+                isEmitiendo: false,
+                elapsed: 0,
+                startTime: 0,
+                emitStatus: "idle" as const,
+                emitMsg: '',
+                reconnectAttempts: 0,
+                lastReconnectTime: 0,
+                logs: []
+              };
+            }
+          });
           setProcesses(loadedProcesses);
+          
+          // Crear filas faltantes en la base de datos
+          for (let i = 0; i < 4; i++) {
+            const exists = data.find(d => d.id === i);
+            if (!exists) {
+              await supabase.from('emission_processes').insert({
+                id: i,
+                m3u8: '',
+                rtmp: '',
+                preview_suffix: '/video.m3u8',
+                is_emitting: false,
+                elapsed: 0,
+                start_time: 0,
+                emit_status: 'idle',
+                emit_msg: ''
+              });
+            }
+          }
+        } else {
+          // Si no hay datos, crear las 4 filas iniciales
+          for (let i = 0; i < 4; i++) {
+            await supabase.from('emission_processes').insert({
+              id: i,
+              m3u8: '',
+              rtmp: '',
+              preview_suffix: '/video.m3u8',
+              is_emitting: false,
+              elapsed: 0,
+              start_time: 0,
+              emit_status: 'idle',
+              emit_msg: ''
+            });
+          }
         }
       } catch (error) {
         console.error('Error cargando procesos:', error);
@@ -266,6 +320,21 @@ export default function EmisorM3U8Panel() {
     setProcesses(prev => prev.map((process, i) => 
       i === index ? { ...process, ...updates } : process
     ));
+    
+    // Si se actualizan m3u8 o rtmp, guardar automáticamente en Supabase
+    if (updates.m3u8 !== undefined || updates.rtmp !== undefined) {
+      const dataToUpdate: any = {};
+      if (updates.m3u8 !== undefined) dataToUpdate.m3u8 = updates.m3u8;
+      if (updates.rtmp !== undefined) dataToUpdate.rtmp = updates.rtmp;
+      
+      supabase
+        .from('emission_processes')
+        .update(dataToUpdate)
+        .eq('id', index)
+        .then(({ error }) => {
+          if (error) console.error('Error actualizando proceso en DB:', error);
+        });
+    }
   };
 
   // Restaurar sesiones al cargar
@@ -410,7 +479,10 @@ export default function EmisorM3U8Panel() {
       if (process.isEmitiendo) {
         if (!timerRefs[index].current) {
           timerRefs[index].current = setInterval(() => {
-            updateProcess(index, { elapsed: process.elapsed + 1 });
+            // Usar función de actualización para obtener el valor más reciente
+            setProcesses(prev => prev.map((p, i) => 
+              i === index ? { ...p, elapsed: p.elapsed + 1 } : p
+            ));
           }, 1000);
         }
       } else {
@@ -429,7 +501,7 @@ export default function EmisorM3U8Panel() {
         }
       });
     };
-  }, [processes]);
+  }, [processes.map(p => p.isEmitiendo).join(',')]);
 
   const formatSeconds = (s: number) => {
     const hh = String(Math.floor(s / 3600)).padStart(2, "0");
@@ -1012,19 +1084,18 @@ export default function EmisorM3U8Panel() {
                     key={i} 
                     value={i.toString()}
                     className={`px-6 py-3 rounded-xl transition-all duration-200 relative ${
-                      activeTab === i.toString() 
-                        ? `${color.bg} text-white shadow-lg` 
-                        : 'hover:bg-muted/50'
+                      process.isEmitiendo 
+                        ? 'bg-green-500/20 border-2 border-green-500 text-green-400 shadow-lg shadow-green-500/50 hover:bg-green-500/30' 
+                        : activeTab === i.toString() 
+                          ? `${color.bg} text-white shadow-lg` 
+                          : 'hover:bg-muted/50'
                     }`}
                   >
                     <span className="relative flex items-center gap-2">
-                      {color.name}
                       {process.isEmitiendo && (
-                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-live opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-3 w-3 bg-status-live"></span>
-                        </span>
+                        <span className="inline-flex h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse mr-1"></span>
                       )}
+                      {color.name}
                     </span>
                   </TabsTrigger>
                 );
