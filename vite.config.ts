@@ -32,9 +32,14 @@ export default defineConfig(({ mode }) => ({
   build: {
     commonjsOptions: {
       include: [/node_modules/],
+      transformMixedEsModules: true,
     },
     rollupOptions: {
-      external: ['child_process', 'fs', 'path', 'url', 'http', 'https', 'stream', 'util', 'os', 'crypto', 'net', 'tls', 'zlib', 'events'],
+      external: (id) => {
+        // Excluir módulos de Node.js del build del frontend
+        const nodeModules = ['child_process', 'fs', 'path', 'url', 'http', 'https', 'stream', 'util', 'os', 'crypto', 'net', 'tls', 'zlib', 'events', 'buffer', 'querystring'];
+        return nodeModules.some(mod => id === mod || id.startsWith(`node:${mod}`));
+      },
     },
   },
 }));
