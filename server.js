@@ -450,14 +450,16 @@ app.post('/api/emit', async (req, res) => {
           
           // Actualizar base de datos a estado 'running'
           if (supabase) {
-            await supabase
+            supabase
               .from('emission_processes')
               .update({
                 emit_status: 'running',
                 is_active: true,
                 updated_at: new Date().toISOString()
               })
-              .eq('id', parseInt(process_id));
+              .eq('id', parseInt(process_id))
+              .then(() => {})
+              .catch(err => console.error('Error actualizando estado a running:', err));
           }
         }
         
