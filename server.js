@@ -306,7 +306,9 @@ app.post('/api/emit', async (req, res) => {
             is_active: false, 
             is_emitting: false, 
             ended_at: new Date().toISOString(),
-            emit_status: 'stopped'
+            emit_status: 'stopped',
+            start_time: 0,
+            elapsed: 0
           })
           .eq('id', parseInt(process_id))
           .eq('is_emitting', true);
@@ -516,7 +518,8 @@ app.post('/api/emit', async (req, res) => {
             emit_status: finalStatus,
             ended_at: new Date().toISOString(),
             process_logs: `[${new Date().toISOString()}] ${logMessage}\n`,
-            elapsed: Math.floor(runtime / 1000)
+            elapsed: Math.floor(runtime / 1000),
+            start_time: 0
           })
           .eq('id', parseInt(process_id));
       }
@@ -541,7 +544,9 @@ app.post('/api/emit', async (req, res) => {
             ended_at: new Date().toISOString(),
             failure_reason: 'server',
             failure_details: error.message,
-            process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`
+            process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`,
+            start_time: 0,
+            elapsed: 0
           })
           .eq('id', parseInt(process_id));
       }
@@ -632,7 +637,9 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
             is_active: false, 
             is_emitting: false, 
             ended_at: new Date().toISOString(),
-            emit_status: 'stopped'
+            emit_status: 'stopped',
+            start_time: 0,
+            elapsed: 0
           })
           .eq('id', parseInt(process_id))
           .eq('is_emitting', true);
@@ -857,7 +864,8 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
             emit_status: finalStatus,
             ended_at: new Date().toISOString(),
             process_logs: `[${new Date().toISOString()}] ${logMessage}\n`,
-            elapsed: Math.floor(runtime / 1000)
+            elapsed: Math.floor(runtime / 1000),
+            start_time: 0
           })
           .eq('id', parseInt(process_id));
       }
@@ -881,7 +889,9 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
             ended_at: new Date().toISOString(),
             failure_reason: 'server',
             failure_details: error.message,
-            process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`
+            process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`,
+            start_time: 0,
+            elapsed: 0
           })
           .eq('id', parseInt(process_id));
       }
@@ -936,6 +946,8 @@ app.post('/api/emit/stop', async (req, res) => {
             is_emitting: false,
             emit_status: 'stopped',
             ended_at: new Date().toISOString(),
+            start_time: 0, // Resetear start_time cuando se detiene
+            elapsed: 0, // Resetear elapsed cuando se detiene
             process_logs: `[${new Date().toISOString()}] Emisión detenida manualmente\n`
           })
           .eq('id', parseInt(process_id));

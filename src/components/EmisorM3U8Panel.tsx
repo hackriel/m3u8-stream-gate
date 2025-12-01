@@ -945,11 +945,11 @@ export default function EmisorM3U8Panel() {
                   <span className="font-mono text-3xl font-bold text-primary">{formatSeconds(process.elapsed)}</span>
                 </div>
                 
-                {process.isEmitiendo && (
+                {process.isEmitiendo && process.startTime > 0 && (
                   <div className="mt-3 pt-3 border-t border-border/50">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-muted-foreground">Inicio:</span>
-                      <span className="text-foreground">{new Date(process.startTime * 1000).toLocaleString('es-CR', { 
+                      <span className="text-foreground">{new Date(process.startTime).toLocaleString('es-CR', { 
                         dateStyle: 'short', 
                         timeStyle: 'medium' 
                       })}</span>
