@@ -128,7 +128,7 @@ export default function EmisorM3U8Panel() {
                 previewSuffix: row.preview_suffix || '/video.m3u8',
                 isEmitiendo: row.is_emitting || false,
                 elapsed: row.elapsed || 0,
-                startTime: row.start_time || 0,
+                startTime: row.start_time ? row.start_time * 1000 : 0, // Convertir de segundos a milisegundos
                 emitStatus: (row.emit_status as "idle" | "starting" | "running" | "stopping" | "error") || "idle",
                 emitMsg: row.emit_msg || '',
                 reconnectAttempts: 0,
@@ -594,11 +594,12 @@ export default function EmisorM3U8Panel() {
         
         const data = resp;
         const startTimeUnix = data.start_time || Math.floor(Date.now() / 1000);
+        const startTimeMs = startTimeUnix * 1000; // Convertir a milisegundos para consistencia
         updateProcess(processIndex, {
           emitStatus: "running",
           emitMsg: "✅ Archivos subidos. Emisión en progreso...",
-          elapsed: Math.floor(Date.now() / 1000) - startTimeUnix,
-          startTime: startTimeUnix,
+          elapsed: 0, // Se calculará automáticamente por el timer
+          startTime: startTimeMs,
           isEmitiendo: true
         });
         
@@ -650,11 +651,12 @@ export default function EmisorM3U8Panel() {
       const data = await resp.json();
       
       const startTimeUnix = data.start_time || Math.floor(Date.now() / 1000);
+      const startTimeMs = startTimeUnix * 1000; // Convertir a milisegundos para consistencia
       updateProcess(processIndex, {
         emitStatus: "running",
         emitMsg: "✅ Emitiendo a RTMP",
-        elapsed: Math.floor(Date.now() / 1000) - startTimeUnix,
-        startTime: startTimeUnix,
+        elapsed: 0, // Se calculará automáticamente por el timer
+        startTime: startTimeMs,
         isEmitiendo: true
       });
       
