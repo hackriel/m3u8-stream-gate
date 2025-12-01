@@ -121,44 +121,25 @@ export default function EmisorM3U8Panel() {
           // Asegurar que siempre tengamos 4 procesos
           const loadedProcesses: EmissionProcess[] = [0, 1, 2, 3].map(index => {
             const row = data.find(d => d.id === index);
-
-            // Leer posible estado persistido en localStorage
-            const localIsEmitting = localStorage.getItem(`emisor_is_emitting_${index}`) === 'true';
-            const localStartTimeMs = parseInt(localStorage.getItem(`emisor_start_time_${index}`) || '0', 10);
-            const localElapsed = parseInt(localStorage.getItem(`emisor_elapsed_${index}`) || '0', 10);
-            const localStatus = (localStorage.getItem(`emisor_status_${index}`) || 'idle') as EmissionProcess["emitStatus"];
-            const localMsg = localStorage.getItem(`emisor_msg_${index}`) || '';
-
             if (row) {
-              const isRunningDB = row.emit_status === 'running' && row.start_time && row.start_time > 0;
-              const startTimeMsFromDB = row.start_time ? row.start_time * 1000 : 0;
+              const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
+              const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
               let elapsedSeconds = row.elapsed || 0;
 
-              // Si el proceso está corriendo según DB, recalcular el tiempo activo desde start_time
-              if (isRunningDB && startTimeMsFromDB > 0) {
-                elapsedSeconds = Math.floor((Date.now() - startTimeMsFromDB) / 1000);
+              // Si el proceso está corriendo, recalcular el tiempo activo desde start_time
+              if (isRunning && startTimeMs > 0) {
+                elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
               }
-
-              // Si la DB no tiene info de emisión pero localStorage sí, preferir localStorage
-              const shouldUseLocalTimer = !isRunningDB && !row.is_emitting && localIsEmitting && localStartTimeMs > 0;
-
-              const finalIsEmitting = shouldUseLocalTimer ? true : (row.is_emitting || isRunningDB);
-              const finalStartTimeMs = shouldUseLocalTimer ? localStartTimeMs : startTimeMsFromDB;
-              const finalElapsed = shouldUseLocalTimer
-                ? Math.floor((Date.now() - localStartTimeMs) / 1000)
-                : elapsedSeconds;
-              const finalStatus = shouldUseLocalTimer ? localStatus : (row.emit_status as EmissionProcess["emitStatus"]);
-              const finalMsg = shouldUseLocalTimer ? localMsg : (row.emit_msg || '');
 
               return {
                 m3u8: row.m3u8 || '',
                 rtmp: row.rtmp || '',
                 previewSuffix: row.preview_suffix || '/video.m3u8',
-                isEmitiendo: finalIsEmitting,
-                elapsed: finalElapsed,
-                startTime: finalStartTimeMs,
-                emitStatus: finalStatus,
-                emitMsg: finalMsg,
+                isEmitiendo: row.is_emitting || isRunning,
+                elapsed: elapsedSeconds,
+                startTime: startTimeMs,
+                emitStatus: (row.emit_status as "idle" | "starting" | "running" | "stopping" | "error") || "idle",
+                emitMsg: row.emit_msg || '',
                 reconnectAttempts: 0,
                 lastReconnectTime: 0,
                 failureReason: row.failure_reason || undefined,
@@ -167,35 +148,7 @@ export default function EmisorM3U8Panel() {
                 processLogsFromDB: row.process_logs || ''
               };
             } else {
-              // Si no existe fila en DB, intentar restaurar completamente desde localStorage
-              const hasLocal = (localStorage.getItem(`emisor_m3u8_${index}`) || '') !== '' || localIsEmitting;
-
-              if (hasLocal) {
-                const localM3u8 = localStorage.getItem(`emisor_m3u8_${index}`) || '';
-                const localRtmp = localStorage.getItem(`emisor_rtmp_${index}`) || '';
-                const previewSuffix = localStorage.getItem(`emisor_preview_suffix_${index}`) || '/video.m3u8';
-
-                const startTimeMs = localStartTimeMs > 0 ? localStartTimeMs : 0;
-                const elapsed = startTimeMs > 0
-                  ? Math.floor((Date.now() - startTimeMs) / 1000)
-                  : localElapsed || 0;
-
-                return {
-                  m3u8: localM3u8,
-                  rtmp: localRtmp,
-                  previewSuffix,
-                  isEmitiendo: localIsEmitting,
-                  elapsed,
-                  startTime: startTimeMs,
-                  emitStatus: localStatus,
-                  emitMsg: localMsg,
-                  reconnectAttempts: 0,
-                  lastReconnectTime: 0,
-                  logs: []
-                };
-              }
-
-              // Si no hay ni DB ni localStorage, mantener valores por defecto
+              // Si no existe, mantener valores por defecto pero crear en DB
               return {
                 m3u8: '',
                 rtmp: '',
@@ -660,13 +613,24 @@ export default function EmisorM3U8Panel() {
         const data = resp;
         const startTimeUnix = data.start_time || Math.floor(Date.now() / 1000);
         const startTimeMs = startTimeUnix * 1000; // Convertir a milisegundos para consistencia
+        
         updateProcess(processIndex, {
           emitStatus: "running",
           emitMsg: "✅ Archivos subidos. Emisión en progreso...",
-          elapsed: 0, // Se calculará automáticamente por el timer
+          elapsed: 0,
           startTime: startTimeMs,
           isEmitiendo: true
         });
+        
+        // Guardar start_time en Supabase igual que m3u8 y rtmp
+        await supabase
+          .from('emission_processes')
+          .update({ 
+            start_time: startTimeUnix,
+            is_emitting: true,
+            emit_status: 'running'
+          })
+          .eq('id', processIndex);
         
         toast.success(`Proceso ${processIndex + 1} iniciado con archivos locales`);
       } catch (e: any) {
@@ -717,13 +681,24 @@ export default function EmisorM3U8Panel() {
       
       const startTimeUnix = data.start_time || Math.floor(Date.now() / 1000);
       const startTimeMs = startTimeUnix * 1000; // Convertir a milisegundos para consistencia
+      
       updateProcess(processIndex, {
         emitStatus: "running",
         emitMsg: "✅ Emitiendo a RTMP",
-        elapsed: 0, // Se calculará automáticamente por el timer
+        elapsed: 0,
         startTime: startTimeMs,
         isEmitiendo: true
       });
+      
+      // Guardar start_time en Supabase igual que m3u8 y rtmp
+      await supabase
+        .from('emission_processes')
+        .update({ 
+          start_time: startTimeUnix,
+          is_emitting: true,
+          emit_status: 'running'
+        })
+        .eq('id', processIndex);
       
       toast.success(`Proceso ${processIndex + 1} iniciado`);
     } catch (e: any) {
@@ -766,6 +741,17 @@ export default function EmisorM3U8Panel() {
       failureReason: undefined,
       failureDetails: undefined
     });
+    
+    // Guardar el reset en Supabase igual que m3u8 y rtmp
+    await supabase
+      .from('emission_processes')
+      .update({ 
+        start_time: 0,
+        elapsed: 0,
+        is_emitting: false,
+        emit_status: 'idle'
+      })
+      .eq('id', processIndex);
     
     // Limpiar localStorage de emisión pero mantener datos de entrada
     localStorage.removeItem(`emisor_is_emitting_${processIndex}`);
