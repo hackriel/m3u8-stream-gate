@@ -122,13 +122,22 @@ export default function EmisorM3U8Panel() {
           const loadedProcesses: EmissionProcess[] = [0, 1, 2, 3].map(index => {
             const row = data.find(d => d.id === index);
             if (row) {
+              const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
+              const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
+              let elapsedSeconds = row.elapsed || 0;
+
+              // Si el proceso está corriendo, recalcular el tiempo activo desde start_time
+              if (isRunning && startTimeMs > 0) {
+                elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
+              }
+
               return {
                 m3u8: row.m3u8 || '',
                 rtmp: row.rtmp || '',
                 previewSuffix: row.preview_suffix || '/video.m3u8',
-                isEmitiendo: row.is_emitting || false,
-                elapsed: row.elapsed || 0,
-                startTime: row.start_time ? row.start_time * 1000 : 0, // Convertir de segundos a milisegundos
+                isEmitiendo: row.is_emitting || isRunning,
+                elapsed: elapsedSeconds,
+                startTime: startTimeMs,
                 emitStatus: (row.emit_status as "idle" | "starting" | "running" | "stopping" | "error") || "idle",
                 emitMsg: row.emit_msg || '',
                 reconnectAttempts: 0,
@@ -217,13 +226,22 @@ export default function EmisorM3U8Panel() {
             setProcesses(prev => {
               const newProcesses = [...prev];
               if (row.id >= 0 && row.id <= 3) {
+                const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
+                const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
+                let elapsedSeconds = row.elapsed || 0;
+
+                // Si el proceso está corriendo, recalcular el tiempo activo desde start_time
+                if (isRunning && startTimeMs > 0) {
+                  elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
+                }
+
                 newProcesses[row.id] = {
                   m3u8: row.m3u8,
                   rtmp: row.rtmp,
                   previewSuffix: row.preview_suffix,
-                  isEmitiendo: row.is_emitting,
-                  elapsed: row.elapsed,
-                  startTime: row.start_time,
+                  isEmitiendo: row.is_emitting || isRunning,
+                  elapsed: elapsedSeconds,
+                  startTime: startTimeMs,
                   emitStatus: row.emit_status,
                   emitMsg: row.emit_msg,
                   reconnectAttempts: 0,
