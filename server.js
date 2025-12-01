@@ -327,7 +327,7 @@ app.post('/api/emit', async (req, res) => {
           is_active: true,
           is_emitting: true,
           emit_status: 'starting',
-          start_time: Date.now(),
+          start_time: Math.floor(Date.now() / 1000), // Guardar en segundos
           process_logs: `[${new Date().toISOString()}] Iniciando emisión desde M3U8\n`,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
@@ -455,6 +455,7 @@ app.post('/api/emit', async (req, res) => {
               .update({
                 emit_status: 'running',
                 is_active: true,
+                is_emitting: true,
                 updated_at: new Date().toISOString()
               })
               .eq('id', parseInt(process_id))
@@ -561,7 +562,8 @@ app.post('/api/emit', async (req, res) => {
     res.json({ 
       success: true, 
       message: 'Emisión iniciada correctamente',
-      status: 'starting'
+      status: 'starting',
+      start_time: dbRecord?.start_time || Math.floor(Date.now() / 1000)
     });
 
   } catch (error) {
@@ -650,7 +652,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         is_active: true,
         is_emitting: true,
         emit_status: 'starting',
-        start_time: Date.now(),
+        start_time: Math.floor(Date.now() / 1000), // Guardar en segundos
         process_logs: `[${new Date().toISOString()}] Iniciando emisión desde archivos locales: ${fileNames}\n`,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -900,6 +902,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       success: true, 
       message: `Emisión iniciada con ${files.length} archivo(s)`,
       status: 'starting',
+      start_time: dbRecord?.start_time || Math.floor(Date.now() / 1000),
       files: files.map(f => ({ name: f.originalname, size: f.size }))
     });
 
