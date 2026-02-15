@@ -16,6 +16,18 @@ import { supabase } from "@/integrations/supabase/client";
 
 const NUM_PROCESSES = 6;
 const FILE_UPLOAD_INDEX = 5; // "Subida" process
+const METRICS_HISTORY_SECONDS = 30 * 60; // 30 minutes
+const METRICS_POLL_INTERVAL = 3000; // 3 seconds
+
+interface MetricsDataPoint {
+  time: string;
+  timestamp: number;
+  cpu: number;
+  ramPercent: number;
+  ramUsedMB: number;
+  rxMbps: number;
+  txMbps: number;
+}
 
 // Tipo para un proceso de emisión
 interface EmissionProcess {
@@ -247,6 +259,42 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
+  const [metricsHistory, setMetricsHistory] = useState<MetricsDataPoint[]>([]);
+  const [latestMetrics, setLatestMetrics] = useState<any>(null);
+
+  // Polling de métricas del servidor
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      try {
+        const resp = await fetch('/api/metrics');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        
+        const point: MetricsDataPoint = {
+          time: new Date(data.timestamp).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          timestamp: data.timestamp,
+          cpu: data.cpu.usage,
+          ramPercent: data.memory.percent,
+          ramUsedMB: data.memory.used,
+          rxMbps: data.network.rxMbps,
+          txMbps: data.network.txMbps
+        };
+        
+        setLatestMetrics(data);
+        setMetricsHistory(prev => {
+          const cutoff = Date.now() - (METRICS_HISTORY_SECONDS * 1000);
+          const filtered = prev.filter(p => p.timestamp > cutoff);
+          return [...filtered, point];
+        });
+      } catch (e) {
+        // Server not reachable, ignore
+      }
+    };
+    
+    fetchMetrics();
+    const interval = setInterval(fetchMetrics, METRICS_POLL_INTERVAL);
+    return () => clearInterval(interval);
+  }, []);
 
   // Función genérica para obtener URL de un canal automáticamente
   const fetchChannelUrl = useCallback(async (processIndex: number) => {
@@ -1168,6 +1216,122 @@ export default function EmisorM3U8Panel() {
             </TabsContent>
           ))}
         </Tabs>
+
+        {/* Panel de Métricas del Servidor */}
+        <section className="mt-8 bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-broadcast-border/50">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-accent">🖥️ Métricas del Servidor</h2>
+            {latestMetrics && (
+              <div className="flex gap-4 text-xs text-muted-foreground">
+                <span>Cores: {latestMetrics.cpu.cores}</span>
+                <span>RAM Total: {(latestMetrics.memory.total / 1024).toFixed(1)} GB</span>
+                <span>Uptime: {Math.floor(latestMetrics.uptime / 3600)}h {Math.floor((latestMetrics.uptime % 3600) / 60)}m</span>
+              </div>
+            )}
+          </div>
+
+          {metricsHistory.length < 2 ? (
+            <div className="text-muted-foreground text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-3" />
+              <p>Recopilando métricas del servidor...</p>
+              <p className="text-xs mt-1">Las gráficas aparecerán en unos segundos</p>
+            </div>
+          ) : (
+            <>
+              {/* Indicadores actuales */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <p className="text-xs text-muted-foreground mb-1">CPU</p>
+                  <p className={`text-2xl font-bold font-mono ${
+                    (latestMetrics?.cpu.usage || 0) > 80 ? 'text-destructive' : 
+                    (latestMetrics?.cpu.usage || 0) > 50 ? 'text-warning' : 'text-primary'
+                  }`}>
+                    {latestMetrics?.cpu.usage?.toFixed(1) || '0.0'}%
+                  </p>
+                </div>
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <p className="text-xs text-muted-foreground mb-1">RAM</p>
+                  <p className={`text-2xl font-bold font-mono ${
+                    (latestMetrics?.memory.percent || 0) > 85 ? 'text-destructive' : 
+                    (latestMetrics?.memory.percent || 0) > 60 ? 'text-warning' : 'text-primary'
+                  }`}>
+                    {latestMetrics?.memory.percent?.toFixed(1) || '0.0'}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">{latestMetrics?.memory.used || 0} / {latestMetrics?.memory.total || 0} MB</p>
+                </div>
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <p className="text-xs text-muted-foreground mb-1">↓ Red (Rx)</p>
+                  <p className="text-2xl font-bold font-mono text-primary">
+                    {latestMetrics?.network.rxMbps?.toFixed(2) || '0.00'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">MB/s</p>
+                </div>
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <p className="text-xs text-muted-foreground mb-1">↑ Red (Tx)</p>
+                  <p className="text-2xl font-bold font-mono text-primary">
+                    {latestMetrics?.network.txMbps?.toFixed(2) || '0.00'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">MB/s</p>
+                </div>
+              </div>
+
+              {/* Gráficas */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* CPU */}
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <h3 className="text-sm font-medium text-muted-foreground mb-3">📈 CPU (%)</h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={metricsHistory}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="time" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" interval="preserveStartEnd" />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                      <Tooltip 
+                        contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
+                        labelStyle={{ color: 'hsl(var(--foreground))' }}
+                      />
+                      <Line type="monotone" dataKey="cpu" stroke="#3b82f6" strokeWidth={2} dot={false} name="CPU %" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* RAM */}
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <h3 className="text-sm font-medium text-muted-foreground mb-3">💾 RAM (%)</h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={metricsHistory}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="time" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" interval="preserveStartEnd" />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                      <Tooltip 
+                        contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
+                        labelStyle={{ color: 'hsl(var(--foreground))' }}
+                      />
+                      <Line type="monotone" dataKey="ramPercent" stroke="#a855f7" strokeWidth={2} dot={false} name="RAM %" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Red */}
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <h3 className="text-sm font-medium text-muted-foreground mb-3">🌐 Red (MB/s)</h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={metricsHistory}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="time" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" interval="preserveStartEnd" />
+                      <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                      <Tooltip 
+                        contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
+                        labelStyle={{ color: 'hsl(var(--foreground))' }}
+                      />
+                      <Line type="monotone" dataKey="rxMbps" stroke="#22c55e" strokeWidth={2} dot={false} name="↓ Rx MB/s" />
+                      <Line type="monotone" dataKey="txMbps" stroke="#f97316" strokeWidth={2} dot={false} name="↑ Tx MB/s" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
       </div>
     </div>
   );
