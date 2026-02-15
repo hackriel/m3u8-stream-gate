@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-cd /root/m3u8-stream-gate
+cd /opt/m3u8-emitter
 
 echo "📥 Actualizando código..."
 git pull
