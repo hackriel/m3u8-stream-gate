@@ -128,6 +128,86 @@ app.use(express.static(path.join(__dirname, 'dist')));
 // Variables globales para manejo de múltiples procesos ffmpeg
 const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTime, target_rtmp }>
 const emissionStatuses = new Map(); // Map<processId, status>
+const autoRecoveryInProgress = new Map(); // Map<processId, boolean>
+
+// FUTV Auto-recovery: obtener nueva URL y reiniciar emisión
+const SUPABASE_FUNCTIONS_URL = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1`;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
+
+const autoRecoverFutv = async (process_id) => {
+  if (autoRecoveryInProgress.get(process_id)) {
+    sendLog(process_id, 'warn', '⏳ Auto-recovery ya en progreso, ignorando...');
+    return;
+  }
+  
+  autoRecoveryInProgress.set(process_id, true);
+  sendLog(process_id, 'info', '🔄 AUTO-RECOVERY FUTV: Obteniendo nueva URL...');
+  
+  try {
+    // Llamar a la edge function scrape-futv
+    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-futv`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+    });
+    
+    const data = await resp.json();
+    
+    if (!data.success || !data.url) {
+      sendLog(process_id, 'error', `❌ AUTO-RECOVERY falló: ${data.error || 'No se obtuvo URL'}`);
+      autoRecoveryInProgress.set(process_id, false);
+      return;
+    }
+    
+    const newUrl = data.url;
+    sendLog(process_id, 'success', `✅ Nueva URL FUTV obtenida: ${newUrl.substring(0, 80)}...`);
+    
+    // Obtener el RTMP destino actual de la DB
+    let targetRtmp = 'rtmp://fluestabiliz.giize.com/costaFUUTV';
+    if (supabase) {
+      const { data: row } = await supabase
+        .from('emission_processes')
+        .select('rtmp')
+        .eq('id', parseInt(process_id))
+        .single();
+      if (row?.rtmp) targetRtmp = row.rtmp;
+    }
+    
+    // Actualizar la URL en DB
+    if (supabase) {
+      await supabase
+        .from('emission_processes')
+        .update({ m3u8: newUrl, emit_status: 'starting', is_emitting: true, is_active: true })
+        .eq('id', parseInt(process_id));
+    }
+    
+    // Esperar un momento antes de reiniciar
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    sendLog(process_id, 'info', '🚀 AUTO-RECOVERY: Reiniciando emisión con nueva URL...');
+    
+    // Simular una llamada al endpoint /api/emit internamente
+    const emitUrl = `http://localhost:${PORT}/api/emit`;
+    await fetch(emitUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_m3u8: newUrl,
+        target_rtmp: targetRtmp,
+        process_id: process_id
+      })
+    });
+    
+    sendLog(process_id, 'success', '✅ AUTO-RECOVERY completado: Emisión reiniciada');
+  } catch (error) {
+    sendLog(process_id, 'error', `❌ AUTO-RECOVERY error: ${error.message}`);
+  } finally {
+    autoRecoveryInProgress.set(process_id, false);
+  }
+};
 
 // Función para verificar si un destino RTMP ya está en uso
 const checkRTMPConflict = (target_rtmp, current_process_id) => {
@@ -526,6 +606,14 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
+      
+      // AUTO-RECOVERY: Si es proceso FUTV (id=0) y falló (no fue detenido manualmente)
+      if (process_id === '0' && code !== 0 && code !== null) {
+        sendLog(process_id, 'warn', '🔄 FUTV caído - Iniciando auto-recovery en 3 segundos...');
+        setTimeout(() => {
+          autoRecoverFutv(process_id);
+        }, 3000);
+      }
     });
 
     // Manejar error del proceso

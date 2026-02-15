@@ -1,1 +1,4 @@
 project_id = "zbrkijgnkckcutydsmkt"
+
+[functions.scrape-futv]
+verify_jwt = false
