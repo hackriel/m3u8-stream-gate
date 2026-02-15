@@ -607,10 +607,17 @@ app.post('/api/emit', async (req, res) => {
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
       
-      // AUTO-RECOVERY: Si es proceso FUTV (id=0) o Tigo Sports (id=1) y falló
-      if ((process_id === '0' || process_id === '1') && code !== 0 && code !== null) {
-        const channelName = process_id === '0' ? 'FUTV' : 'Tigo Sports';
-        const scrapeFn = process_id === '0' ? 'scrape-futv' : 'scrape-tigo';
+      // AUTO-RECOVERY: Para canales con scraping (ids 0-4)
+      const autoRecoveryMap = {
+        '0': { scrapeFn: 'scrape-futv', channelName: 'FUTV' },
+        '1': { scrapeFn: 'scrape-tigo', channelName: 'Tigo Sports' },
+        '2': { scrapeFn: 'scrape-tdmas1', channelName: 'TDmas 1' },
+        '3': { scrapeFn: 'scrape-teletica', channelName: 'Teletica' },
+        '4': { scrapeFn: 'scrape-canal6', channelName: 'Canal 6' },
+      };
+      
+      if (autoRecoveryMap[process_id] && code !== 0 && code !== null) {
+        const { scrapeFn, channelName } = autoRecoveryMap[process_id];
         sendLog(process_id, 'warn', `🔄 ${channelName} caído - Iniciando auto-recovery en 3 segundos...`);
         setTimeout(() => {
           autoRecoverChannel(process_id, scrapeFn, channelName);
