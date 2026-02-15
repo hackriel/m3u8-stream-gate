@@ -18,7 +18,7 @@ fail() { echo -e "${RED}❌ $1${NC}"; exit 1; }
 # Verificar root
 [ "$EUID" -eq 0 ] || fail "Ejecuta como root: sudo bash setup-vps.sh"
 
-INSTALL_DIR=$(pwd)
+INSTALL_DIR="/opt/m3u8-emitter"
 SERVICE_NAME="m3u8-emitter"
 
 echo ""
