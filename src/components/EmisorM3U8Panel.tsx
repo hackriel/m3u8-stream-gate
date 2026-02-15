@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useServerMetrics } from "@/hooks/useServerMetrics";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -16,18 +17,6 @@ import { supabase } from "@/integrations/supabase/client";
 
 const NUM_PROCESSES = 6;
 const FILE_UPLOAD_INDEX = 5; // "Subida" process
-const METRICS_HISTORY_SECONDS = 30 * 60; // 30 minutes
-const METRICS_POLL_INTERVAL = 3000; // 3 seconds
-
-interface MetricsDataPoint {
-  time: string;
-  timestamp: number;
-  cpu: number;
-  ramPercent: number;
-  ramUsedMB: number;
-  rxMbps: number;
-  txMbps: number;
-}
 
 // Tipo para un proceso de emisión
 interface EmissionProcess {
@@ -60,16 +49,17 @@ interface LogEntry {
 interface ChannelConfig {
   name: string;
   scrapeFn: string | null;
+  channelId: string | null;
   fetchLabel: string;
 }
 
 const CHANNEL_CONFIGS: ChannelConfig[] = [
-  { name: "FUTV", scrapeFn: "scrape-futv", fetchLabel: "🔄 FUTV" },
-  { name: "Tigo Sports", scrapeFn: "scrape-tigo", fetchLabel: "🔄 Tigo" },
-  { name: "TDmas 1", scrapeFn: "scrape-tdmas1", fetchLabel: "🔄 TDmas1" },
-  { name: "Teletica", scrapeFn: "scrape-teletica", fetchLabel: "🔄 Teletica" },
-  { name: "Canal 6", scrapeFn: "scrape-canal6", fetchLabel: "🔄 Canal6" },
-  { name: "Subida", scrapeFn: null, fetchLabel: "" },
+  { name: "FUTV", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
+  { name: "Tigo Sports", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
+  { name: "TDmas 1", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
+  { name: "Teletica", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
+  { name: "Canal 6", scrapeFn: "scrape-channel", channelId: "65d7aca4e4b0140cbf380bd0", fetchLabel: "🔄 Canal6" },
+  { name: "Subida", scrapeFn: null, channelId: null, fetchLabel: "" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -259,52 +249,18 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
-  const [metricsHistory, setMetricsHistory] = useState<MetricsDataPoint[]>([]);
-  const [latestMetrics, setLatestMetrics] = useState<any>(null);
-
-  // Polling de métricas del servidor
-  useEffect(() => {
-    const fetchMetrics = async () => {
-      try {
-        const resp = await fetch('/api/metrics');
-        if (!resp.ok) return;
-        const data = await resp.json();
-        
-        const point: MetricsDataPoint = {
-          time: new Date(data.timestamp).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          timestamp: data.timestamp,
-          cpu: data.cpu.usage,
-          ramPercent: data.memory.percent,
-          ramUsedMB: data.memory.used,
-          rxMbps: data.network.rxMbps,
-          txMbps: data.network.txMbps
-        };
-        
-        setLatestMetrics(data);
-        setMetricsHistory(prev => {
-          const cutoff = Date.now() - (METRICS_HISTORY_SECONDS * 1000);
-          const filtered = prev.filter(p => p.timestamp > cutoff);
-          return [...filtered, point];
-        });
-      } catch (e) {
-        // Server not reachable, ignore
-      }
-    };
-    
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, METRICS_POLL_INTERVAL);
-    return () => clearInterval(interval);
-  }, []);
+  const { metricsHistory, latestMetrics } = useServerMetrics();
 
   // Función genérica para obtener URL de un canal automáticamente
   const fetchChannelUrl = useCallback(async (processIndex: number) => {
     const config = CHANNEL_CONFIGS[processIndex];
-    if (!config.scrapeFn) return;
+    if (!config.scrapeFn || !config.channelId) return;
     
     setFetchingChannel(processIndex);
     try {
       const { data, error } = await supabase.functions.invoke(config.scrapeFn, {
         method: 'POST',
+        body: { channel_id: config.channelId },
       });
 
       if (error) throw error;
@@ -313,7 +269,7 @@ export default function EmisorM3U8Panel() {
       const streamUrl = data.url;
       updateProcess(processIndex, { 
         m3u8: streamUrl,
-        rtmp: processes[processIndex].rtmp || ''
+        rtmp: processesRef.current[processIndex].rtmp || ''
       });
       toast.success(`✅ URL ${config.name} actualizada correctamente`);
     } catch (e: any) {
@@ -322,67 +278,9 @@ export default function EmisorM3U8Panel() {
     } finally {
       setFetchingChannel(null);
     }
-  }, [processes]);
-
-  // Limpieza de caché programada del lado del cliente (4am Costa Rica)
-  useEffect(() => {
-    const checkCacheClear = () => {
-      const now = new Date();
-      const costaRicaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Costa_Rica' }));
-      const hour = costaRicaTime.getHours();
-      const minute = costaRicaTime.getMinutes();
-      
-      if (hour === 4 && minute < 5) {
-        const lastClear = localStorage.getItem('last_cache_clear');
-        const lastClearTime = lastClear ? parseInt(lastClear) : 0;
-        const hoursSinceClear = (Date.now() - lastClearTime) / (1000 * 60 * 60);
-        
-        if (hoursSinceClear > 12) {
-          console.log('🧹 Limpiando caché programado (4am Costa Rica)');
-          
-          const essentialData: Record<string, string> = {};
-          for (let i = 0; i < NUM_PROCESSES; i++) {
-            const m3u8 = localStorage.getItem(`emisor_m3u8_${i}`);
-            const rtmp = localStorage.getItem(`emisor_rtmp_${i}`);
-            if (m3u8) essentialData[`emisor_m3u8_${i}`] = m3u8;
-            if (rtmp) essentialData[`emisor_rtmp_${i}`] = rtmp;
-          }
-          
-          localStorage.clear();
-          
-          Object.entries(essentialData).forEach(([key, value]) => {
-            localStorage.setItem(key, value);
-          });
-          
-          localStorage.setItem('last_cache_clear', Date.now().toString());
-          console.log('✅ Caché limpiado exitosamente');
-        }
-      }
-    };
-    
-    const interval = setInterval(checkCacheClear, 60 * 1000);
-    return () => clearInterval(interval);
   }, []);
 
-  // Persistir datos en localStorage cuando cambien
-  useEffect(() => {
-    processes.forEach((process, index) => {
-      localStorage.setItem(`emisor_m3u8_${index}`, process.m3u8);
-      localStorage.setItem(`emisor_rtmp_${index}`, process.rtmp);
-      localStorage.setItem(`emisor_preview_suffix_${index}`, process.previewSuffix);
-      localStorage.setItem(`emisor_is_emitting_${index}`, process.isEmitiendo.toString());
-      localStorage.setItem(`emisor_elapsed_${index}`, process.elapsed.toString());
-      localStorage.setItem(`emisor_start_time_${index}`, process.startTime.toString());
-      localStorage.setItem(`emisor_status_${index}`, process.emitStatus);
-      localStorage.setItem(`emisor_msg_${index}`, process.emitMsg);
-      if (process.failureReason) {
-        localStorage.setItem(`emisor_failure_reason_${index}`, process.failureReason);
-      }
-      if (process.failureDetails) {
-        localStorage.setItem(`emisor_failure_details_${index}`, process.failureDetails);
-      }
-    });
-  }, [processes]);
+
 
   // Función para actualizar un proceso específico
   const updateProcess = (index: number, updates: Partial<EmissionProcess>) => {
@@ -533,34 +431,6 @@ export default function EmisorM3U8Panel() {
     }
   };
 
-  // Timer de reproducción para cada proceso
-  useEffect(() => {
-    processes.forEach((process, index) => {
-      if (process.isEmitiendo) {
-        if (!timerRefs[index].current) {
-          timerRefs[index].current = setInterval(() => {
-            setProcesses(prev => prev.map((p, i) => 
-              i === index ? { ...p, elapsed: p.elapsed + 1 } : p
-            ));
-          }, 1000);
-        }
-      } else {
-        if (timerRefs[index].current) {
-          clearInterval(timerRefs[index].current);
-          timerRefs[index].current = null;
-        }
-      }
-    });
-    
-    return () => {
-      timerRefs.forEach(timerRef => {
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
-      });
-    };
-  }, [processes.map(p => p.isEmitiendo).join(',')]);
 
   const formatSeconds = (s: number) => {
     const hh = String(Math.floor(s / 3600)).padStart(2, "0");
@@ -774,13 +644,6 @@ export default function EmisorM3U8Panel() {
       })
       .eq('id', processIndex);
     
-    localStorage.removeItem(`emisor_is_emitting_${processIndex}`);
-    localStorage.removeItem(`emisor_elapsed_${processIndex}`);
-    localStorage.removeItem(`emisor_start_time_${processIndex}`);
-    localStorage.removeItem(`emisor_status_${processIndex}`);
-    localStorage.removeItem(`emisor_msg_${processIndex}`);
-    localStorage.removeItem(`emisor_failure_reason_${processIndex}`);
-    localStorage.removeItem(`emisor_failure_details_${processIndex}`);
   }
 
   async function onBorrar(processIndex: number) {

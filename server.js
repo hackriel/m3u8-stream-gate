@@ -135,7 +135,7 @@ const autoRecoveryInProgress = new Map(); // Map<processId, boolean>
 const SUPABASE_FUNCTIONS_URL = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1`;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
 
-const autoRecoverChannel = async (process_id, scrapeFnName = 'scrape-futv', channelName = 'FUTV') => {
+const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') => {
   if (autoRecoveryInProgress.get(process_id)) {
     sendLog(process_id, 'warn', '⏳ Auto-recovery ya en progreso, ignorando...');
     return;
@@ -145,14 +145,14 @@ const autoRecoverChannel = async (process_id, scrapeFnName = 'scrape-futv', chan
   sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName}: Obteniendo nueva URL...`);
   
   try {
-    // Llamar a la edge function correspondiente
-    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/${scrapeFnName}`, {
+    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
         'apikey': SUPABASE_ANON_KEY,
       },
+      body: JSON.stringify({ channel_id: channelId }),
     });
     
     const data = await resp.json();
@@ -164,10 +164,9 @@ const autoRecoverChannel = async (process_id, scrapeFnName = 'scrape-futv', chan
     }
     
     const newUrl = data.url;
-    sendLog(process_id, 'success', `✅ Nueva URL FUTV obtenida: ${newUrl.substring(0, 80)}...`);
+    sendLog(process_id, 'success', `✅ Nueva URL ${channelName} obtenida: ${newUrl.substring(0, 80)}...`);
     
-    // Obtener el RTMP destino actual de la DB
-    let targetRtmp = 'rtmp://fluestabiliz.giize.com/costaFUUTV';
+    let targetRtmp = '';
     if (supabase) {
       const { data: row } = await supabase
         .from('emission_processes')
@@ -177,7 +176,6 @@ const autoRecoverChannel = async (process_id, scrapeFnName = 'scrape-futv', chan
       if (row?.rtmp) targetRtmp = row.rtmp;
     }
     
-    // Actualizar la URL en DB
     if (supabase) {
       await supabase
         .from('emission_processes')
@@ -185,12 +183,10 @@ const autoRecoverChannel = async (process_id, scrapeFnName = 'scrape-futv', chan
         .eq('id', parseInt(process_id));
     }
     
-    // Esperar un momento antes de reiniciar
     await new Promise(resolve => setTimeout(resolve, 2000));
     
     sendLog(process_id, 'info', '🚀 AUTO-RECOVERY: Reiniciando emisión con nueva URL...');
     
-    // Simular una llamada al endpoint /api/emit internamente
     const emitUrl = `http://localhost:${PORT}/api/emit`;
     await fetch(emitUrl, {
       method: 'POST',
@@ -276,48 +272,15 @@ const detectAndCategorizeError = (output, processId) => {
   return false;
 };
 
-// Función auxiliar para detectar resolución de un M3U8
-const detectM3U8Resolution = async (m3u8Url) => {
+// Función auxiliar para detectar resolución de cualquier fuente (M3U8 o archivo)
+const detectResolution = async (source) => {
   return new Promise((resolve) => {
     const probe = spawn('ffprobe', [
       '-v', 'error',
       '-select_streams', 'v:0',
       '-show_entries', 'stream=width,height',
       '-of', 'json',
-      m3u8Url
-    ]);
-    
-    let output = '';
-    probe.stdout.on('data', (data) => {
-      output += data.toString();
-    });
-    
-    probe.on('close', () => {
-      try {
-        const data = JSON.parse(output);
-        const width = data.streams?.[0]?.width || 0;
-        const height = data.streams?.[0]?.height || 0;
-        resolve({ width, height });
-      } catch (e) {
-        resolve({ width: 0, height: 0 });
-      }
-    });
-    
-    probe.on('error', () => {
-      resolve({ width: 0, height: 0 });
-    });
-  });
-};
-
-// Función auxiliar para detectar resolución de un archivo local
-const detectFileResolution = async (filePath) => {
-  return new Promise((resolve) => {
-    const probe = spawn('ffprobe', [
-      '-v', 'error',
-      '-select_streams', 'v:0',
-      '-show_entries', 'stream=width,height',
-      '-of', 'json',
-      filePath
+      source
     ]);
     
     let output = '';
@@ -432,7 +395,7 @@ app.post('/api/emit', async (req, res) => {
     // Detectar resolución para optimizar CPU
     // OPTIMIZACIÓN: Solo detectamos resolución si realmente es necesario
     sendLog(process_id, 'info', `Verificando resolución de la fuente...`);
-    const resolution = await detectM3U8Resolution(source_m3u8);
+    const resolution = await detectResolution(source_m3u8);
     const needsRecode = resolution.height > 720;
     
     let ffmpegArgs;
@@ -610,18 +573,18 @@ app.post('/api/emit', async (req, res) => {
       
       // AUTO-RECOVERY: Para canales con scraping (ids 0-4)
       const autoRecoveryMap = {
-        '0': { scrapeFn: 'scrape-futv', channelName: 'FUTV' },
-        '1': { scrapeFn: 'scrape-tigo', channelName: 'Tigo Sports' },
-        '2': { scrapeFn: 'scrape-tdmas1', channelName: 'TDmas 1' },
-        '3': { scrapeFn: 'scrape-teletica', channelName: 'Teletica' },
-        '4': { scrapeFn: 'scrape-canal6', channelName: 'Canal 6' },
+        '0': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV' },
+        '1': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Sports' },
+        '2': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
+        '3': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
+        '4': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
       };
       
       if (autoRecoveryMap[process_id] && code !== 0 && code !== null) {
-        const { scrapeFn, channelName } = autoRecoveryMap[process_id];
+        const { channelId, channelName } = autoRecoveryMap[process_id];
         sendLog(process_id, 'warn', `🔄 ${channelName} caído - Iniciando auto-recovery en 3 segundos...`);
         setTimeout(() => {
-          autoRecoverChannel(process_id, scrapeFn, channelName);
+          autoRecoverChannel(process_id, channelId, channelName);
         }, 3000);
       }
     });
@@ -791,7 +754,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     // Detectar resolución del primer archivo para optimizar CPU
     sendLog(process_id, 'info', `Detectando resolución...`);
     const firstFilePath = files[0].path;
-    const resolution = await detectFileResolution(firstFilePath);
+    const resolution = await detectResolution(firstFilePath);
     const needsRecode = resolution.height > 720;
     
     let ffmpegArgs;
@@ -1207,7 +1170,7 @@ app.get('/api/status', (req, res) => {
   } else {
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       const id = i.toString();
       const processData = ffmpegProcesses.get(id);
       allStatuses[id] = {
@@ -1232,48 +1195,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Servir archivos estáticos de React en producción
-app.use((req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
 
-// === TAREA PROGRAMADA: Limpieza de caché diaria a las 4am Costa Rica ===
-const scheduleCacheClear = () => {
-  const checkAndClear = () => {
-    const now = new Date();
-    // Costa Rica es UTC-6
-    const costaRicaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Costa_Rica' }));
-    const hour = costaRicaTime.getHours();
-    const minute = costaRicaTime.getMinutes();
-    
-    // Ejecutar entre 4:00am y 4:05am
-    if (hour === 4 && minute < 5) {
-      const lastCleared = global.lastCacheClear || 0;
-      const hoursSinceLastClear = (Date.now() - lastCleared) / (1000 * 60 * 60);
-      
-      // Solo ejecutar si han pasado más de 12 horas desde la última limpieza
-      if (hoursSinceLastClear > 12) {
-        sendLog('system', 'info', '🧹 Iniciando limpieza programada de caché (4am Costa Rica)');
-        
-        // Limpiar cookies y caché del navegador (localStorage se limpia en cliente)
-        if (global.gc) {
-          global.gc();
-          sendLog('system', 'success', 'Garbage collector ejecutado');
-        }
-        
-        // Marcar timestamp de limpieza
-        global.lastCacheClear = Date.now();
-        sendLog('system', 'success', '✅ Limpieza de caché completada');
-      }
-    }
-  };
-  
-  // Verificar cada minuto
-  setInterval(checkAndClear, 60 * 1000);
-  sendLog('system', 'info', '⏰ Tarea programada activada: Limpieza de caché diaria a las 4am Costa Rica');
-};
-
-scheduleCacheClear();
 
 // ===== MÉTRICAS DEL SERVIDOR =====
 let prevCpuTimes = null;
