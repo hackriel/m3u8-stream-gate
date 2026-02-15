@@ -14,6 +14,9 @@ import { supabase } from "@/integrations/supabase/client";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
+const NUM_PROCESSES = 6;
+const FILE_UPLOAD_INDEX = 5; // "Subida" process
+
 // Tipo para un proceso de emisión
 interface EmissionProcess {
   m3u8: string;
@@ -26,10 +29,10 @@ interface EmissionProcess {
   emitMsg: string;
   reconnectAttempts: number;
   lastReconnectTime: number;
-  failureReason?: string; // Razón del fallo (source, rtmp, server)
-  failureDetails?: string; // Detalles específicos del fallo
-  logs: LogEntry[]; // Logs en tiempo real
-  processLogsFromDB?: string; // Logs guardados en DB
+  failureReason?: string;
+  failureDetails?: string;
+  logs: LogEntry[];
+  processLogsFromDB?: string;
 }
 
 // Tipo para una entrada de log
@@ -41,70 +44,48 @@ interface LogEntry {
   details?: any;
 }
 
+// Channel config for scraping
+interface ChannelConfig {
+  name: string;
+  scrapeFn: string | null;
+  fetchLabel: string;
+}
+
+const CHANNEL_CONFIGS: ChannelConfig[] = [
+  { name: "FUTV", scrapeFn: "scrape-futv", fetchLabel: "🔄 FUTV" },
+  { name: "Tigo Sports", scrapeFn: "scrape-tigo", fetchLabel: "🔄 Tigo" },
+  { name: "TDmas 1", scrapeFn: "scrape-tdmas1", fetchLabel: "🔄 TDmas1" },
+  { name: "Teletica", scrapeFn: "scrape-teletica", fetchLabel: "🔄 Teletica" },
+  { name: "Canal 6", scrapeFn: "scrape-canal6", fetchLabel: "🔄 Canal6" },
+  { name: "Subida", scrapeFn: null, fetchLabel: "" },
+];
+
+const defaultProcess = (): EmissionProcess => ({
+  m3u8: '',
+  rtmp: '',
+  previewSuffix: '/video.m3u8',
+  isEmitiendo: false,
+  elapsed: 0,
+  startTime: 0,
+  emitStatus: "idle",
+  emitMsg: '',
+  reconnectAttempts: 0,
+  lastReconnectTime: 0,
+  logs: []
+});
+
 export default function EmisorM3U8Panel() {
-  const logContainerRefs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
+  const logContainerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<HTMLDivElement>(null));
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
   const wsRef = useRef<WebSocket | null>(null);
   
-  // Estado para 4 procesos independientes - ahora carga desde Supabase
-  const [processes, setProcesses] = useState<EmissionProcess[]>([
-    {
-      m3u8: "",
-      rtmp: "",
-      previewSuffix: "/video.m3u8",
-      isEmitiendo: false,
-      elapsed: 0,
-      startTime: 0,
-      emitStatus: "idle",
-      emitMsg: "",
-      reconnectAttempts: 0,
-      lastReconnectTime: 0,
-      logs: []
-    },
-    {
-      m3u8: "",
-      rtmp: "",
-      previewSuffix: "/video.m3u8",
-      isEmitiendo: false,
-      elapsed: 0,
-      startTime: 0,
-      emitStatus: "idle",
-      emitMsg: "",
-      reconnectAttempts: 0,
-      lastReconnectTime: 0,
-      logs: []
-    },
-    {
-      m3u8: "",
-      rtmp: "",
-      previewSuffix: "/video.m3u8",
-      isEmitiendo: false,
-      elapsed: 0,
-      startTime: 0,
-      emitStatus: "idle",
-      emitMsg: "",
-      reconnectAttempts: 0,
-      lastReconnectTime: 0,
-      logs: []
-    },
-    {
-      m3u8: "",
-      rtmp: "",
-      previewSuffix: "/video.m3u8",
-      isEmitiendo: false,
-      elapsed: 0,
-      startTime: 0,
-      emitStatus: "idle",
-      emitMsg: "",
-      reconnectAttempts: 0,
-      lastReconnectTime: 0,
-      logs: []
-    }
-  ]);
+  const [processes, setProcesses] = useState<EmissionProcess[]>(
+    Array.from({ length: NUM_PROCESSES }, defaultProcess)
+  );
 
-  const timerRefs = [useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null), useRef<NodeJS.Timeout | null>(null)];
+  const timerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<NodeJS.Timeout | null>(null));
   
   // Cargar datos desde Supabase al montar el componente
   useEffect(() => {
@@ -118,15 +99,13 @@ export default function EmisorM3U8Panel() {
         if (error) throw error;
         
         if (data && data.length > 0) {
-          // Asegurar que siempre tengamos 4 procesos
-          const loadedProcesses: EmissionProcess[] = [0, 1, 2, 3].map(index => {
+          const loadedProcesses: EmissionProcess[] = Array.from({ length: NUM_PROCESSES }, (_, index) => {
             const row = data.find(d => d.id === index);
             if (row) {
               const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
               const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
               let elapsedSeconds = row.elapsed || 0;
 
-              // Si el proceso está corriendo, recalcular el tiempo activo desde start_time
               if (isRunning && startTimeMs > 0) {
                 elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
               }
@@ -148,26 +127,13 @@ export default function EmisorM3U8Panel() {
                 processLogsFromDB: row.process_logs || ''
               };
             } else {
-              // Si no existe, mantener valores por defecto pero crear en DB
-              return {
-                m3u8: '',
-                rtmp: '',
-                previewSuffix: '/video.m3u8',
-                isEmitiendo: false,
-                elapsed: 0,
-                startTime: 0,
-                emitStatus: "idle" as const,
-                emitMsg: '',
-                reconnectAttempts: 0,
-                lastReconnectTime: 0,
-                logs: []
-              };
+              return defaultProcess();
             }
           });
           setProcesses(loadedProcesses);
           
           // Crear filas faltantes en la base de datos
-          for (let i = 0; i < 4; i++) {
+          for (let i = 0; i < NUM_PROCESSES; i++) {
             const exists = data.find(d => d.id === i);
             if (!exists) {
               await supabase.from('emission_processes').insert({
@@ -184,8 +150,7 @@ export default function EmisorM3U8Panel() {
             }
           }
         } else {
-          // Si no hay datos, crear las 4 filas iniciales
-          for (let i = 0; i < 4; i++) {
+          for (let i = 0; i < NUM_PROCESSES; i++) {
             await supabase.from('emission_processes').insert({
               id: i,
               m3u8: '',
@@ -225,12 +190,11 @@ export default function EmisorM3U8Panel() {
             const row = payload.new as any;
             setProcesses(prev => {
               const newProcesses = [...prev];
-              if (row.id >= 0 && row.id <= 3) {
+              if (row.id >= 0 && row.id < NUM_PROCESSES) {
                 const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
                 const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
                 let elapsedSeconds = row.elapsed || 0;
 
-                // Si el proceso está corriendo, recalcular el tiempo activo desde start_time
                 if (isRunning && startTimeMs > 0) {
                   elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
                 }
@@ -279,17 +243,19 @@ export default function EmisorM3U8Panel() {
     return () => clearInterval(interval);
   }, []);
   
-  // Estado específico para el proceso 4 (archivos locales)
+  // Estado específico para el proceso de subida (archivos locales)
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
-  const [isFetchingFutv, setIsFetchingFutv] = useState(false);
-  const [isFetchingTigo, setIsFetchingTigo] = useState(false);
+  const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
 
-  // Función para obtener URL FUTV automáticamente
-  const fetchFutvUrl = useCallback(async () => {
-    setIsFetchingFutv(true);
+  // Función genérica para obtener URL de un canal automáticamente
+  const fetchChannelUrl = useCallback(async (processIndex: number) => {
+    const config = CHANNEL_CONFIGS[processIndex];
+    if (!config.scrapeFn) return;
+    
+    setFetchingChannel(processIndex);
     try {
-      const { data, error } = await supabase.functions.invoke('scrape-futv', {
+      const { data, error } = await supabase.functions.invoke(config.scrapeFn, {
         method: 'POST',
       });
 
@@ -297,41 +263,16 @@ export default function EmisorM3U8Panel() {
       if (!data?.success) throw new Error(data?.error || 'Error desconocido');
 
       const streamUrl = data.url;
-      updateProcess(0, { 
+      updateProcess(processIndex, { 
         m3u8: streamUrl,
-        rtmp: processes[0].rtmp || 'rtmp://fluestabiliz.giize.com/costaFUUTV'
+        rtmp: processes[processIndex].rtmp || ''
       });
-      toast.success('✅ URL FUTV actualizada correctamente');
+      toast.success(`✅ URL ${config.name} actualizada correctamente`);
     } catch (e: any) {
-      console.error('Error obteniendo URL FUTV:', e);
-      toast.error(`Error obteniendo URL FUTV: ${e.message}`);
+      console.error(`Error obteniendo URL ${config.name}:`, e);
+      toast.error(`Error obteniendo URL ${config.name}: ${e.message}`);
     } finally {
-      setIsFetchingFutv(false);
-    }
-  }, [processes]);
-
-  // Función para obtener URL Tigo Sports automáticamente
-  const fetchTigoUrl = useCallback(async () => {
-    setIsFetchingTigo(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('scrape-tigo', {
-        method: 'POST',
-      });
-
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || 'Error desconocido');
-
-      const streamUrl = data.url;
-      updateProcess(1, { 
-        m3u8: streamUrl,
-        rtmp: processes[1].rtmp || ''
-      });
-      toast.success('✅ URL Tigo Sports actualizada correctamente');
-    } catch (e: any) {
-      console.error('Error obteniendo URL Tigo Sports:', e);
-      toast.error(`Error obteniendo URL Tigo Sports: ${e.message}`);
-    } finally {
-      setIsFetchingTigo(false);
+      setFetchingChannel(null);
     }
   }, [processes]);
 
@@ -343,7 +284,6 @@ export default function EmisorM3U8Panel() {
       const hour = costaRicaTime.getHours();
       const minute = costaRicaTime.getMinutes();
       
-      // Entre 4:00am y 4:05am Costa Rica
       if (hour === 4 && minute < 5) {
         const lastClear = localStorage.getItem('last_cache_clear');
         const lastClearTime = lastClear ? parseInt(lastClear) : 0;
@@ -352,19 +292,16 @@ export default function EmisorM3U8Panel() {
         if (hoursSinceClear > 12) {
           console.log('🧹 Limpiando caché programado (4am Costa Rica)');
           
-          // Guardar solo datos esenciales
           const essentialData: Record<string, string> = {};
-          for (let i = 0; i < 4; i++) {
+          for (let i = 0; i < NUM_PROCESSES; i++) {
             const m3u8 = localStorage.getItem(`emisor_m3u8_${i}`);
             const rtmp = localStorage.getItem(`emisor_rtmp_${i}`);
             if (m3u8) essentialData[`emisor_m3u8_${i}`] = m3u8;
             if (rtmp) essentialData[`emisor_rtmp_${i}`] = rtmp;
           }
           
-          // Limpiar todo
           localStorage.clear();
           
-          // Restaurar datos esenciales
           Object.entries(essentialData).forEach(([key, value]) => {
             localStorage.setItem(key, value);
           });
@@ -375,7 +312,6 @@ export default function EmisorM3U8Panel() {
       }
     };
     
-    // Verificar cada minuto
     const interval = setInterval(checkCacheClear, 60 * 1000);
     return () => clearInterval(interval);
   }, []);
@@ -406,7 +342,6 @@ export default function EmisorM3U8Panel() {
       i === index ? { ...process, ...updates } : process
     ));
     
-    // Si se actualizan m3u8 o rtmp, guardar automáticamente en Supabase
     if (updates.m3u8 !== undefined || updates.rtmp !== undefined) {
       const dataToUpdate: any = {};
       if (updates.m3u8 !== undefined) dataToUpdate.m3u8 = updates.m3u8;
@@ -443,7 +378,6 @@ export default function EmisorM3U8Panel() {
   // Ref para acceder al estado actual de processes sin causar re-renders
   const processesRef = useRef(processes);
   
-  // Mantener la ref actualizada
   useEffect(() => {
     processesRef.current = processes;
   }, [processes]);
@@ -464,10 +398,9 @@ export default function EmisorM3U8Panel() {
       try {
         const data = JSON.parse(event.data);
         
-        // Capturar logs en tiempo real
         if (data.timestamp && data.level && data.message) {
           const processIndex = parseInt(data.processId);
-          if (processIndex >= 0 && processIndex <= 3) {
+          if (processIndex >= 0 && processIndex < NUM_PROCESSES) {
             const logEntry: LogEntry = {
               id: data.id || `${Date.now()}-${Math.random()}`,
               timestamp: data.timestamp,
@@ -480,24 +413,22 @@ export default function EmisorM3U8Panel() {
               const newProcesses = [...prev];
               newProcesses[processIndex] = {
                 ...newProcesses[processIndex],
-                logs: [...newProcesses[processIndex].logs, logEntry].slice(-100) // Mantener últimos 100 logs
+                logs: [...newProcesses[processIndex].logs, logEntry].slice(-100)
               };
               return newProcesses;
             });
             
-            // Scroll automático al final
             setTimeout(() => {
-              if (logContainerRefs[processIndex].current) {
+              if (logContainerRefs[processIndex]?.current) {
                 logContainerRefs[processIndex].current!.scrollTop = logContainerRefs[processIndex].current!.scrollHeight;
               }
             }, 50);
           }
         }
         
-        // Escuchar notificaciones de fallo
         if (data.type === 'failure') {
           const processIndex = parseInt(data.processId);
-          const failureType = data.failureType; // 'source', 'rtmp', 'server'
+          const failureType = data.failureType;
           const details = data.details;
           
           console.log(`❌ Fallo reportado en proceso ${processIndex + 1}:`, failureType, details);
@@ -508,12 +439,10 @@ export default function EmisorM3U8Panel() {
             server: '🖥️ Fallo en Servidor'
           };
           
-          // Mostrar toast de advertencia
-          toast.warning(`⚠️ Advertencia en Proceso ${processIndex + 1}`, {
+          toast.warning(`⚠️ Advertencia en ${CHANNEL_CONFIGS[processIndex]?.name || `Proceso ${processIndex + 1}`}`, {
             description: `${failureMessages[failureType as keyof typeof failureMessages] || 'Advertencia'}: ${details}. Verificando estado...`,
           });
           
-          // Marcar advertencia pero no detener inmediatamente
           updateProcess(processIndex, {
             failureReason: failureType,
             failureDetails: details
@@ -538,23 +467,21 @@ export default function EmisorM3U8Panel() {
     };
   }, []);
 
-  // Función para verificar estado del proceso en el backend
   const checkProcessStatus = async (processIndex: number) => {
     try {
       const resp = await fetch(`/api/status?process_id=${processIndex}`);
       const data = await resp.json();
       
       if (!data.process_running && processes[processIndex].isEmitiendo) {
-        console.error(`Proceso ${processIndex + 1}: FFmpeg no está corriendo en el servidor`);
+        console.error(`${CHANNEL_CONFIGS[processIndex]?.name}: FFmpeg no está corriendo en el servidor`);
         
-        // Intentar reiniciar el proceso automáticamente
         setTimeout(() => {
-          console.log(`Proceso ${processIndex + 1}: Intentando reiniciar automáticamente...`);
+          console.log(`${CHANNEL_CONFIGS[processIndex]?.name}: Intentando reiniciar automáticamente...`);
           startEmitToRTMP(processIndex);
         }, 5000);
       }
     } catch (e) {
-      console.error(`Proceso ${processIndex + 1}: Error verificando estado del servidor`);
+      console.error(`${CHANNEL_CONFIGS[processIndex]?.name}: Error verificando estado del servidor`);
     }
   };
 
@@ -564,7 +491,6 @@ export default function EmisorM3U8Panel() {
       if (process.isEmitiendo) {
         if (!timerRefs[index].current) {
           timerRefs[index].current = setInterval(() => {
-            // Usar función de actualización para obtener el valor más reciente
             setProcesses(prev => prev.map((p, i) => 
               i === index ? { ...p, elapsed: p.elapsed + 1 } : p
             ));
@@ -598,8 +524,8 @@ export default function EmisorM3U8Panel() {
   async function startEmitToRTMP(processIndex: number) {
     const process = processes[processIndex];
     
-    // Proceso 4 (índice 3) usa archivos locales
-    if (processIndex === 3) {
+    // Proceso Subida (file upload)
+    if (processIndex === FILE_UPLOAD_INDEX) {
       if (uploadedFiles.length === 0 || !process.rtmp) {
         updateProcess(processIndex, {
           emitStatus: "error",
@@ -619,7 +545,6 @@ export default function EmisorM3U8Panel() {
       setUploadProgress(0);
       
       try {
-        // Subir archivos al servidor con tracking de progreso usando XMLHttpRequest
         const formData = new FormData();
         uploadedFiles.forEach((file) => {
           formData.append('files', file);
@@ -627,7 +552,6 @@ export default function EmisorM3U8Panel() {
         formData.append('target_rtmp', process.rtmp);
         formData.append('process_id', processIndex.toString());
         
-        // Usar XMLHttpRequest para poder trackear progreso
         const resp = await new Promise<any>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           
@@ -664,7 +588,7 @@ export default function EmisorM3U8Panel() {
         
         const data = resp;
         const startTimeUnix = data.start_time || Math.floor(Date.now() / 1000);
-        const startTimeMs = startTimeUnix * 1000; // Convertir a milisegundos para consistencia
+        const startTimeMs = startTimeUnix * 1000;
         
         updateProcess(processIndex, {
           emitStatus: "running",
@@ -674,7 +598,6 @@ export default function EmisorM3U8Panel() {
           isEmitiendo: true
         });
         
-        // Guardar start_time en Supabase igual que m3u8 y rtmp
         await supabase
           .from('emission_processes')
           .update({ 
@@ -684,7 +607,7 @@ export default function EmisorM3U8Panel() {
           })
           .eq('id', processIndex);
         
-        toast.success(`Proceso ${processIndex + 1} iniciado con archivos locales`);
+        toast.success(`${CHANNEL_CONFIGS[processIndex].name} iniciado con archivos locales`);
       } catch (e: any) {
         console.error("Error emitiendo archivos locales:", e);
         setUploadProgress(0);
@@ -700,7 +623,7 @@ export default function EmisorM3U8Panel() {
       return;
     }
 
-    // Procesos 1-3: M3U8 -> RTMP
+    // Procesos M3U8 -> RTMP
     if (!process.m3u8 || !process.rtmp) {
       updateProcess(processIndex, {
         emitStatus: "error",
@@ -732,7 +655,7 @@ export default function EmisorM3U8Panel() {
       const data = await resp.json();
       
       const startTimeUnix = data.start_time || Math.floor(Date.now() / 1000);
-      const startTimeMs = startTimeUnix * 1000; // Convertir a milisegundos para consistencia
+      const startTimeMs = startTimeUnix * 1000;
       
       updateProcess(processIndex, {
         emitStatus: "running",
@@ -742,7 +665,6 @@ export default function EmisorM3U8Panel() {
         isEmitiendo: true
       });
       
-      // Guardar start_time en Supabase igual que m3u8 y rtmp
       await supabase
         .from('emission_processes')
         .update({ 
@@ -752,7 +674,7 @@ export default function EmisorM3U8Panel() {
         })
         .eq('id', processIndex);
       
-      toast.success(`Proceso ${processIndex + 1} iniciado`);
+      toast.success(`${CHANNEL_CONFIGS[processIndex].name} iniciado`);
     } catch (e: any) {
       console.error("Error starting emit:", e);
       const errorMsg = e.message || "Error al iniciar stream";
@@ -794,7 +716,6 @@ export default function EmisorM3U8Panel() {
       failureDetails: undefined
     });
     
-    // Guardar el reset en Supabase igual que m3u8 y rtmp
     await supabase
       .from('emission_processes')
       .update({ 
@@ -805,7 +726,6 @@ export default function EmisorM3U8Panel() {
       })
       .eq('id', processIndex);
     
-    // Limpiar localStorage de emisión pero mantener datos de entrada
     localStorage.removeItem(`emisor_is_emitting_${processIndex}`);
     localStorage.removeItem(`emisor_elapsed_${processIndex}`);
     localStorage.removeItem(`emisor_start_time_${processIndex}`);
@@ -818,13 +738,11 @@ export default function EmisorM3U8Panel() {
   async function onBorrar(processIndex: number) {
     const process = processes[processIndex];
     
-    // Primero detener emisión si está activa
     if (process.isEmitiendo) {
       await stopEmit(processIndex);
     }
     
-    // Para el proceso 4 (archivos locales), borrar archivos del servidor
-    if (processIndex === 3 && uploadedFiles.length > 0) {
+    if (processIndex === FILE_UPLOAD_INDEX && uploadedFiles.length > 0) {
       fetch('/api/emit/files', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -835,7 +753,6 @@ export default function EmisorM3U8Panel() {
       setUploadProgress(0);
     }
     
-    // Limpiar campos
     updateProcess(processIndex, {
       m3u8: "",
       rtmp: "",
@@ -849,8 +766,8 @@ export default function EmisorM3U8Panel() {
       failureDetails: undefined
     });
     
-    toast.success(`Proceso ${processIndex + 1} eliminado`);
-    console.log(`🧹 Proceso ${processIndex + 1} limpiado completamente, listo para nueva configuración`);
+    toast.success(`${CHANNEL_CONFIGS[processIndex].name} eliminado`);
+    console.log(`🧹 ${CHANNEL_CONFIGS[processIndex].name} limpiado completamente`);
   }
 
   const getStatusColor = (status: string) => {
@@ -897,8 +814,10 @@ export default function EmisorM3U8Panel() {
     const colors = [
       { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "FUTV" },
       { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Tigo Sports" },
-      { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "Proceso 3" },
-      { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Proceso 4" }
+      { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "TDmas 1" },
+      { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "Teletica" },
+      { bg: "bg-orange-500", text: "text-orange-500", stroke: "#f97316", name: "Canal 6" },
+      { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Subida" }
     ];
     return colors[processIndex];
   };
@@ -906,6 +825,7 @@ export default function EmisorM3U8Panel() {
   // Función para renderizar un tab de proceso
   const renderProcessTab = (processIndex: number) => {
     const process = processes[processIndex];
+    const channelConfig = CHANNEL_CONFIGS[processIndex];
 
     return (
       <div className="space-y-6">
@@ -913,11 +833,11 @@ export default function EmisorM3U8Panel() {
           {/* Panel de configuración */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
             <h2 className="text-lg font-medium mb-4 text-accent">
-              {processIndex === 3 ? "Archivos Locales" : "Fuente y Cabeceras"} - {getProcessColor(processIndex).name}
+              {processIndex === FILE_UPLOAD_INDEX ? "Archivos Locales" : "Fuente y Cabeceras"} - {channelConfig.name}
             </h2>
 
-            {processIndex === 3 ? (
-              // Proceso 4: Upload de archivos
+            {processIndex === FILE_UPLOAD_INDEX ? (
+              // Proceso Subida: Upload de archivos
               <>
                 <label className="block text-sm mb-2 text-muted-foreground">Archivos de video (MP4, MKV, etc.)</label>
                 <input
@@ -955,7 +875,7 @@ export default function EmisorM3U8Panel() {
                 )}
               </>
             ) : (
-              // Procesos 1-3: URL M3U8
+              // Procesos M3U8
               <>
                 <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 (fuente)</label>
                 <div className="flex gap-2 mb-4">
@@ -966,37 +886,20 @@ export default function EmisorM3U8Panel() {
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
                     className="flex-1 bg-card border border-border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
                   />
-                  {processIndex === 0 && (
+                  {channelConfig.scrapeFn && (
                     <button
-                      onClick={fetchFutvUrl}
-                      disabled={isFetchingFutv}
+                      onClick={() => fetchChannelUrl(processIndex)}
+                      disabled={fetchingChannel !== null}
                       className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
-                      title="Obtener URL FUTV automáticamente"
+                      title={`Obtener URL ${channelConfig.name} automáticamente`}
                     >
-                      {isFetchingFutv ? (
+                      {fetchingChannel === processIndex ? (
                         <span className="flex items-center gap-2">
                           <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-accent-foreground" />
                           Obteniendo...
                         </span>
                       ) : (
-                        "🔄 FUTV"
-                      )}
-                    </button>
-                  )}
-                  {processIndex === 1 && (
-                    <button
-                      onClick={fetchTigoUrl}
-                      disabled={isFetchingTigo}
-                      className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
-                      title="Obtener URL Tigo Sports automáticamente"
-                    >
-                      {isFetchingTigo ? (
-                        <span className="flex items-center gap-2">
-                          <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-accent-foreground" />
-                          Obteniendo...
-                        </span>
-                      ) : (
-                        "🔄 Tigo"
+                        channelConfig.fetchLabel
                       )}
                     </button>
                   )}
@@ -1054,7 +957,7 @@ export default function EmisorM3U8Panel() {
 
           {/* Panel de Métricas */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <h2 className="text-lg font-medium mb-6 text-accent">📊 Métricas - {getProcessColor(processIndex).name}</h2>
+            <h2 className="text-lg font-medium mb-6 text-accent">📊 Métricas - {channelConfig.name}</h2>
             
             <div className="space-y-6">
               {/* Estado Actual */}
@@ -1225,21 +1128,21 @@ export default function EmisorM3U8Panel() {
             📡 Sistema de Emisión M3U8 a RTMP
           </h1>
           <p className="text-muted-foreground">
-            Gestiona hasta 4 procesos de streaming simultáneos
+            Gestiona hasta {NUM_PROCESSES} procesos de streaming simultáneos
           </p>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="mb-6 flex justify-center">
-            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border">
-              {[0, 1, 2, 3].map((i) => {
+            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border flex flex-wrap">
+              {Array.from({ length: NUM_PROCESSES }, (_, i) => {
                 const color = getProcessColor(i);
                 const process = processes[i];
                 return (
                   <TabsTrigger 
                     key={i} 
                     value={i.toString()}
-                    className={`px-6 py-3 rounded-xl transition-all duration-200 relative ${
+                    className={`px-4 py-2.5 rounded-xl transition-all duration-200 relative ${
                       process.isEmitiendo 
                         ? 'bg-green-500/20 border-2 border-green-500 text-green-400 shadow-lg shadow-green-500/50 hover:bg-green-500/30' 
                         : activeTab === i.toString() 
@@ -1247,9 +1150,9 @@ export default function EmisorM3U8Panel() {
                           : 'hover:bg-muted/50'
                     }`}
                   >
-                    <span className="relative flex items-center gap-2">
+                    <span className="relative flex items-center gap-1.5 text-sm">
                       {process.isEmitiendo && (
-                        <span className="inline-flex h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse mr-1"></span>
+                        <span className="inline-flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
                       )}
                       {color.name}
                     </span>
@@ -1259,7 +1162,7 @@ export default function EmisorM3U8Panel() {
             </TabsList>
           </div>
 
-          {[0, 1, 2, 3].map((i) => (
+          {Array.from({ length: NUM_PROCESSES }, (_, i) => (
             <TabsContent key={i} value={i.toString()}>
               {renderProcessTab(i)}
             </TabsContent>

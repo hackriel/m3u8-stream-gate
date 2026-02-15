@@ -5,3 +5,12 @@ verify_jwt = false
 
 [functions.scrape-tigo]
 verify_jwt = false
+
+[functions.scrape-tdmas1]
+verify_jwt = false
+
+[functions.scrape-teletica]
+verify_jwt = false
+
+[functions.scrape-canal6]
+verify_jwt = false
