@@ -1,12 +1,13 @@
 import express from 'express';
 import cors from 'cors';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import multer from 'multer';
 import fs from 'fs';
+import os from 'os';
 import { createClient } from '@supabase/supabase-js';
 
 // Configurar cliente de Supabase (opcional, solo si hay variables de entorno)
@@ -1273,6 +1274,102 @@ const scheduleCacheClear = () => {
 };
 
 scheduleCacheClear();
+
+// ===== MÉTRICAS DEL SERVIDOR =====
+let prevCpuTimes = null;
+let prevNetStats = null;
+
+const getCpuUsage = () => {
+  const cpus = os.cpus();
+  let totalIdle = 0, totalTick = 0;
+  cpus.forEach(cpu => {
+    for (const type in cpu.times) {
+      totalTick += cpu.times[type];
+    }
+    totalIdle += cpu.times.idle;
+  });
+  
+  const currentTimes = { idle: totalIdle, total: totalTick };
+  
+  if (prevCpuTimes) {
+    const idleDiff = currentTimes.idle - prevCpuTimes.idle;
+    const totalDiff = currentTimes.total - prevCpuTimes.total;
+    const usage = totalDiff > 0 ? ((1 - idleDiff / totalDiff) * 100) : 0;
+    prevCpuTimes = currentTimes;
+    return Math.round(usage * 10) / 10;
+  }
+  
+  prevCpuTimes = currentTimes;
+  return 0;
+};
+
+const getNetworkStats = () => {
+  try {
+    const interfaces = os.networkInterfaces();
+    // Try reading /proc/net/dev for actual bytes (Linux only)
+    if (fs.existsSync('/proc/net/dev')) {
+      const content = fs.readFileSync('/proc/net/dev', 'utf8');
+      const lines = content.split('\n').slice(2); // Skip headers
+      let totalRx = 0, totalTx = 0;
+      lines.forEach(line => {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 10 && !parts[0].startsWith('lo:')) {
+          totalRx += parseInt(parts[1]) || 0;
+          totalTx += parseInt(parts[9]) || 0;
+        }
+      });
+      
+      const current = { rx: totalRx, tx: totalTx, time: Date.now() };
+      
+      if (prevNetStats) {
+        const elapsed = (current.time - prevNetStats.time) / 1000;
+        const rxRate = elapsed > 0 ? ((current.rx - prevNetStats.rx) / elapsed / 1024 / 1024) : 0; // MB/s
+        const txRate = elapsed > 0 ? ((current.tx - prevNetStats.tx) / elapsed / 1024 / 1024) : 0; // MB/s
+        prevNetStats = current;
+        return {
+          rxMbps: Math.round(rxRate * 100) / 100,
+          txMbps: Math.round(txRate * 100) / 100
+        };
+      }
+      
+      prevNetStats = current;
+      return { rxMbps: 0, txMbps: 0 };
+    }
+    
+    return { rxMbps: 0, txMbps: 0 };
+  } catch (e) {
+    return { rxMbps: 0, txMbps: 0 };
+  }
+};
+
+app.get('/api/metrics', (req, res) => {
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  
+  const cpuUsage = getCpuUsage();
+  const network = getNetworkStats();
+  
+  res.json({
+    timestamp: Date.now(),
+    cpu: {
+      usage: cpuUsage,
+      cores: os.cpus().length
+    },
+    memory: {
+      total: Math.round(totalMem / 1024 / 1024), // MB
+      used: Math.round(usedMem / 1024 / 1024),
+      free: Math.round(freeMem / 1024 / 1024),
+      percent: Math.round((usedMem / totalMem) * 1000) / 10
+    },
+    network: {
+      rxMbps: network.rxMbps,
+      txMbps: network.txMbps
+    },
+    uptime: os.uptime(),
+    loadAvg: os.loadavg()
+  });
+});
 
 // Ruta catch-all para servir la aplicación React (debe ir después de todas las rutas API)
 app.use((req, res, next) => {
