@@ -1,11 +1,18 @@
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
 const RESELLER_ID = '61316705e4b0295f87dae396';
-const CHANNEL_ID = '617c2f66e4b045a692106126';
 const BASE_URL = 'https://cf.streann.tech';
+
+const CHANNEL_MAP: Record<string, string> = {
+  '641cba02e4b068d89b2344e3': 'FUTV',
+  '664237788f085ac1f2a15f81': 'Tigo Sports',
+  '66608d188f0839b8a740cfe9': 'TDmas 1',
+  '617c2f66e4b045a692106126': 'Teletica',
+  '65d7aca4e4b0140cbf380bd0': 'Canal 6',
+};
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -13,9 +20,21 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const body = await req.json().catch(() => ({}));
+    const channelId = body.channel_id;
+
+    if (!channelId) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Falta channel_id' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const channelName = CHANNEL_MAP[channelId] || channelId;
+
     const email = Deno.env.get('TDMAX_EMAIL');
     const password = Deno.env.get('TDMAX_PASSWORD');
-    
+
     if (!email || !password) {
       return new Response(
         JSON.stringify({ success: false, error: 'Credenciales TDMAX no configuradas' }),
@@ -58,7 +77,7 @@ Deno.serve(async (req) => {
     }
 
     const deviceId = crypto.randomUUID();
-    const lbUrl = `${BASE_URL}/loadbalancer/services/v1/channels-secure/${CHANNEL_ID}/playlist.m3u8?r=${RESELLER_ID}&deviceId=${deviceId}&accessToken=${encodeURIComponent(accessToken)}&doNotUseRedirect=true&countryCode=CR&deviceType=web&appType=web`;
+    const lbUrl = `${BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?r=${RESELLER_ID}&deviceId=${deviceId}&accessToken=${encodeURIComponent(accessToken)}&doNotUseRedirect=true&countryCode=CR&deviceType=web&appType=web`;
 
     const lbResp = await fetch(lbUrl, {
       headers: {
@@ -88,7 +107,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, url: streamUrl, channel: 'Teletica' }),
+      JSON.stringify({ success: true, url: streamUrl, channel: channelName }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
