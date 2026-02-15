@@ -134,18 +134,18 @@ const autoRecoveryInProgress = new Map(); // Map<processId, boolean>
 const SUPABASE_FUNCTIONS_URL = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1`;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
 
-const autoRecoverFutv = async (process_id) => {
+const autoRecoverChannel = async (process_id, scrapeFnName = 'scrape-futv', channelName = 'FUTV') => {
   if (autoRecoveryInProgress.get(process_id)) {
     sendLog(process_id, 'warn', '⏳ Auto-recovery ya en progreso, ignorando...');
     return;
   }
   
   autoRecoveryInProgress.set(process_id, true);
-  sendLog(process_id, 'info', '🔄 AUTO-RECOVERY FUTV: Obteniendo nueva URL...');
+  sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName}: Obteniendo nueva URL...`);
   
   try {
-    // Llamar a la edge function scrape-futv
-    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-futv`, {
+    // Llamar a la edge function correspondiente
+    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/${scrapeFnName}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -607,11 +607,13 @@ app.post('/api/emit', async (req, res) => {
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
       
-      // AUTO-RECOVERY: Si es proceso FUTV (id=0) y falló (no fue detenido manualmente)
-      if (process_id === '0' && code !== 0 && code !== null) {
-        sendLog(process_id, 'warn', '🔄 FUTV caído - Iniciando auto-recovery en 3 segundos...');
+      // AUTO-RECOVERY: Si es proceso FUTV (id=0) o Tigo Sports (id=1) y falló
+      if ((process_id === '0' || process_id === '1') && code !== 0 && code !== null) {
+        const channelName = process_id === '0' ? 'FUTV' : 'Tigo Sports';
+        const scrapeFn = process_id === '0' ? 'scrape-futv' : 'scrape-tigo';
+        sendLog(process_id, 'warn', `🔄 ${channelName} caído - Iniciando auto-recovery en 3 segundos...`);
         setTimeout(() => {
-          autoRecoverFutv(process_id);
+          autoRecoverChannel(process_id, scrapeFn, channelName);
         }, 3000);
       }
     });

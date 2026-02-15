@@ -283,6 +283,7 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isFetchingFutv, setIsFetchingFutv] = useState(false);
+  const [isFetchingTigo, setIsFetchingTigo] = useState(false);
 
   // Función para obtener URL FUTV automáticamente
   const fetchFutvUrl = useCallback(async () => {
@@ -306,6 +307,31 @@ export default function EmisorM3U8Panel() {
       toast.error(`Error obteniendo URL FUTV: ${e.message}`);
     } finally {
       setIsFetchingFutv(false);
+    }
+  }, [processes]);
+
+  // Función para obtener URL Tigo Sports automáticamente
+  const fetchTigoUrl = useCallback(async () => {
+    setIsFetchingTigo(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('scrape-tigo', {
+        method: 'POST',
+      });
+
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Error desconocido');
+
+      const streamUrl = data.url;
+      updateProcess(1, { 
+        m3u8: streamUrl,
+        rtmp: processes[1].rtmp || ''
+      });
+      toast.success('✅ URL Tigo Sports actualizada correctamente');
+    } catch (e: any) {
+      console.error('Error obteniendo URL Tigo Sports:', e);
+      toast.error(`Error obteniendo URL Tigo Sports: ${e.message}`);
+    } finally {
+      setIsFetchingTigo(false);
     }
   }, [processes]);
 
@@ -870,7 +896,7 @@ export default function EmisorM3U8Panel() {
   const getProcessColor = (processIndex: number) => {
     const colors = [
       { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "FUTV" },
-      { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Proceso 2" },
+      { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Tigo Sports" },
       { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "Proceso 3" },
       { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Proceso 4" }
     ];
@@ -954,6 +980,23 @@ export default function EmisorM3U8Panel() {
                         </span>
                       ) : (
                         "🔄 FUTV"
+                      )}
+                    </button>
+                  )}
+                  {processIndex === 1 && (
+                    <button
+                      onClick={fetchTigoUrl}
+                      disabled={isFetchingTigo}
+                      className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
+                      title="Obtener URL Tigo Sports automáticamente"
+                    >
+                      {isFetchingTigo ? (
+                        <span className="flex items-center gap-2">
+                          <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-accent-foreground" />
+                          Obteniendo...
+                        </span>
+                      ) : (
+                        "🔄 Tigo"
                       )}
                     </button>
                   )}
