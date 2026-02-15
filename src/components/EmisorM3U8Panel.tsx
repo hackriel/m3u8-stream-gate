@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
@@ -282,6 +282,32 @@ export default function EmisorM3U8Panel() {
   // Estado específico para el proceso 4 (archivos locales)
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [isFetchingFutv, setIsFetchingFutv] = useState(false);
+
+  // Función para obtener URL FUTV automáticamente
+  const fetchFutvUrl = useCallback(async () => {
+    setIsFetchingFutv(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('scrape-futv', {
+        method: 'POST',
+      });
+
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Error desconocido');
+
+      const streamUrl = data.url;
+      updateProcess(0, { 
+        m3u8: streamUrl,
+        rtmp: processes[0].rtmp || 'rtmp://fluestabiliz.giize.com/costaFUUTV'
+      });
+      toast.success('✅ URL FUTV actualizada correctamente');
+    } catch (e: any) {
+      console.error('Error obteniendo URL FUTV:', e);
+      toast.error(`Error obteniendo URL FUTV: ${e.message}`);
+    } finally {
+      setIsFetchingFutv(false);
+    }
+  }, [processes]);
 
   // Limpieza de caché programada del lado del cliente (4am Costa Rica)
   useEffect(() => {
@@ -843,7 +869,7 @@ export default function EmisorM3U8Panel() {
   // Colores únicos para cada proceso
   const getProcessColor = (processIndex: number) => {
     const colors = [
-      { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "Proceso 1" },
+      { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "FUTV" },
       { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Proceso 2" },
       { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "Proceso 3" },
       { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Proceso 4" }
@@ -861,7 +887,7 @@ export default function EmisorM3U8Panel() {
           {/* Panel de configuración */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
             <h2 className="text-lg font-medium mb-4 text-accent">
-              {processIndex === 3 ? "Archivos Locales" : "Fuente y Cabeceras"} - Proceso {processIndex + 1}
+              {processIndex === 3 ? "Archivos Locales" : "Fuente y Cabeceras"} - {getProcessColor(processIndex).name}
             </h2>
 
             {processIndex === 3 ? (
@@ -906,13 +932,32 @@ export default function EmisorM3U8Panel() {
               // Procesos 1-3: URL M3U8
               <>
                 <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 (fuente)</label>
-                <input
-                  type="url"
-                  placeholder="https://servidor/origen/playlist.m3u8"
-                  value={process.m3u8}
-                  onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-                />
+                <div className="flex gap-2 mb-4">
+                  <input
+                    type="url"
+                    placeholder="https://servidor/origen/playlist.m3u8"
+                    value={process.m3u8}
+                    onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
+                    className="flex-1 bg-card border border-border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+                  />
+                  {processIndex === 0 && (
+                    <button
+                      onClick={fetchFutvUrl}
+                      disabled={isFetchingFutv}
+                      className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
+                      title="Obtener URL FUTV automáticamente"
+                    >
+                      {isFetchingFutv ? (
+                        <span className="flex items-center gap-2">
+                          <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-accent-foreground" />
+                          Obteniendo...
+                        </span>
+                      ) : (
+                        "🔄 FUTV"
+                      )}
+                    </button>
+                  )}
+                </div>
               </>
             )}
 
@@ -966,7 +1011,7 @@ export default function EmisorM3U8Panel() {
 
           {/* Panel de Métricas */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <h2 className="text-lg font-medium mb-6 text-accent">📊 Métricas - Proceso {processIndex + 1}</h2>
+            <h2 className="text-lg font-medium mb-6 text-accent">📊 Métricas - {getProcessColor(processIndex).name}</h2>
             
             <div className="space-y-6">
               {/* Estado Actual */}
