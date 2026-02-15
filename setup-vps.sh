@@ -62,13 +62,16 @@ fi
 # ── Paso 4: Instalar dependencias ──
 echo "📥 [4/8] Instalando dependencias del proyecto..."
 [ -f "package.json" ] || fail "No se encontró package.json. Ejecuta este script desde el directorio del proyecto."
-npm install --omit=dev 2>&1 | tail -1
+npm install 2>&1 | tail -1
 ok "Dependencias instaladas"
 
 # ── Paso 5: Build del frontend ──
 echo "🔨 [5/8] Compilando frontend..."
 npm run build 2>&1 | tail -3
 ok "Frontend compilado"
+
+# Podar dependencias de desarrollo después del build
+npm prune --omit=dev 2>&1 | tail -1
 
 # ── Paso 6: Crear servicio systemd ──
 echo "⚙️  [6/8] Configurando servicio systemd..."
