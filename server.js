@@ -415,13 +415,11 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_delay_max', '5',
         '-reconnect_on_network_error', '1',
         '-reconnect_on_http_error', '5xx',
-        '-multiple_requests', '1', // Permitir requests paralelos para HLS
-      '-http_persistent', '1',
+        '-multiple_requests', '1',
         '-http_persistent', '1',
         '-live_start_index', '-3',
-        '-readrate', '1', // Limitar lectura a 1x velocidad (más suave que -re, evita agotar playlist)
+        '-re',
         '-fflags', '+genpts+discardcorrupt',
-        '-fflags', '+genpts+discardcorrupt', // Regenerar timestamps + descartar paquetes corruptos
         '-analyzeduration', '10000000', // 10s análisis para mejor detección de códecs
         '-probesize', '5000000', // 5MB de datos para análisis inicial
         '-i', source_m3u8,
@@ -458,11 +456,10 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_delay_max', '5',
         '-reconnect_on_network_error', '1',
         '-reconnect_on_http_error', '5xx',
-        '-multiple_requests', '1', // Permitir requests paralelos para HLS
+        '-multiple_requests', '1',
         '-http_persistent', '1',
         '-live_start_index', '-3',
-        '-readrate', '1', // Limitar lectura a 1x velocidad
-        '-fflags', '+genpts+discardcorrupt',
+        '-re',
         '-fflags', '+genpts+discardcorrupt',
         '-analyzeduration', '10000000',
         '-probesize', '5000000',
