@@ -414,9 +414,12 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_on_network_error', '1',
         '-reconnect_on_http_error', '5xx',
         '-multiple_requests', '1', // Permitir requests paralelos para HLS
-        '-http_persistent', '1',
+      '-http_persistent', '1',
         '-live_start_index', '-3', // Empezar 3 segmentos antes del final (para streams en vivo)
-        '-re',
+        // NO usar -re en HLS en vivo: causa double-throttling y saltos
+        '-fflags', '+genpts+discardcorrupt', // Regenerar timestamps + descartar paquetes corruptos
+        '-analyzeduration', '10000000', // 10s análisis para mejor detección de códecs
+        '-probesize', '5000000', // 5MB de datos para análisis inicial
         '-i', source_m3u8,
         '-c:v', 'libx264',
         '-preset', 'fast',
@@ -433,6 +436,7 @@ app.post('/api/emit', async (req, res) => {
         '-b:a', '128k',
         '-ac', '2',
         '-ar', '48000',
+        '-max_muxing_queue_size', '1024', // Prevenir overflow en ráfagas de datos
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
         target_rtmp
@@ -451,12 +455,16 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_on_network_error', '1',
         '-reconnect_on_http_error', '5xx',
         '-multiple_requests', '1', // Permitir requests paralelos para HLS
-        '-http_persistent', '1',
-        '-live_start_index', '-3', // Empezar 3 segmentos antes del final (para streams en vivo)
-        '-re',
+      '-http_persistent', '1',
+        '-live_start_index', '-3',
+        // NO usar -re en HLS en vivo: causa double-throttling y saltos
+        '-fflags', '+genpts+discardcorrupt',
+        '-analyzeduration', '10000000',
+        '-probesize', '5000000',
         '-i', source_m3u8,
         '-c:v', 'copy',
         '-c:a', 'copy',
+        '-max_muxing_queue_size', '1024',
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
         target_rtmp
