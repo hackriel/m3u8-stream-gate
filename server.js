@@ -130,6 +130,7 @@ app.use(express.static(path.join(__dirname, 'dist')));
 const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTime, target_rtmp }>
 const emissionStatuses = new Map(); // Map<processId, status>
 const autoRecoveryInProgress = new Map(); // Map<processId, boolean>
+const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hacer auto-recovery)
 
 // FUTV Auto-recovery: obtener nueva URL y reiniciar emisión
 const SUPABASE_FUNCTIONS_URL = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1`;
@@ -337,6 +338,7 @@ app.post('/api/emit', async (req, res) => {
 
     // Si ya hay un proceso corriendo para este ID, detenerlo primero
     const existingProcess = ffmpegProcesses.get(process_id);
+    manualStopProcesses.delete(process_id); // Limpiar flag de parada manual al iniciar nueva emisión
     if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
       sendLog(process_id, 'warn', `Deteniendo proceso ffmpeg existente para reinicio`);
       existingProcess.process.kill('SIGTERM');
@@ -588,12 +590,15 @@ app.post('/api/emit', async (req, res) => {
         '4': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
       };
       
-      if (autoRecoveryMap[process_id] && code !== 0 && code !== null) {
+      if (autoRecoveryMap[process_id] && code !== 0 && code !== null && !manualStopProcesses.has(process_id)) {
         const { channelId, channelName } = autoRecoveryMap[process_id];
         sendLog(process_id, 'warn', `🔄 ${channelName} caído - Iniciando auto-recovery en 3 segundos...`);
         setTimeout(() => {
           autoRecoverChannel(process_id, channelId, channelName);
         }, 3000);
+      } else if (manualStopProcesses.has(process_id)) {
+        sendLog(process_id, 'info', '🛑 Parada manual detectada - Auto-recovery desactivado');
+        manualStopProcesses.delete(process_id); // Limpiar flag después de usarla
       }
     });
 
@@ -1004,7 +1009,8 @@ app.post('/api/emit/stop', async (req, res) => {
     
     const processData = ffmpegProcesses.get(process_id);
     if (processData && processData.process && !processData.process.killed) {
-      emissionStatuses.set(process_id, 'stopping');
+    emissionStatuses.set(process_id, 'stopping');
+      manualStopProcesses.add(process_id); // Marcar como parada manual para evitar auto-recovery
       
       // Actualizar base de datos antes de detener (solo si Supabase está disponible)
       if (supabase) {
@@ -1069,6 +1075,7 @@ app.delete('/api/emit/:process_id', async (req, res) => {
     // Primero detener el proceso si está corriendo
     const processData = ffmpegProcesses.get(process_id);
     if (processData && processData.process && !processData.process.killed) {
+      manualStopProcesses.add(process_id); // Marcar como manual para evitar auto-recovery
       processData.process.kill('SIGKILL');
       ffmpegProcesses.delete(process_id);
       emissionStatuses.set(process_id, 'idle');
