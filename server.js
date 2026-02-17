@@ -136,6 +136,14 @@ const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hac
 const SUPABASE_FUNCTIONS_URL = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1`;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
 
+// Fallback URLs oficiales por canal (se usan si el scraping falla)
+const CHANNEL_FALLBACK_URLS = {
+  '4': 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8', // Canal 6 oficial
+};
+
+// Track de intentos de recovery para saber cuándo usar fallback
+const recoveryAttempts = new Map(); // Map<processId, number>
+
 const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') => {
   if (autoRecoveryInProgress.get(process_id)) {
     sendLog(process_id, 'warn', '⏳ Auto-recovery ya en progreso, ignorando...');
@@ -143,29 +151,58 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
   }
   
   autoRecoveryInProgress.set(process_id, true);
-  sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName}: Obteniendo nueva URL...`);
+  const attempts = (recoveryAttempts.get(process_id) || 0) + 1;
+  recoveryAttempts.set(process_id, attempts);
+  
+  let newUrl = null;
+  const fallbackUrl = CHANNEL_FALLBACK_URLS[process_id];
+  
+  // Si es el segundo intento (o más) y hay fallback, usar directamente la URL oficial
+  if (attempts >= 2 && fallbackUrl) {
+    sendLog(process_id, 'warn', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Usando URL oficial de respaldo...`);
+    newUrl = fallbackUrl;
+  } else {
+    // Primer intento: intentar scraping normal
+    sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Obteniendo nueva URL...`);
+    
+    try {
+      const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'apikey': SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ channel_id: channelId }),
+      });
+      
+      const data = await resp.json();
+      
+      if (data.success && data.url) {
+        newUrl = data.url;
+      } else if (fallbackUrl) {
+        sendLog(process_id, 'warn', `⚠️ Scraping falló, usando URL oficial de respaldo para ${channelName}`);
+        newUrl = fallbackUrl;
+      } else {
+        sendLog(process_id, 'error', `❌ AUTO-RECOVERY falló: ${data.error || 'No se obtuvo URL'}`);
+        autoRecoveryInProgress.set(process_id, false);
+        return;
+      }
+    } catch (scrapeError) {
+      if (fallbackUrl) {
+        sendLog(process_id, 'warn', `⚠️ Error en scraping (${scrapeError.message}), usando URL oficial de respaldo`);
+        newUrl = fallbackUrl;
+      } else {
+        sendLog(process_id, 'error', `❌ AUTO-RECOVERY error scraping: ${scrapeError.message}`);
+        autoRecoveryInProgress.set(process_id, false);
+        return;
+      }
+    }
+  }
   
   try {
-    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'apikey': SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({ channel_id: channelId }),
-    });
-    
-    const data = await resp.json();
-    
-    if (!data.success || !data.url) {
-      sendLog(process_id, 'error', `❌ AUTO-RECOVERY falló: ${data.error || 'No se obtuvo URL'}`);
-      autoRecoveryInProgress.set(process_id, false);
-      return;
-    }
-    
-    const newUrl = data.url;
-    sendLog(process_id, 'success', `✅ Nueva URL ${channelName} obtenida: ${newUrl.substring(0, 80)}...`);
+    const newUrl_display = newUrl === fallbackUrl ? '🏛️ URL OFICIAL' : newUrl.substring(0, 80) + '...';
+    sendLog(process_id, 'success', `✅ Nueva URL ${channelName}: ${newUrl_display}`);
     
     let targetRtmp = '';
     if (supabase) {
@@ -200,6 +237,10 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
     });
     
     sendLog(process_id, 'success', '✅ AUTO-RECOVERY completado: Emisión reiniciada');
+    // Si fue exitoso con URL oficial, resetear intentos
+    if (newUrl === fallbackUrl) {
+      recoveryAttempts.set(process_id, 0);
+    }
   } catch (error) {
     sendLog(process_id, 'error', `❌ AUTO-RECOVERY error: ${error.message}`);
   } finally {
@@ -311,6 +352,9 @@ app.post('/api/emit', async (req, res) => {
   try {
     const { source_m3u8, target_rtmp, process_id = '0' } = req.body;
 
+    // Resetear contador de recovery al iniciar emisión manualmente
+    recoveryAttempts.set(process_id, 0);
+    
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
 
     // Validaciones
