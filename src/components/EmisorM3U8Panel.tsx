@@ -234,7 +234,8 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     const interval = setInterval(() => {
       setProcesses(prev => prev.map(p => {
-        if (p.isEmitiendo && p.emitStatus === 'running' && p.startTime > 0) {
+        // Timer funciona si está emitiendo Y tiene startTime válido, sin importar si es 'starting' o 'running'
+        if (p.isEmitiendo && (p.emitStatus === 'running' || p.emitStatus === 'starting') && p.startTime > 0) {
           const newElapsed = Math.floor((Date.now() - p.startTime) / 1000);
           return { ...p, elapsed: newElapsed };
         }
