@@ -139,6 +139,7 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPA
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
   '4': 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8', // Canal 6 oficial
+  '5': 'https://mdstrm.com/live-stream-playlist/5a7b1e63a8da282c34d65445.m3u8', // Multimedios oficial
 };
 
 // Track de intentos de recovery para saber cuándo usar fallback
@@ -632,6 +633,7 @@ app.post('/api/emit', async (req, res) => {
         '2': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
         '3': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
         '4': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
+        '5': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
       };
       
       if (autoRecoveryMap[process_id] && code !== 0 && code !== null && !manualStopProcesses.has(process_id)) {

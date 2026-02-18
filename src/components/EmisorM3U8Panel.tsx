@@ -15,8 +15,8 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 6;
-const FILE_UPLOAD_INDEX = 5; // "Subida" process
+const NUM_PROCESSES = 7;
+const FILE_UPLOAD_INDEX = 6; // "Subida" process
 
 // Tipo para un proceso de emisión
 interface EmissionProcess {
@@ -59,6 +59,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "TDmas 1", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "Teletica", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "Canal 6", scrapeFn: "scrape-channel", channelId: "65d7aca4e4b0140cbf380bd0", fetchLabel: "🔄 Canal6" },
+  { name: "Multimedios", scrapeFn: "scrape-channel", channelId: "664e5de58f089fa849a58697", fetchLabel: "🔄 Multi" },
   { name: "Subida", scrapeFn: null, channelId: null, fetchLabel: "" },
 ];
 
@@ -729,6 +730,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "TDmas 1" },
       { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "Teletica" },
       { bg: "bg-orange-500", text: "text-orange-500", stroke: "#f97316", name: "Canal 6" },
+      { bg: "bg-red-500", text: "text-red-500", stroke: "#ef4444", name: "Multimedios" },
       { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Subida" }
     ];
     return colors[processIndex];
