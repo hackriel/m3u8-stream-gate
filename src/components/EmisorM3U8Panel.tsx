@@ -646,7 +646,32 @@ export default function EmisorM3U8Panel() {
         emit_status: 'idle'
       })
       .eq('id', processIndex);
+  }
+
+  async function dropSignal(processIndex: number) {
+    const channelConfig = CHANNEL_CONFIGS[processIndex];
+    if (!channelConfig.scrapeFn) return;
     
+    toast.info(`📡 Botando señal de ${channelConfig.name}...`);
+    updateProcess(processIndex, {
+      emitMsg: "📡 Cambiando señal...",
+    });
+    
+    try {
+      const resp = await fetch("/api/emit/drop-signal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ process_id: processIndex.toString() })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        toast.success(`🔄 ${channelConfig.name}: Buscando nueva señal...`);
+      } else {
+        toast.error(`Error: ${data.error}`);
+      }
+    } catch (e: any) {
+      toast.error(`Error botando señal: ${e.message}`);
+    }
   }
 
   async function onBorrar(processIndex: number) {
@@ -847,6 +872,16 @@ export default function EmisorM3U8Panel() {
                   className="px-6 py-3 rounded-xl bg-warning hover:bg-warning/90 active:scale-[.98] transition-all duration-200 font-medium text-warning-foreground shadow-lg hover:shadow-xl"
                 >
                   ⏹️ Detener emisión
+                </button>
+              )}
+              {/* Botón "Botar Señal": solo canales con scraping mientras está emitiendo */}
+              {process.isEmitiendo && channelConfig.scrapeFn && (
+                <button
+                  onClick={() => dropSignal(processIndex)}
+                  className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl"
+                  title="Fuerza un cambio de señal: busca nueva URL y reinicia la emisión"
+                >
+                  📡 Botar Señal
                 </button>
               )}
               <button 

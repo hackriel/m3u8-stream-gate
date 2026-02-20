@@ -145,6 +145,31 @@ const CHANNEL_FALLBACK_URLS = {
 // Track de intentos de recovery para saber cuándo usar fallback
 const recoveryAttempts = new Map(); // Map<processId, number>
 
+// Espera a que el proceso FFmpeg esté completamente muerto (con timeout)
+const waitForProcessDeath = (proc, timeoutMs = 5000) => {
+  return new Promise((resolve) => {
+    if (!proc || proc.killed || proc.exitCode !== null) {
+      return resolve();
+    }
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        // Forzar SIGKILL si SIGTERM no fue suficiente
+        try { proc.kill('SIGKILL'); } catch (e) {}
+        resolve();
+      }
+    }, timeoutMs);
+    proc.on('close', () => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+  });
+};
+
 const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') => {
   if (autoRecoveryInProgress.get(process_id)) {
     sendLog(process_id, 'warn', '⏳ Auto-recovery ya en progreso, ignorando...');
@@ -181,8 +206,9 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       
       if (data.success && data.url) {
         newUrl = data.url;
+        sendLog(process_id, 'success', `✅ URL scrapeada correctamente para ${channelName}`);
       } else if (fallbackUrl) {
-        sendLog(process_id, 'warn', `⚠️ Scraping falló, usando URL oficial de respaldo para ${channelName}`);
+        sendLog(process_id, 'warn', `⚠️ Scraping falló (${data.error || 'sin URL'}), usando URL oficial de respaldo para ${channelName}`);
         newUrl = fallbackUrl;
       } else {
         sendLog(process_id, 'error', `❌ AUTO-RECOVERY falló: ${data.error || 'No se obtuvo URL'}`);
@@ -205,6 +231,19 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
     const newUrl_display = newUrl === fallbackUrl ? '🏛️ URL OFICIAL' : newUrl.substring(0, 80) + '...';
     sendLog(process_id, 'success', `✅ Nueva URL ${channelName}: ${newUrl_display}`);
     
+    // CRÍTICO: Asegurarse de que el proceso anterior esté COMPLETAMENTE muerto antes de reiniciar
+    const existingProc = ffmpegProcesses.get(process_id);
+    if (existingProc && existingProc.process && !existingProc.process.killed) {
+      sendLog(process_id, 'info', '🔪 Terminando proceso anterior antes de reiniciar...');
+      existingProc.process.kill('SIGTERM');
+      await waitForProcessDeath(existingProc.process, 4000);
+      ffmpegProcesses.delete(process_id);
+      sendLog(process_id, 'info', '✔ Proceso anterior terminado correctamente');
+    }
+    
+    // Pausa adicional para liberar recursos del sistema
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
     let targetRtmp = '';
     if (supabase) {
       const { data: row } = await supabase
@@ -215,6 +254,12 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       if (row?.rtmp) targetRtmp = row.rtmp;
     }
     
+    if (!targetRtmp) {
+      sendLog(process_id, 'error', `❌ AUTO-RECOVERY: No se encontró RTMP destino para proceso ${process_id}`);
+      autoRecoveryInProgress.set(process_id, false);
+      return;
+    }
+    
     if (supabase) {
       await supabase
         .from('emission_processes')
@@ -222,12 +267,10 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
         .eq('id', parseInt(process_id));
     }
     
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
     sendLog(process_id, 'info', '🚀 AUTO-RECOVERY: Reiniciando emisión con nueva URL...');
     
     const emitUrl = `http://localhost:${PORT}/api/emit`;
-    await fetch(emitUrl, {
+    const emitResp = await fetch(emitUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -237,10 +280,15 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       })
     });
     
-    sendLog(process_id, 'success', '✅ AUTO-RECOVERY completado: Emisión reiniciada');
-    // Si fue exitoso con URL oficial, resetear intentos
-    if (newUrl === fallbackUrl) {
-      recoveryAttempts.set(process_id, 0);
+    if (!emitResp.ok) {
+      const errText = await emitResp.text().catch(() => '');
+      sendLog(process_id, 'error', `❌ AUTO-RECOVERY: El endpoint /api/emit respondió ${emitResp.status}: ${errText.substring(0, 100)}`);
+    } else {
+      sendLog(process_id, 'success', '✅ AUTO-RECOVERY completado: Emisión reiniciada correctamente');
+      // Si fue exitoso con URL oficial, resetear intentos
+      if (newUrl === fallbackUrl) {
+        recoveryAttempts.set(process_id, 0);
+      }
     }
   } catch (error) {
     sendLog(process_id, 'error', `❌ AUTO-RECOVERY error: ${error.message}`);
@@ -1110,6 +1158,61 @@ app.post('/api/emit/stop', async (req, res) => {
       error: 'Error interno del servidor', 
       details: error.message 
     });
+  }
+});
+
+
+// Endpoint para "Botar Señal": fuerza un cambio de señal en caliente
+// Mata FFmpeg, espera que muera, y dispara auto-recovery como si fuera una caída
+app.post('/api/emit/drop-signal', async (req, res) => {
+  try {
+    const { process_id } = req.body;
+    
+    if (!process_id) {
+      return res.status(400).json({ success: false, error: 'Falta process_id' });
+    }
+    
+    const dropSignalMap = {
+      '1': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV' },
+      '2': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Sports' },
+      '3': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
+      '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
+      '5': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
+      '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
+    };
+    
+    const channelInfo = dropSignalMap[process_id];
+    if (!channelInfo) {
+      return res.status(400).json({ success: false, error: `Proceso ${process_id} no soporta cambio de señal automático` });
+    }
+    
+    sendLog(process_id, 'warn', `📡 BOTAR SEÑAL: Forzando cambio de señal para ${channelInfo.channelName}...`);
+    
+    // Matar proceso existente y esperar que muera completamente
+    const processData = ffmpegProcesses.get(process_id);
+    if (processData && processData.process && !processData.process.killed) {
+      sendLog(process_id, 'info', '🔪 Terminando proceso FFmpeg actual...');
+      processData.process.kill('SIGTERM');
+      await waitForProcessDeath(processData.process, 4000);
+      ffmpegProcesses.delete(process_id);
+      emissionStatuses.set(process_id, 'idle');
+      sendLog(process_id, 'info', '✔ Proceso anterior terminado - iniciando cambio de señal...');
+    }
+    
+    // Resetear intentos para que haga scraping limpio (intento 1)
+    recoveryAttempts.set(process_id, 0);
+    
+    // Responder inmediatamente al cliente y ejecutar recovery en background
+    res.json({ success: true, message: `Cambiando señal de ${channelInfo.channelName}...` });
+    
+    // Disparar auto-recovery después de un breve delay
+    setTimeout(() => {
+      autoRecoverChannel(process_id, channelInfo.channelId, channelInfo.channelName);
+    }, 500);
+    
+  } catch (error) {
+    sendLog(req.body?.process_id || '?', 'error', `Error en drop-signal: ${error.message}`);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
