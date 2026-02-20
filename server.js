@@ -145,17 +145,20 @@ const CHANNEL_FALLBACK_URLS = {
 // Track de intentos de recovery para saber cuándo usar fallback
 const recoveryAttempts = new Map(); // Map<processId, number>
 
-// Espera a que el proceso FFmpeg esté completamente muerto (con timeout)
-const waitForProcessDeath = (proc, timeoutMs = 5000) => {
+// Cache de resolución por canal para evitar re-sondear en cada recovery
+const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, height }>
+
+// Espera a que el proceso FFmpeg esté completamente muerto (con timeout agresivo)
+const waitForProcessDeath = (proc, timeoutMs = 1500) => {
   return new Promise((resolve) => {
     if (!proc || proc.killed || proc.exitCode !== null) {
       return resolve();
     }
     let resolved = false;
+    // SIGKILL inmediato si no muere en timeoutMs
     const timer = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        // Forzar SIGKILL si SIGTERM no fue suficiente
         try { proc.kill('SIGKILL'); } catch (e) {}
         resolve();
       }
@@ -235,14 +238,11 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
     const existingProc = ffmpegProcesses.get(process_id);
     if (existingProc && existingProc.process && !existingProc.process.killed) {
       sendLog(process_id, 'info', '🔪 Terminando proceso anterior antes de reiniciar...');
-      existingProc.process.kill('SIGTERM');
-      await waitForProcessDeath(existingProc.process, 4000);
+      existingProc.process.kill('SIGKILL'); // SIGKILL directo para máxima velocidad
+      await waitForProcessDeath(existingProc.process, 1500);
       ffmpegProcesses.delete(process_id);
       sendLog(process_id, 'info', '✔ Proceso anterior terminado correctamente');
     }
-    
-    // Pausa adicional para liberar recursos del sistema
-    await new Promise(resolve => setTimeout(resolve, 1500));
     
     let targetRtmp = '';
     if (supabase) {
@@ -488,21 +488,34 @@ app.post('/api/emit', async (req, res) => {
     }
     
     // Detectar resolución para optimizar CPU
-    // OPTIMIZACIÓN: Solo detectamos resolución si realmente es necesario
-    sendLog(process_id, 'info', `Verificando resolución de la fuente...`);
-    const resolution = await detectResolution(source_m3u8);
-    const needsRecode = resolution.height > 720;
+    // OPTIMIZACIÓN: Usar caché de resolución por proceso para evitar ffprobe en cada recovery
+    let resolution, needsRecode;
+    const cached = resolutionCache.get(process_id);
+    if (cached) {
+      resolution = cached;
+      needsRecode = cached.needsRecode;
+      sendLog(process_id, 'info', `Resolución en caché: ${cached.width}x${cached.height} (needsRecode=${needsRecode})`);
+    } else {
+      sendLog(process_id, 'info', `Verificando resolución de la fuente...`);
+      resolution = await detectResolution(source_m3u8);
+      needsRecode = resolution.height > 720;
+      resolutionCache.set(process_id, { ...resolution, needsRecode });
+    }
     
     let ffmpegArgs;
     
+    // Si es un recovery (hay caché) usar parámetros más agresivos para arrancar más rápido
+    const isRecovery = !!cached;
+    const analyzeDuration = isRecovery ? '3000000' : '5000000';  // 3s recovery / 5s inicio frío
+    const probeSize      = isRecovery ? '1000000' : '2000000';   // 1MB recovery / 2MB inicio frío
+
     if (needsRecode) {
       // Recodificación estable: preset fast + CBR + baseline profile
-      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 720p30 (modo estable)...`);
+      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 720p30 (modo estable)${isRecovery ? ' [recovery rápido]' : ''}...`);
       ffmpegArgs = [
-        // Headers y configuración de red optimizados para IPTV/HLS
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         '-headers', 'Referer: https://www.teletica.com/',
-        '-timeout', '10000000', // 10 segundos en microsegundos
+        '-timeout', '10000000',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '5',
@@ -513,8 +526,8 @@ app.post('/api/emit', async (req, res) => {
         '-live_start_index', '-3',
         '-re',
         '-fflags', '+genpts+discardcorrupt',
-        '-analyzeduration', '10000000', // 10s análisis para mejor detección de códecs
-        '-probesize', '5000000', // 5MB de datos para análisis inicial
+        '-analyzeduration', analyzeDuration,
+        '-probesize', probeSize,
         '-i', source_m3u8,
         '-c:v', 'libx264',
         '-preset', 'fast',
@@ -531,19 +544,18 @@ app.post('/api/emit', async (req, res) => {
         '-b:a', '128k',
         '-ac', '2',
         '-ar', '48000',
-        '-max_muxing_queue_size', '1024', // Prevenir overflow en ráfagas de datos
+        '-max_muxing_queue_size', '1024',
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
         target_rtmp
       ];
     } else {
       // Copy directo - MUY bajo CPU (8-10%) - Optimizado para IPTV/HLS
-      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, usando copy (bajo CPU)...`);
+      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, usando copy (bajo CPU)${isRecovery ? ' [recovery rápido]' : ''}...`);
       ffmpegArgs = [
-        // Headers y configuración de red optimizados para IPTV/HLS
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         '-headers', 'Referer: https://www.teletica.com/',
-        '-timeout', '10000000', // 10 segundos en microsegundos
+        '-timeout', '10000000',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '5',
@@ -554,8 +566,8 @@ app.post('/api/emit', async (req, res) => {
         '-live_start_index', '-3',
         '-re',
         '-fflags', '+genpts+discardcorrupt',
-        '-analyzeduration', '10000000',
-        '-probesize', '5000000',
+        '-analyzeduration', analyzeDuration,
+        '-probesize', probeSize,
         '-i', source_m3u8,
         '-c:v', 'copy',
         '-c:a', 'copy',
@@ -687,10 +699,10 @@ app.post('/api/emit', async (req, res) => {
       
       if (autoRecoveryMap[process_id] && code !== 0 && code !== null && !manualStopProcesses.has(process_id)) {
         const { channelId, channelName } = autoRecoveryMap[process_id];
-        sendLog(process_id, 'warn', `🔄 ${channelName} caído - Iniciando auto-recovery en 3 segundos...`);
+        sendLog(process_id, 'warn', `🔄 ${channelName} caído - Iniciando auto-recovery en 500ms...`);
         setTimeout(() => {
           autoRecoverChannel(process_id, channelId, channelName);
-        }, 3000);
+        }, 500);
       } else if (manualStopProcesses.has(process_id)) {
         sendLog(process_id, 'info', '🛑 Parada manual detectada - Auto-recovery desactivado');
         manualStopProcesses.delete(process_id); // Limpiar flag después de usarla
@@ -1136,6 +1148,7 @@ app.post('/api/emit/stop', async (req, res) => {
       }, 5000);
       
       ffmpegProcesses.delete(process_id);
+      resolutionCache.delete(process_id); // Limpiar caché al detener manualmente
       emissionStatuses.set(process_id, 'idle');
       sendLog(process_id, 'success', `Emisión detenida correctamente`);
       
