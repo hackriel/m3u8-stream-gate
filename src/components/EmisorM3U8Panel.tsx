@@ -17,6 +17,7 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 
 const NUM_PROCESSES = 9;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
+const EVENTO_INDEX = 8; // "Evento" process - dynamic channel ID from TDMax URL
 
 // Tipo para un proceso de emisión
 interface EmissionProcess {
@@ -62,7 +63,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "Canal 6", scrapeFn: "scrape-channel", channelId: "65d7aca4e4b0140cbf380bd0", fetchLabel: "🔄 Canal6" },
   { name: "Multimedios", scrapeFn: "scrape-channel", channelId: "664e5de58f089fa849a58697", fetchLabel: "🔄 Multi" },
   { name: "Subida", scrapeFn: null, channelId: null, fetchLabel: "" },
-  { name: "Evento", scrapeFn: "scrape-channel", channelId: "61a8c0e8e4b010fa97ffde55", fetchLabel: "🔄 Evento" },
+  { name: "Evento", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer Fuente" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -253,18 +254,42 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
+  const [eventoUrl, setEventoUrl] = useState<string>('');
   const { metricsHistory, latestMetrics } = useServerMetrics();
+
+  // Extraer channel ID de una URL de TDMax
+  const extractChannelId = (url: string): string | null => {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.searchParams.get('id');
+    } catch {
+      // Intentar extraer con regex si no es URL válida
+      const match = url.match(/id=([a-f0-9]+)/i);
+      return match ? match[1] : null;
+    }
+  };
 
   // Función genérica para obtener URL de un canal automáticamente
   const fetchChannelUrl = useCallback(async (processIndex: number) => {
     const config = CHANNEL_CONFIGS[processIndex];
-    if (!config.scrapeFn || !config.channelId) return;
+    if (!config.scrapeFn) return;
+    
+    // Para Evento, extraer channelId de la URL pegada
+    let channelId = config.channelId;
+    if (processIndex === EVENTO_INDEX) {
+      channelId = extractChannelId(eventoUrl);
+      if (!channelId) {
+        toast.error('Pega una URL válida de TDMax con el parámetro id');
+        return;
+      }
+    }
+    if (!channelId) return;
     
     setFetchingChannel(processIndex);
     try {
       const { data, error } = await supabase.functions.invoke(config.scrapeFn, {
         method: 'POST',
-        body: { channel_id: config.channelId },
+        body: { channel_id: channelId },
       });
 
       if (error) throw error;
@@ -275,14 +300,14 @@ export default function EmisorM3U8Panel() {
         m3u8: streamUrl,
         rtmp: processesRef.current[processIndex].rtmp || ''
       });
-      toast.success(`✅ URL ${config.name} actualizada correctamente`);
+      toast.success(`✅ URL ${config.name} extraída correctamente`);
     } catch (e: any) {
       console.error(`Error obteniendo URL ${config.name}:`, e);
       toast.error(`Error obteniendo URL ${config.name}: ${e.message}`);
     } finally {
       setFetchingChannel(null);
     }
-  }, []);
+  }, [eventoUrl]);
 
 
 
@@ -817,8 +842,53 @@ export default function EmisorM3U8Panel() {
                   </div>
                 )}
               </>
+            ) : processIndex === EVENTO_INDEX ? (
+              // Proceso Evento: URL de TDMax + extracción automática
+              <>
+                <label className="block text-sm mb-2 text-muted-foreground">URL del Evento (TDMax)</label>
+                <div className="flex gap-2 mb-4">
+                  <input
+                    type="url"
+                    placeholder="https://www.tdmax.com/player?id=...&type=channel"
+                    value={eventoUrl}
+                    onChange={(e) => setEventoUrl(e.target.value)}
+                    className="flex-1 bg-card border border-border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+                  />
+                  <button
+                    onClick={() => fetchChannelUrl(processIndex)}
+                    disabled={fetchingChannel !== null || !eventoUrl}
+                    className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
+                    title="Extraer fuente M3U8 del evento"
+                  >
+                    {fetchingChannel === processIndex ? (
+                      <span className="flex items-center gap-2">
+                        <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-accent-foreground" />
+                        Extrayendo...
+                      </span>
+                    ) : (
+                      "🔄 Extraer Fuente"
+                    )}
+                  </button>
+                </div>
+                {eventoUrl && extractChannelId(eventoUrl) && (
+                  <div className="mb-3 p-2 rounded-lg bg-card/50 border border-border">
+                    <p className="text-xs text-muted-foreground">
+                      Channel ID detectado: <span className="font-mono text-primary">{extractChannelId(eventoUrl)}</span>
+                    </p>
+                  </div>
+                )}
+                <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 extraída</label>
+                <input
+                  type="url"
+                  placeholder="Se llenará automáticamente al extraer..."
+                  value={process.m3u8}
+                  onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
+                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+                  readOnly
+                />
+              </>
             ) : (
-              // Procesos M3U8
+              // Procesos M3U8 normales
               <>
                 <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 (fuente)</label>
                 <div className="flex gap-2 mb-4">
