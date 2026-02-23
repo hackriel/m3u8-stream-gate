@@ -496,7 +496,7 @@ app.post('/api/emit', async (req, res) => {
     const probeSize      = isRecovery ? '1000000' : '2000000';   // 1MB recovery / 2MB inicio frío
     resolutionCache.set(process_id, { recovery: true }); // Marcar para futuros recoveries
 
-    sendLog(process_id, 'info', `Emitiendo a 480p @ 1200kbps (900-1500k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
+    sendLog(process_id, 'info', `Emitiendo a 480p @ 1500kbps (1200-1800k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
     
     // Detectar el dominio de la fuente para usar el Referer correcto
     let refererDomain = 'https://www.tdmax.com/';
@@ -526,10 +526,10 @@ app.post('/api/emit', async (req, res) => {
       '-c:v', 'libx264',
       '-preset', 'superfast',
       '-profile:v', 'baseline',
-      '-b:v', '1200k',
-      '-minrate', '900k',
-      '-maxrate', '1500k',
-      '-bufsize', '2400k',
+      '-b:v', '1500k',
+      '-minrate', '1200k',
+      '-maxrate', '1800k',
+      '-bufsize', '3000k',
       '-vf', 'scale=-2:480',
       '-r', '30',
       '-g', '60',
@@ -899,10 +899,10 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-c:v', 'libx264',
         '-preset', 'superfast',
         '-profile:v', 'baseline',
-        '-b:v', '1200k',
-        '-minrate', '900k',
-        '-maxrate', '1500k',
-        '-bufsize', '2400k',
+        '-b:v', '1500k',
+        '-minrate', '1200k',
+        '-maxrate', '1800k',
+        '-bufsize', '3000k',
         '-vf', 'scale=-2:480',
         '-r', '30',
         '-g', '60',
@@ -925,10 +925,10 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-c:v', 'libx264',
         '-preset', 'superfast',
         '-profile:v', 'baseline',
-        '-b:v', '1200k',
-        '-minrate', '900k',
-        '-maxrate', '1500k',
-        '-bufsize', '2400k',
+        '-b:v', '1500k',
+        '-minrate', '1200k',
+        '-maxrate', '1800k',
+        '-bufsize', '3000k',
         '-vf', 'scale=-2:480',
         '-r', '30',
         '-g', '60',
