@@ -363,13 +363,14 @@ const detectAndCategorizeError = (output, processId) => {
   return false;
 };
 
-// Función auxiliar para detectar resolución de cualquier fuente (M3U8 o archivo)
-const detectResolution = async (source) => {
+// Función auxiliar para detectar resolución y bitrate de cualquier fuente (M3U8 o archivo)
+const detectSourceInfo = async (source) => {
   return new Promise((resolve) => {
     const probe = spawn('ffprobe', [
       '-v', 'error',
       '-select_streams', 'v:0',
-      '-show_entries', 'stream=width,height',
+      '-show_entries', 'stream=width,height,bit_rate',
+      '-show_entries', 'format=bit_rate',
       '-of', 'json',
       source
     ]);
@@ -384,14 +385,18 @@ const detectResolution = async (source) => {
         const data = JSON.parse(output);
         const width = data.streams?.[0]?.width || 0;
         const height = data.streams?.[0]?.height || 0;
-        resolve({ width, height });
+        // Bitrate: intentar stream, luego format (en bps, convertir a kbps)
+        const streamBitrate = parseInt(data.streams?.[0]?.bit_rate || '0');
+        const formatBitrate = parseInt(data.format?.bit_rate || '0');
+        const bitrateKbps = Math.round((streamBitrate || formatBitrate) / 1000);
+        resolve({ width, height, bitrateKbps });
       } catch (e) {
-        resolve({ width: 0, height: 0 });
+        resolve({ width: 0, height: 0, bitrateKbps: 0 });
       }
     });
     
     probe.on('error', () => {
-      resolve({ width: 0, height: 0 });
+      resolve({ width: 0, height: 0, bitrateKbps: 0 });
     });
   });
 };
@@ -503,100 +508,64 @@ app.post('/api/emit', async (req, res) => {
       originDomain = 'https://www.teletica.com';
     }
 
-    // Proceso 0 (Libre): si fuente ≤720p, mantener resolución original con bitrate adaptado
+    // Proceso 0 (Libre): lógica por bitrate — copy si ≤5000kbps, re-encode 720p si >5000kbps
     const isLibre = String(process_id) === '0';
     
     if (isLibre) {
-      // Detectar resolución de la fuente
-      sendLog(process_id, 'info', '🔍 Proceso Libre: Detectando resolución de la fuente...');
-      const { width, height } = await detectResolution(source_m3u8);
-      sendLog(process_id, 'info', `📐 Resolución detectada: ${width}x${height}`);
+      sendLog(process_id, 'info', '🔍 Proceso Libre: Detectando resolución y bitrate de la fuente...');
+      const { width, height, bitrateKbps } = await detectSourceInfo(source_m3u8);
+      sendLog(process_id, 'info', `📐 Fuente: ${width}x${height} @ ${bitrateKbps}kbps`);
       
-      if (height > 0 && height <= 720) {
-        // ≤720p: mantener resolución original, adaptar bitrate según resolución
-        let targetBitrate, minRate, maxRate, bufSize;
-        if (height <= 360) {
-          targetBitrate = '800k'; minRate = '600k'; maxRate = '1000k'; bufSize = '1600k';
-        } else if (height <= 480) {
-          targetBitrate = '1200k'; minRate = '900k'; maxRate = '1500k'; bufSize = '2400k';
-        } else {
-          // 720p
-          targetBitrate = '2500k'; minRate = '2000k'; maxRate = '3000k'; bufSize = '5000k';
-        }
-        sendLog(process_id, 'info', `✅ Libre: Manteniendo ${width}x${height} @ ${targetBitrate} (${minRate}-${maxRate})${isRecovery ? ' [recovery]' : ''}`);
-        
+      const inputArgs = [
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
+        '-timeout', '10000000',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        '-reconnect_on_network_error', '1',
+        '-reconnect_on_http_error', '4xx,5xx',
+        '-multiple_requests', '1',
+        '-http_persistent', '1',
+        '-live_start_index', '-3',
+        '-re',
+        '-fflags', '+genpts+discardcorrupt',
+        '-analyzeduration', analyzeDuration,
+        '-probesize', probeSize,
+        '-i', source_m3u8,
+      ];
+      
+      if (bitrateKbps > 0 && bitrateKbps <= 5000) {
+        // ≤5000kbps: stream copy — sin re-encodear
+        sendLog(process_id, 'info', `✅ Libre: ${bitrateKbps}kbps ≤ 5000 → COPY (sin re-encodear)${isRecovery ? ' [recovery]' : ''}`);
         ffmpegArgs = [
-          '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-          '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-          '-timeout', '10000000',
-          '-reconnect', '1',
-          '-reconnect_streamed', '1',
-          '-reconnect_delay_max', '5',
-          '-reconnect_on_network_error', '1',
-          '-reconnect_on_http_error', '4xx,5xx',
-          '-multiple_requests', '1',
-          '-http_persistent', '1',
-          '-live_start_index', '-3',
-          '-re',
-          '-fflags', '+genpts+discardcorrupt',
-          '-analyzeduration', analyzeDuration,
-          '-probesize', probeSize,
-          '-i', source_m3u8,
-          '-c:v', 'libx264',
-          '-preset', 'superfast',
-          '-profile:v', 'baseline',
-          '-b:v', targetBitrate,
-          '-minrate', minRate,
-          '-maxrate', maxRate,
-          '-bufsize', bufSize,
-          '-r', '30',
-          '-g', '60',
-          '-keyint_min', '60',
-          '-sc_threshold', '0',
-          '-c:a', 'aac',
-          '-b:a', '96k',
-          '-ac', '2',
-          '-ar', '44100',
+          ...inputArgs,
+          '-c:v', 'copy',
+          '-c:a', 'copy',
           '-max_muxing_queue_size', '1024',
           '-f', 'flv',
           '-flvflags', 'no_duration_filesize',
           target_rtmp
         ];
       } else {
-        // >720p o no detectada: forzar 480p como antes
-        sendLog(process_id, 'info', `📺 Libre: Fuente ${height > 720 ? '>' : '?'}720p, recodificando a 480p @ 1200kbps (900-1500k)${isRecovery ? ' [recovery]' : ''}`);
-        
+        // >5000kbps o no detectado: re-encodear a 720p @ 2500kbps
+        sendLog(process_id, 'info', `📺 Libre: ${bitrateKbps || '?'}kbps > 5000 → Re-encode 720p @ 2500kbps (2000-3000k)${isRecovery ? ' [recovery]' : ''}`);
         ffmpegArgs = [
-          '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-          '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-          '-timeout', '10000000',
-          '-reconnect', '1',
-          '-reconnect_streamed', '1',
-          '-reconnect_delay_max', '5',
-          '-reconnect_on_network_error', '1',
-          '-reconnect_on_http_error', '4xx,5xx',
-          '-multiple_requests', '1',
-          '-http_persistent', '1',
-          '-live_start_index', '-3',
-          '-re',
-          '-fflags', '+genpts+discardcorrupt',
-          '-analyzeduration', analyzeDuration,
-          '-probesize', probeSize,
-          '-i', source_m3u8,
+          ...inputArgs,
           '-c:v', 'libx264',
           '-preset', 'superfast',
           '-profile:v', 'baseline',
-          '-b:v', '1200k',
-          '-minrate', '900k',
-          '-maxrate', '1500k',
-          '-bufsize', '2400k',
-          '-vf', 'scale=-2:480',
+          '-b:v', '2500k',
+          '-minrate', '2000k',
+          '-maxrate', '3000k',
+          '-bufsize', '5000k',
+          '-vf', 'scale=-2:720',
           '-r', '30',
           '-g', '60',
           '-keyint_min', '60',
           '-sc_threshold', '0',
           '-c:a', 'aac',
-          '-b:a', '96k',
+          '-b:a', '128k',
           '-ac', '2',
           '-ar', '44100',
           '-max_muxing_queue_size', '1024',
@@ -990,41 +959,30 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `Creada playlist con ${files.length} archivos`);
     }
 
-    // Subida: detectar resolución, si ≤720p mantener original con bitrate adaptado
-    const firstFile = files.length === 1 ? files[0].path : files[0].path;
-    sendLog(process_id, 'info', '🔍 Subida: Detectando resolución del archivo...');
-    const { width: srcW, height: srcH } = await detectResolution(firstFile);
-    sendLog(process_id, 'info', `📐 Resolución detectada: ${srcW}x${srcH}`);
+    // Subida: detectar bitrate — copy si ≤5000kbps, re-encode 720p si >5000kbps
+    const firstFile = files[0].path;
+    sendLog(process_id, 'info', '🔍 Subida: Detectando resolución y bitrate del archivo...');
+    const { width: srcW, height: srcH, bitrateKbps: srcBitrate } = await detectSourceInfo(firstFile);
+    sendLog(process_id, 'info', `📐 Fuente: ${srcW}x${srcH} @ ${srcBitrate}kbps`);
     
-    let videoParams;
-    if (srcH > 0 && srcH <= 720) {
-      // ≤720p: mantener resolución original
-      let targetBitrate, minRate, maxRate, bufSize;
-      if (srcH <= 360) {
-        targetBitrate = '800k'; minRate = '600k'; maxRate = '1000k'; bufSize = '1600k';
-      } else if (srcH <= 480) {
-        targetBitrate = '1200k'; minRate = '900k'; maxRate = '1500k'; bufSize = '2400k';
-      } else {
-        targetBitrate = '2500k'; minRate = '2000k'; maxRate = '3000k'; bufSize = '5000k';
-      }
-      sendLog(process_id, 'info', `✅ Subida: Manteniendo ${srcW}x${srcH} @ ${targetBitrate} (${minRate}-${maxRate})`);
-      videoParams = [
-        '-c:v', 'libx264', '-preset', 'superfast', '-profile:v', 'baseline',
-        '-b:v', targetBitrate, '-minrate', minRate, '-maxrate', maxRate, '-bufsize', bufSize,
-        '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
-      ];
+    let videoParams, audioParams;
+    
+    if (srcBitrate > 0 && srcBitrate <= 5000) {
+      // ≤5000kbps: stream copy
+      sendLog(process_id, 'info', `✅ Subida: ${srcBitrate}kbps ≤ 5000 → COPY (sin re-encodear)`);
+      videoParams = ['-c:v', 'copy'];
+      audioParams = ['-c:a', 'copy'];
     } else {
-      // >720p o no detectada: forzar 480p
-      sendLog(process_id, 'info', `📺 Subida: Fuente ${srcH > 720 ? '>' : '?'}720p, recodificando a 480p @ 1200kbps (900-1500k)`);
+      // >5000kbps o no detectado: re-encodear a 720p @ 2500kbps
+      sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode 720p @ 2500kbps (2000-3000k)`);
       videoParams = [
         '-c:v', 'libx264', '-preset', 'superfast', '-profile:v', 'baseline',
-        '-b:v', '1200k', '-minrate', '900k', '-maxrate', '1500k', '-bufsize', '2400k',
-        '-vf', 'scale=-2:480',
+        '-b:v', '2500k', '-minrate', '2000k', '-maxrate', '3000k', '-bufsize', '5000k',
+        '-vf', 'scale=-2:720',
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
+      audioParams = ['-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100'];
     }
-    
-    const audioParams = ['-c:a', 'aac', '-b:a', '96k', '-ac', '2', '-ar', '44100'];
     
     let ffmpegArgs;
     
