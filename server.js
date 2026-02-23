@@ -882,7 +882,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     
     if (files.length === 1) {
       if (needsRecode) {
-        sendLog(process_id, 'info', `Archivo ${resolution.width}x${resolution.height}, recodificando a 720p30 (modo estable)...`);
+        sendLog(process_id, 'info', `Archivo ${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (modo liviano)...`);
         ffmpegArgs = [
           '-re',
           '-stream_loop', '-1',
@@ -890,18 +890,18 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
           '-c:v', 'libx264',
           '-preset', 'fast',
           '-profile:v', 'baseline',
-          '-b:v', '2500k',
-          '-minrate', '2500k',
-          '-maxrate', '2500k',
-          '-bufsize', '5000k',
-          '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
+          '-b:v', '900k',
+          '-minrate', '800k',
+          '-maxrate', '1000k',
+          '-bufsize', '1800k',
+          '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,fps=30',
           '-g', '60',
           '-keyint_min', '60',
           '-sc_threshold', '0',
           '-c:a', 'aac',
-          '-b:a', '128k',
+          '-b:a', '96k',
           '-ac', '2',
-          '-ar', '48000',
+          '-ar', '44100',
           '-f', 'flv',
           target_rtmp
         ];
@@ -919,7 +919,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       }
     } else {
       if (needsRecode) {
-        sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, recodificando a 720p30 (modo estable)...`);
+        sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (modo liviano)...`);
         ffmpegArgs = [
           '-re',
           '-f', 'concat',
@@ -929,21 +929,21 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
           '-c:v', 'libx264',
           '-preset', 'fast',
           '-profile:v', 'baseline',
-          '-b:v', '2500k',
-          '-minrate', '2500k',
-          '-maxrate', '2500k',
-          '-bufsize', '5000k',
-          '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
+          '-b:v', '900k',
+          '-minrate', '800k',
+          '-maxrate', '1000k',
+          '-bufsize', '1800k',
+          '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,fps=30',
           '-g', '60',
           '-keyint_min', '60',
           '-sc_threshold', '0',
           '-c:a', 'aac',
-          '-b:a', '128k',
+          '-b:a', '96k',
           '-ac', '2',
-        '-ar', '48000',
-        '-f', 'flv',
-        target_rtmp
-      ];
+          '-ar', '44100',
+          '-f', 'flv',
+          target_rtmp
+        ];
       } else {
         sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, usando copy (bajo CPU)...`);
         ffmpegArgs = [
