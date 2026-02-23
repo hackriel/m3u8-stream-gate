@@ -510,8 +510,8 @@ app.post('/api/emit', async (req, res) => {
     const probeSize      = isRecovery ? '1000000' : '2000000';   // 1MB recovery / 2MB inicio frío
 
     if (needsRecode) {
-      // Recodificación estable: preset fast + CBR + baseline profile
-      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 720p30 (modo estable)${isRecovery ? ' [recovery rápido]' : ''}...`);
+      // Recodificación optimizada: 480p @ 900kbps CBR - bajo CPU y compatible con XUI
+      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (modo liviano)${isRecovery ? ' [recovery rápido]' : ''}...`);
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         '-headers', 'Referer: https://www.teletica.com/',
@@ -532,18 +532,18 @@ app.post('/api/emit', async (req, res) => {
         '-c:v', 'libx264',
         '-preset', 'fast',
         '-profile:v', 'baseline',
-        '-b:v', '2500k',
-        '-minrate', '2500k',
-        '-maxrate', '2500k',
-        '-bufsize', '5000k',
-        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,fps=30',
+        '-b:v', '900k',
+        '-minrate', '800k',
+        '-maxrate', '1000k',
+        '-bufsize', '1800k',
+        '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,fps=30',
         '-g', '60',
         '-keyint_min', '60',
         '-sc_threshold', '0',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '96k',
         '-ac', '2',
-        '-ar', '48000',
+        '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
