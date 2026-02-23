@@ -575,8 +575,8 @@ app.post('/api/emit', async (req, res) => {
         ];
       }
     } else {
-      // Procesos 1-6, 8 (scrapeados): 480p @ 1500kbps fijo
-      sendLog(process_id, 'info', `Emitiendo a 480p @ 1500kbps (1200-1800k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
+      // Procesos 1-6, 8 (scrapeados): 576p @ 2000kbps
+      sendLog(process_id, 'info', `Emitiendo a 576p @ 2000kbps (1600-2400k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
       
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
