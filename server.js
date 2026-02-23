@@ -555,9 +555,20 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'info', `FFmpeg stdout: ${output.trim()}`);
     });
 
+    // Buffer para capturar las últimas líneas de stderr (diagnóstico de crashes)
+    const stderrBuffer = [];
+    const MAX_STDERR_LINES = 15;
+    
     // Manejar errores con análisis mejorado
     ffmpegProcess.stderr.on('data', (data) => {
       const output = data.toString();
+      
+      // Guardar en buffer circular para diagnóstico
+      const lines = output.split('\n').filter(l => l.trim());
+      for (const line of lines) {
+        stderrBuffer.push(line.trim());
+        if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
+      }
       
       // Detectar diferentes tipos de mensajes
       if (output.includes('frame=') || output.includes('fps=')) {
@@ -622,11 +633,21 @@ app.post('/api/emit', async (req, res) => {
         sendLog(process_id, 'success', logMessage);
       } else {
         sendLog(process_id, 'error', logMessage);
+        // Mostrar las últimas líneas de stderr para diagnóstico
+        if (stderrBuffer.length > 0) {
+          const diagnosticLines = stderrBuffer.filter(l => !l.includes('frame=') && !l.includes('fps=')).slice(-8);
+          if (diagnosticLines.length > 0) {
+            sendLog(process_id, 'error', `📋 Últimas líneas de FFmpeg:\n${diagnosticLines.join('\n')}`);
+          }
+        }
         sendFailureNotification(process_id, 'server', `Proceso terminado con código de error ${code}`);
       }
       
       // Actualizar base de datos (solo si Supabase está disponible)
       if (supabase) {
+        const diagInfo = code !== 0 && stderrBuffer.length > 0 
+          ? `\n[DIAGNÓSTICO] ${stderrBuffer.filter(l => !l.includes('frame=')).slice(-5).join(' | ')}`
+          : '';
         await supabase
           .from('emission_processes')
           .update({
@@ -634,7 +655,7 @@ app.post('/api/emit', async (req, res) => {
             is_emitting: false,
             emit_status: finalStatus,
             ended_at: new Date().toISOString(),
-            process_logs: `[${new Date().toISOString()}] ${logMessage}\n`,
+            process_logs: `[${new Date().toISOString()}] ${logMessage}${diagInfo}\n`,
             elapsed: Math.floor(runtime / 1000),
             start_time: 0
           })
@@ -644,8 +665,7 @@ app.post('/api/emit', async (req, res) => {
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
       
-      // AUTO-RECOVERY: Para canales con scraping (ids 0-4)
-      // Process 0 = Libre (sin auto-recovery)
+      // AUTO-RECOVERY: Para canales con scraping
       const autoRecoveryMap = {
         '1': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV' },
         '2': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Sports' },
@@ -653,18 +673,45 @@ app.post('/api/emit', async (req, res) => {
         '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
         '5': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
         '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
-        // Proceso 8 (Evento) no tiene auto-recovery porque el channelId es dinámico
       };
       
-      if (autoRecoveryMap[process_id] && code !== 0 && code !== null && !manualStopProcesses.has(process_id)) {
-        const { channelId, channelName } = autoRecoveryMap[process_id];
-        sendLog(process_id, 'warn', `🔄 ${channelName} caído - Iniciando auto-recovery en 500ms...`);
-        setTimeout(() => {
-          autoRecoverChannel(process_id, channelId, channelName);
-        }, 500);
-      } else if (manualStopProcesses.has(process_id)) {
+      if (manualStopProcesses.has(process_id)) {
         sendLog(process_id, 'info', '🛑 Parada manual detectada - Auto-recovery desactivado');
-        manualStopProcesses.delete(process_id); // Limpiar flag después de usarla
+        manualStopProcesses.delete(process_id);
+      } else if (code !== 0 && code !== null) {
+        if (autoRecoveryMap[process_id]) {
+          const { channelId, channelName } = autoRecoveryMap[process_id];
+          sendLog(process_id, 'warn', `🔄 ${channelName} caído - Iniciando auto-recovery en 500ms...`);
+          setTimeout(() => {
+            autoRecoverChannel(process_id, channelId, channelName);
+          }, 500);
+        } else if (process_id === '8' || process_id === 8) {
+          // Proceso 8 (Evento): extraer channelId del source_url guardado en DB
+          sendLog(process_id, 'warn', `🔄 Evento caído - Iniciando auto-recovery dinámico...`);
+          setTimeout(async () => {
+            try {
+              const { data: procData } = await supabase
+                .from('emission_processes')
+                .select('source_url')
+                .eq('id', 8)
+                .single();
+              
+              if (procData && procData.source_url) {
+                const idMatch = procData.source_url.match(/id=([a-f0-9]+)/i);
+                if (idMatch) {
+                  sendLog(8, 'info', `🔄 AUTO-RECOVERY Evento: channelId extraído = ${idMatch[1]}`);
+                  await autoRecoverChannel(8, idMatch[1], 'Evento');
+                } else {
+                  sendLog(8, 'error', '❌ AUTO-RECOVERY Evento: No se pudo extraer channelId del source_url');
+                }
+              } else {
+                sendLog(8, 'error', '❌ AUTO-RECOVERY Evento: No hay source_url guardado');
+              }
+            } catch (err) {
+              sendLog(8, 'error', `❌ AUTO-RECOVERY Evento error: ${err.message}`);
+            }
+          }, 500);
+        }
       }
     });
 
