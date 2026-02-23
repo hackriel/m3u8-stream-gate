@@ -33,6 +33,7 @@ export type Database = {
           preview_suffix: string
           process_logs: string | null
           rtmp: string
+          source_url: string
           start_time: number
           updated_at: string
         }
@@ -54,6 +55,7 @@ export type Database = {
           preview_suffix?: string
           process_logs?: string | null
           rtmp?: string
+          source_url?: string
           start_time?: number
           updated_at?: string
         }
@@ -75,6 +77,7 @@ export type Database = {
           preview_suffix?: string
           process_logs?: string | null
           rtmp?: string
+          source_url?: string
           start_time?: number
           updated_at?: string
         }

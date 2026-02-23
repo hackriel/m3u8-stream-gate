@@ -105,6 +105,7 @@ export default function EmisorM3U8Panel() {
         if (error) throw error;
         
         if (data && data.length > 0) {
+          let initialEventoUrl = '';
           const loadedProcesses: EmissionProcess[] = Array.from({ length: NUM_PROCESSES }, (_, index) => {
             const row = data.find(d => d.id === index);
             if (row) {
@@ -116,6 +117,10 @@ export default function EmisorM3U8Panel() {
                 elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
               }
 
+              // Restore eventoUrl for Evento process
+              if (index === EVENTO_INDEX && (row as any).source_url) {
+                initialEventoUrl = (row as any).source_url;
+              }
               return {
                 m3u8: row.m3u8 || '',
                 rtmp: row.rtmp || '',
@@ -137,6 +142,7 @@ export default function EmisorM3U8Panel() {
             }
           });
           setProcesses(loadedProcesses);
+          if (initialEventoUrl) setEventoUrl(initialEventoUrl);
           
           // Crear filas faltantes en la base de datos
           for (let i = 0; i < NUM_PROCESSES; i++) {
@@ -851,7 +857,13 @@ export default function EmisorM3U8Panel() {
                     type="url"
                     placeholder="https://www.tdmax.com/player?id=...&type=channel"
                     value={eventoUrl}
-                    onChange={(e) => setEventoUrl(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEventoUrl(val);
+                      supabase.from('emission_processes').update({ source_url: val } as any).eq('id', EVENTO_INDEX).then(({ error }) => {
+                        if (error) console.error('Error guardando source_url:', error);
+                      });
+                    }}
                     className="flex-1 bg-card border border-border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
                   />
                   <button

@@ -1,0 +1,1 @@
+ALTER TABLE public.emission_processes ADD COLUMN IF NOT EXISTS source_url text NOT NULL DEFAULT '';
