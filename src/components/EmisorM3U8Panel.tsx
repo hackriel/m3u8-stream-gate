@@ -946,8 +946,8 @@ export default function EmisorM3U8Panel() {
                   ⏹️ Detener emisión
                 </button>
               )}
-              {/* Botón "Botar Señal": solo canales con scraping mientras está emitiendo */}
-              {process.isEmitiendo && channelConfig.scrapeFn && (
+              {/* Botón "Botar Señal": solo canales con scraping fijo (no Evento ni Libre ni Subida) */}
+              {process.isEmitiendo && channelConfig.scrapeFn && channelConfig.channelId && processIndex !== EVENTO_INDEX && (
                 <button
                   onClick={() => dropSignal(processIndex)}
                   className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl"
