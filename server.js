@@ -487,7 +487,7 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'warn', 'Supabase no configurado: no se guardará el proceso en base de datos.');
     }
     
-    // Configuración uniforme: mantener resolución original, comprimir a 800-1000kbps
+    // Configuración uniforme: 480p @ 1500kbps
     let ffmpegArgs;
     
     // Si es un recovery (hay caché) usar parámetros más agresivos para arrancar más rápido
@@ -496,7 +496,7 @@ app.post('/api/emit', async (req, res) => {
     const probeSize      = isRecovery ? '1000000' : '2000000';   // 1MB recovery / 2MB inicio frío
     resolutionCache.set(process_id, { recovery: true }); // Marcar para futuros recoveries
 
-    sendLog(process_id, 'info', `Emitiendo a 480p @ 900kbps (800-1000k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
+    sendLog(process_id, 'info', `Emitiendo a 480p @ 1500kbps (1200-1800k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
     ffmpegArgs = [
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       '-headers', 'Referer: https://www.teletica.com/',
@@ -517,10 +517,10 @@ app.post('/api/emit', async (req, res) => {
       '-c:v', 'libx264',
       '-preset', 'fast',
       '-profile:v', 'baseline',
-      '-b:v', '900k',
-      '-minrate', '800k',
-      '-maxrate', '1000k',
-      '-bufsize', '1800k',
+      '-b:v', '1500k',
+      '-minrate', '1200k',
+      '-maxrate', '1800k',
+      '-bufsize', '3000k',
       '-vf', 'scale=-2:480,fps=30',
       '-g', '60',
       '-keyint_min', '60',
@@ -829,8 +829,8 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `Creada playlist con ${files.length} archivos`);
     }
 
-    // Configuración uniforme: escalar a 480p, comprimir a 800-1000kbps
-    sendLog(process_id, 'info', `Recodificando a 480p @ 900kbps...`);
+    // Configuración uniforme: 480p @ 1500kbps
+    sendLog(process_id, 'info', `Recodificando a 480p @ 1500kbps...`);
     
     let ffmpegArgs;
     
@@ -842,10 +842,10 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-c:v', 'libx264',
         '-preset', 'fast',
         '-profile:v', 'baseline',
-        '-b:v', '900k',
-        '-minrate', '800k',
-        '-maxrate', '1000k',
-        '-bufsize', '1800k',
+        '-b:v', '1500k',
+        '-minrate', '1200k',
+        '-maxrate', '1800k',
+        '-bufsize', '3000k',
         '-vf', 'scale=-2:480,fps=30',
         '-g', '60',
         '-keyint_min', '60',
@@ -867,10 +867,10 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-c:v', 'libx264',
         '-preset', 'fast',
         '-profile:v', 'baseline',
-        '-b:v', '900k',
-        '-minrate', '800k',
-        '-maxrate', '1000k',
-        '-bufsize', '1800k',
+        '-b:v', '1500k',
+        '-minrate', '1200k',
+        '-maxrate', '1800k',
+        '-bufsize', '3000k',
         '-vf', 'scale=-2:480,fps=30',
         '-g', '60',
         '-keyint_min', '60',
