@@ -487,109 +487,54 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'warn', 'Supabase no configurado: no se guardará el proceso en base de datos.');
     }
     
-    // Detectar resolución para optimizar CPU
-    // OPTIMIZACIÓN: Usar caché de resolución por proceso para evitar ffprobe en cada recovery
-    let resolution, needsRecode;
-    const cached = resolutionCache.get(process_id);
-    if (cached) {
-      resolution = cached;
-      needsRecode = cached.needsRecode;
-      sendLog(process_id, 'info', `Resolución en caché: ${cached.width}x${cached.height} (needsRecode=${needsRecode})`);
-    } else {
-      sendLog(process_id, 'info', `Verificando resolución de la fuente...`);
-      resolution = await detectResolution(source_m3u8);
-      needsRecode = resolution.height > 720;
-      resolutionCache.set(process_id, { ...resolution, needsRecode });
-    }
-    
+    // Configuración uniforme: mantener resolución original, comprimir a 800-1000kbps
     let ffmpegArgs;
     
     // Si es un recovery (hay caché) usar parámetros más agresivos para arrancar más rápido
-    const isRecovery = !!cached;
+    const isRecovery = !!resolutionCache.get(process_id);
     const analyzeDuration = isRecovery ? '3000000' : '5000000';  // 3s recovery / 5s inicio frío
     const probeSize      = isRecovery ? '1000000' : '2000000';   // 1MB recovery / 2MB inicio frío
+    resolutionCache.set(process_id, { recovery: true }); // Marcar para futuros recoveries
 
-    if (needsRecode) {
-      // Recodificación optimizada: 480p @ 900kbps CBR - bajo CPU y compatible con XUI
-      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (modo liviano)${isRecovery ? ' [recovery rápido]' : ''}...`);
-      ffmpegArgs = [
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '-headers', 'Referer: https://www.teletica.com/',
-        '-timeout', '10000000',
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
-        '-reconnect_on_network_error', '1',
-        '-reconnect_on_http_error', '5xx',
-        '-multiple_requests', '1',
-        '-http_persistent', '1',
-        '-live_start_index', '-3',
-        '-re',
-        '-fflags', '+genpts+discardcorrupt',
-        '-analyzeduration', analyzeDuration,
-        '-probesize', probeSize,
-        '-i', source_m3u8,
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-profile:v', 'baseline',
-        '-b:v', '900k',
-        '-minrate', '800k',
-        '-maxrate', '1000k',
-        '-bufsize', '1800k',
-        '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2,fps=30',
-        '-g', '60',
-        '-keyint_min', '60',
-        '-sc_threshold', '0',
-        '-c:a', 'aac',
-        '-b:a', '96k',
-        '-ac', '2',
-        '-ar', '44100',
-        '-max_muxing_queue_size', '1024',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        target_rtmp
-      ];
-    } else {
-      // Recodificación uniforme: todas las fuentes a 480p @ 900kbps
-      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (uniforme)${isRecovery ? ' [recovery rápido]' : ''}...`);
-      ffmpegArgs = [
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '-headers', 'Referer: https://www.teletica.com/',
-        '-timeout', '10000000',
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
-        '-reconnect_on_network_error', '1',
-        '-reconnect_on_http_error', '5xx',
-        '-multiple_requests', '1',
-        '-http_persistent', '1',
-        '-live_start_index', '-3',
-        '-re',
-        '-fflags', '+genpts+discardcorrupt',
-        '-analyzeduration', analyzeDuration,
-        '-probesize', probeSize,
-        '-i', source_m3u8,
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-profile:v', 'baseline',
-        '-b:v', '900k',
-        '-minrate', '800k',
-        '-maxrate', '1000k',
-        '-bufsize', '1800k',
-        '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2,fps=30',
-        '-g', '60',
-        '-keyint_min', '60',
-        '-sc_threshold', '0',
-        '-c:a', 'aac',
-        '-b:a', '96k',
-        '-ac', '2',
-        '-ar', '44100',
-        '-max_muxing_queue_size', '1024',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        target_rtmp
-      ];
-    }
+    sendLog(process_id, 'info', `Emitiendo con resolución original @ 900kbps (800-1000k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
+    ffmpegArgs = [
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '-headers', 'Referer: https://www.teletica.com/',
+      '-timeout', '10000000',
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '5',
+      '-reconnect_on_network_error', '1',
+      '-reconnect_on_http_error', '5xx',
+      '-multiple_requests', '1',
+      '-http_persistent', '1',
+      '-live_start_index', '-3',
+      '-re',
+      '-fflags', '+genpts+discardcorrupt',
+      '-analyzeduration', analyzeDuration,
+      '-probesize', probeSize,
+      '-i', source_m3u8,
+      '-c:v', 'libx264',
+      '-preset', 'fast',
+      '-profile:v', 'baseline',
+      '-b:v', '900k',
+      '-minrate', '800k',
+      '-maxrate', '1000k',
+      '-bufsize', '1800k',
+      '-fps_mode', 'cfr',
+      '-r', '30',
+      '-g', '60',
+      '-keyint_min', '60',
+      '-sc_threshold', '0',
+      '-c:a', 'aac',
+      '-b:a', '96k',
+      '-ac', '2',
+      '-ar', '44100',
+      '-max_muxing_queue_size', '1024',
+      '-f', 'flv',
+      '-flvflags', 'no_duration_filesize',
+      target_rtmp
+    ];
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 100)}...`);
@@ -885,118 +830,61 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `Creada playlist con ${files.length} archivos`);
     }
 
-    // Detectar resolución del primer archivo para optimizar CPU
-    sendLog(process_id, 'info', `Detectando resolución...`);
-    const firstFilePath = files[0].path;
-    const resolution = await detectResolution(firstFilePath);
-    const needsRecode = resolution.height > 720;
+    // Configuración uniforme: mantener resolución original, comprimir a 800-1000kbps
+    sendLog(process_id, 'info', `Recodificando a resolución original @ 900kbps...`);
     
     let ffmpegArgs;
     
     if (files.length === 1) {
-      if (needsRecode) {
-        sendLog(process_id, 'info', `Archivo ${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (modo liviano)...`);
-        ffmpegArgs = [
-          '-re',
-          '-stream_loop', '-1',
-          '-i', path.basename(inputSource),
-          '-c:v', 'libx264',
-          '-preset', 'fast',
-          '-profile:v', 'baseline',
-          '-b:v', '900k',
-          '-minrate', '800k',
-          '-maxrate', '1000k',
-          '-bufsize', '1800k',
-          '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2,fps=30',
-          '-g', '60',
-          '-keyint_min', '60',
-          '-sc_threshold', '0',
-          '-c:a', 'aac',
-          '-b:a', '96k',
-          '-ac', '2',
-          '-ar', '44100',
-          '-f', 'flv',
-          target_rtmp
-        ];
-      } else {
-        sendLog(process_id, 'info', `Archivo ${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (uniforme)...`);
-        ffmpegArgs = [
-          '-re',
-          '-stream_loop', '-1',
-          '-i', path.basename(inputSource),
-          '-c:v', 'libx264',
-          '-preset', 'fast',
-          '-profile:v', 'baseline',
-          '-b:v', '900k',
-          '-minrate', '800k',
-          '-maxrate', '1000k',
-          '-bufsize', '1800k',
-          '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2,fps=30',
-          '-g', '60',
-          '-keyint_min', '60',
-          '-sc_threshold', '0',
-          '-c:a', 'aac',
-          '-b:a', '96k',
-          '-ac', '2',
-          '-ar', '44100',
-          '-f', 'flv',
-          target_rtmp
-        ];
-      }
+      ffmpegArgs = [
+        '-re',
+        '-stream_loop', '-1',
+        '-i', path.basename(inputSource),
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-profile:v', 'baseline',
+        '-b:v', '900k',
+        '-minrate', '800k',
+        '-maxrate', '1000k',
+        '-bufsize', '1800k',
+        '-fps_mode', 'cfr',
+        '-r', '30',
+        '-g', '60',
+        '-keyint_min', '60',
+        '-sc_threshold', '0',
+        '-c:a', 'aac',
+        '-b:a', '96k',
+        '-ac', '2',
+        '-ar', '44100',
+        '-f', 'flv',
+        target_rtmp
+      ];
     } else {
-      if (needsRecode) {
-        sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (modo liviano)...`);
-        ffmpegArgs = [
-          '-re',
-          '-f', 'concat',
-          '-safe', '0',
-          '-stream_loop', '-1',
-          '-i', inputSource,
-          '-c:v', 'libx264',
-          '-preset', 'fast',
-          '-profile:v', 'baseline',
-          '-b:v', '900k',
-          '-minrate', '800k',
-          '-maxrate', '1000k',
-          '-bufsize', '1800k',
-          '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2,fps=30',
-          '-g', '60',
-          '-keyint_min', '60',
-          '-sc_threshold', '0',
-          '-c:a', 'aac',
-          '-b:a', '96k',
-          '-ac', '2',
-          '-ar', '44100',
-          '-f', 'flv',
-          target_rtmp
-        ];
-      } else {
-        sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (uniforme)...`);
-        ffmpegArgs = [
-          '-re',
-          '-f', 'concat',
-          '-safe', '0',
-          '-stream_loop', '-1',
-          '-i', inputSource,
-          '-c:v', 'libx264',
-          '-preset', 'fast',
-          '-profile:v', 'baseline',
-          '-b:v', '900k',
-          '-minrate', '800k',
-          '-maxrate', '1000k',
-          '-bufsize', '1800k',
-          '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2,fps=30',
-          '-g', '60',
-          '-keyint_min', '60',
-          '-sc_threshold', '0',
-          '-c:a', 'aac',
-          '-b:a', '96k',
-          '-ac', '2',
-          '-ar', '44100',
-          '-f', 'flv',
-          target_rtmp
-        ];
-      }
+      ffmpegArgs = [
+        '-re',
+        '-f', 'concat',
+        '-safe', '0',
+        '-stream_loop', '-1',
+        '-i', inputSource,
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-profile:v', 'baseline',
+        '-b:v', '900k',
+        '-minrate', '800k',
+        '-maxrate', '1000k',
+        '-bufsize', '1800k',
+        '-fps_mode', 'cfr',
+        '-r', '30',
+        '-g', '60',
+        '-keyint_min', '60',
+        '-sc_threshold', '0',
+        '-c:a', 'aac',
+        '-b:a', '96k',
+        '-ac', '2',
+        '-ar', '44100',
+        '-f', 'flv',
+        target_rtmp
+      ];
     }
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
