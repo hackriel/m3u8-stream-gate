@@ -695,6 +695,7 @@ app.post('/api/emit', async (req, res) => {
         '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
         '5': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
         '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
+        '8': { channelId: '61a8c0e8e4b010fa97ffde55', channelName: 'Evento' },
       };
       
       if (autoRecoveryMap[process_id] && code !== 0 && code !== null && !manualStopProcesses.has(process_id)) {

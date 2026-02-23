@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.scrape-canal6]
 verify_jwt = false
+
+[functions.scrape-channel]
+verify_jwt = false
