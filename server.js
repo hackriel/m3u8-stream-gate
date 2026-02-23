@@ -550,8 +550,8 @@ app.post('/api/emit', async (req, res) => {
         target_rtmp
       ];
     } else {
-      // Copy directo - MUY bajo CPU (8-10%) - Optimizado para IPTV/HLS
-      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, usando copy (bajo CPU)${isRecovery ? ' [recovery rápido]' : ''}...`);
+      // Recodificación uniforme: todas las fuentes a 480p @ 900kbps
+      sendLog(process_id, 'info', `Fuente es ${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (uniforme)${isRecovery ? ' [recovery rápido]' : ''}...`);
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         '-headers', 'Referer: https://www.teletica.com/',
@@ -569,8 +569,21 @@ app.post('/api/emit', async (req, res) => {
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
         '-i', source_m3u8,
-        '-c:v', 'copy',
-        '-c:a', 'copy',
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-profile:v', 'baseline',
+        '-b:v', '900k',
+        '-minrate', '800k',
+        '-maxrate', '1000k',
+        '-bufsize', '1800k',
+        '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,fps=30',
+        '-g', '60',
+        '-keyint_min', '60',
+        '-sc_threshold', '0',
+        '-c:a', 'aac',
+        '-b:a', '96k',
+        '-ac', '2',
+        '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
@@ -906,13 +919,26 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
           target_rtmp
         ];
       } else {
-        sendLog(process_id, 'info', `Archivo ${resolution.width}x${resolution.height}, usando copy (bajo CPU)...`);
+        sendLog(process_id, 'info', `Archivo ${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (uniforme)...`);
         ffmpegArgs = [
           '-re',
           '-stream_loop', '-1',
           '-i', path.basename(inputSource),
-          '-c:v', 'copy',
-          '-c:a', 'copy',
+          '-c:v', 'libx264',
+          '-preset', 'fast',
+          '-profile:v', 'baseline',
+          '-b:v', '900k',
+          '-minrate', '800k',
+          '-maxrate', '1000k',
+          '-bufsize', '1800k',
+          '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,fps=30',
+          '-g', '60',
+          '-keyint_min', '60',
+          '-sc_threshold', '0',
+          '-c:a', 'aac',
+          '-b:a', '96k',
+          '-ac', '2',
+          '-ar', '44100',
           '-f', 'flv',
           target_rtmp
         ];
@@ -945,15 +971,28 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
           target_rtmp
         ];
       } else {
-        sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, usando copy (bajo CPU)...`);
+        sendLog(process_id, 'info', `Archivos ~${resolution.width}x${resolution.height}, recodificando a 480p30 @ 900kbps (uniforme)...`);
         ffmpegArgs = [
           '-re',
           '-f', 'concat',
           '-safe', '0',
           '-stream_loop', '-1',
           '-i', inputSource,
-          '-c:v', 'copy',
-          '-c:a', 'copy',
+          '-c:v', 'libx264',
+          '-preset', 'fast',
+          '-profile:v', 'baseline',
+          '-b:v', '900k',
+          '-minrate', '800k',
+          '-maxrate', '1000k',
+          '-bufsize', '1800k',
+          '-vf', 'scale=854:480:force_original_aspect_ratio=decrease,fps=30',
+          '-g', '60',
+          '-keyint_min', '60',
+          '-sc_threshold', '0',
+          '-c:a', 'aac',
+          '-b:a', '96k',
+          '-ac', '2',
+          '-ar', '44100',
           '-f', 'flv',
           target_rtmp
         ];
