@@ -496,7 +496,7 @@ app.post('/api/emit', async (req, res) => {
     const probeSize      = isRecovery ? '1000000' : '2000000';   // 1MB recovery / 2MB inicio frío
     resolutionCache.set(process_id, { recovery: true }); // Marcar para futuros recoveries
 
-    sendLog(process_id, 'info', `Emitiendo con resolución original @ 900kbps (800-1000k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
+    sendLog(process_id, 'info', `Emitiendo a 480p @ 900kbps (800-1000k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
     ffmpegArgs = [
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       '-headers', 'Referer: https://www.teletica.com/',
@@ -521,8 +521,7 @@ app.post('/api/emit', async (req, res) => {
       '-minrate', '800k',
       '-maxrate', '1000k',
       '-bufsize', '1800k',
-      '-vsync', 'cfr',
-      '-r', '30',
+      '-vf', 'scale=-2:480,fps=30',
       '-g', '60',
       '-keyint_min', '60',
       '-sc_threshold', '0',
@@ -830,8 +829,8 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `Creada playlist con ${files.length} archivos`);
     }
 
-    // Configuración uniforme: mantener resolución original, comprimir a 800-1000kbps
-    sendLog(process_id, 'info', `Recodificando a resolución original @ 900kbps...`);
+    // Configuración uniforme: escalar a 480p, comprimir a 800-1000kbps
+    sendLog(process_id, 'info', `Recodificando a 480p @ 900kbps...`);
     
     let ffmpegArgs;
     
@@ -847,8 +846,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-minrate', '800k',
         '-maxrate', '1000k',
         '-bufsize', '1800k',
-        '-vsync', 'cfr',
-        '-r', '30',
+        '-vf', 'scale=-2:480,fps=30',
         '-g', '60',
         '-keyint_min', '60',
         '-sc_threshold', '0',
@@ -873,8 +871,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-minrate', '800k',
         '-maxrate', '1000k',
         '-bufsize', '1800k',
-        '-vsync', 'cfr',
-        '-r', '30',
+        '-vf', 'scale=-2:480,fps=30',
         '-g', '60',
         '-keyint_min', '60',
         '-sc_threshold', '0',
