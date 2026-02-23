@@ -496,16 +496,25 @@ app.post('/api/emit', async (req, res) => {
     const probeSize      = isRecovery ? '1000000' : '2000000';   // 1MB recovery / 2MB inicio frío
     resolutionCache.set(process_id, { recovery: true }); // Marcar para futuros recoveries
 
-    sendLog(process_id, 'info', `Emitiendo a 480p @ 1500kbps (1200-1800k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
+    sendLog(process_id, 'info', `Emitiendo a 480p @ 1200kbps (900-1500k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
+    
+    // Detectar el dominio de la fuente para usar el Referer correcto
+    let refererDomain = 'https://www.tdmax.com/';
+    let originDomain = 'https://www.tdmax.com';
+    if (source_m3u8.includes('teletica.com') && !source_m3u8.includes('wmsAuthSign')) {
+      refererDomain = 'https://www.teletica.com/';
+      originDomain = 'https://www.teletica.com';
+    }
+    
     ffmpegArgs = [
-      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      '-headers', 'Referer: https://www.teletica.com/',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
       '-timeout', '10000000',
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
       '-reconnect_on_network_error', '1',
-      '-reconnect_on_http_error', '5xx',
+      '-reconnect_on_http_error', '4xx,5xx',
       '-multiple_requests', '1',
       '-http_persistent', '1',
       '-live_start_index', '-3',
