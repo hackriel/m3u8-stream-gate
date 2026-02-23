@@ -596,7 +596,7 @@ app.post('/api/emit', async (req, res) => {
         '-probesize', probeSize,
         '-i', source_m3u8,
         '-c:v', 'libx264',
-        '-preset', 'superfast',
+        '-preset', 'veryfast',
         '-profile:v', 'baseline',
         '-b:v', '1500k',
         '-minrate', '1200k',
