@@ -148,94 +148,7 @@ const recoveryAttempts = new Map(); // Map<processId, number>
 // Cache de resolución por canal para evitar re-sondear en cada recovery
 const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, height }>
 
-// Renovación proactiva de tokens: intervalos de re-scraping por proceso
-const tokenRefreshIntervals = new Map(); // Map<processId, intervalId>
-const TOKEN_REFRESH_INTERVAL_MS = 15 * 60 * 1000; // 15 minutos
 
-// Mapa de channelIds para renovación proactiva
-const CHANNEL_IDS = {
-  '1': '641cba02e4b068d89b2344e3', // FUTV
-  '2': '664237788f085ac1f2a15f81', // Tigo Sports
-  '3': '66608d188f0839b8a740cfe9', // TDmas 1
-  '4': '617c2f66e4b045a692106126', // Teletica
-  '5': '65d7aca4e4b0140cbf380bd0', // Canal 6
-  '6': '664e5de58f089fa849a58697', // Multimedios
-};
-
-// Iniciar renovación proactiva de token para un proceso
-const startTokenRefresh = (processId) => {
-  stopTokenRefresh(processId);
-  
-  const pid = String(processId);
-  
-  const intervalId = setInterval(async () => {
-    if (!ffmpegProcesses.has(pid) && !ffmpegProcesses.has(parseInt(pid))) {
-      stopTokenRefresh(pid);
-      return;
-    }
-    
-    let channelId = CHANNEL_IDS[pid];
-    
-    // Para Evento (8), extraer channelId de source_url en DB
-    if ((pid === '8') && !channelId && supabase) {
-      try {
-        const { data } = await supabase
-          .from('emission_processes')
-          .select('source_url')
-          .eq('id', 8)
-          .single();
-        if (data?.source_url) {
-          const match = data.source_url.match(/id=([a-f0-9]+)/i);
-          if (match) channelId = match[1];
-        }
-      } catch (e) {}
-    }
-    
-    if (!channelId) return;
-    
-    sendLog(pid, 'info', `🔑 Renovación proactiva de token (cada 15min)...`);
-    
-    try {
-      const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'apikey': SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ channel_id: channelId }),
-      });
-      
-      const data = await resp.json();
-      
-      if (data.success && data.url) {
-        if (supabase) {
-          await supabase
-            .from('emission_processes')
-            .update({ m3u8: data.url })
-            .eq('id', parseInt(pid));
-        }
-        sendLog(pid, 'success', `🔑 Token renovado exitosamente - URL actualizada en DB`);
-      } else {
-        sendLog(pid, 'warn', `⚠️ Renovación de token falló: ${data.error || 'sin URL'}`);
-      }
-    } catch (err) {
-      sendLog(pid, 'warn', `⚠️ Error renovando token: ${err.message}`);
-    }
-  }, TOKEN_REFRESH_INTERVAL_MS);
-  
-  tokenRefreshIntervals.set(pid, intervalId);
-  sendLog(pid, 'info', `🔑 Renovación proactiva de token activada (cada 15min)`);
-};
-
-const stopTokenRefresh = (processId) => {
-  const pid = String(processId);
-  const intervalId = tokenRefreshIntervals.get(pid);
-  if (intervalId) {
-    clearInterval(intervalId);
-    tokenRefreshIntervals.delete(pid);
-  }
-};
 
 
 // Espera a que el proceso FFmpeg esté completamente muerto (con timeout agresivo)
@@ -749,10 +662,6 @@ app.post('/api/emit', async (req, res) => {
         if (currentStatus === 'starting') {
           emissionStatuses.set(process_id, 'running');
           sendLog(process_id, 'success', `Emisión iniciada exitosamente`);
-          // Activar renovación proactiva de token para procesos con scraping
-          if (CHANNEL_IDS[process_id] || process_id === '8' || process_id === 8) {
-            startTokenRefresh(process_id);
-          }
           
           // Actualizar base de datos a estado 'running'
           if (supabase) {
@@ -840,7 +749,8 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
-      stopTokenRefresh(process_id);
+
+
       
       // AUTO-RECOVERY: Para canales con scraping
       const autoRecoveryMap = {
@@ -895,6 +805,54 @@ app.post('/api/emit', async (req, res) => {
               sendLog(8, 'error', `❌ AUTO-RECOVERY Evento error: ${err.message}`);
             }
           }, 500);
+        } else if (process_id === '0' || process_id === 0) {
+          // Proceso 0 (Libre): reutilizar la misma URL M3U8 guardada en DB
+          sendLog(process_id, 'warn', `🔄 Libre caído (código ${code}) - Reiniciando con misma URL en 500ms...`);
+          setTimeout(async () => {
+            try {
+              if (!supabase) {
+                sendLog(0, 'error', '❌ AUTO-RECOVERY Libre: Supabase no disponible');
+                return;
+              }
+              const { data: procData } = await supabase
+                .from('emission_processes')
+                .select('m3u8, rtmp')
+                .eq('id', 0)
+                .single();
+              
+              if (procData && procData.m3u8 && procData.rtmp) {
+                sendLog(0, 'info', `🔄 AUTO-RECOVERY Libre: Reiniciando con URL existente...`);
+                autoRecoveryInProgress.set('0', true);
+                
+                await supabase
+                  .from('emission_processes')
+                  .update({ emit_status: 'starting', is_emitting: true, is_active: true })
+                  .eq('id', 0);
+                
+                const emitResp = await fetch(`http://localhost:${PORT}/api/emit`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    source_m3u8: procData.m3u8,
+                    target_rtmp: procData.rtmp,
+                    process_id: '0'
+                  })
+                });
+                
+                if (emitResp.ok) {
+                  sendLog(0, 'success', '✅ AUTO-RECOVERY Libre completado: Emisión reiniciada');
+                } else {
+                  sendLog(0, 'error', `❌ AUTO-RECOVERY Libre falló: ${emitResp.status}`);
+                }
+                autoRecoveryInProgress.set('0', false);
+              } else {
+                sendLog(0, 'error', '❌ AUTO-RECOVERY Libre: No hay M3U8 o RTMP guardados');
+              }
+            } catch (err) {
+              sendLog(0, 'error', `❌ AUTO-RECOVERY Libre error: ${err.message}`);
+              autoRecoveryInProgress.set('0', false);
+            }
+          }, 500);
         }
       }
     });
@@ -924,7 +882,8 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
-      stopTokenRefresh(process_id);
+
+
     });
 
     // Timeout de inicio simple
@@ -1299,7 +1258,7 @@ app.post('/api/emit/stop', async (req, res) => {
       
       ffmpegProcesses.delete(process_id);
       resolutionCache.delete(process_id);
-      stopTokenRefresh(process_id);
+      
       emissionStatuses.set(process_id, 'idle');
       sendLog(process_id, 'success', `Emisión detenida correctamente`);
       
