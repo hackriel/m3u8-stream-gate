@@ -148,6 +148,96 @@ const recoveryAttempts = new Map(); // Map<processId, number>
 // Cache de resolución por canal para evitar re-sondear en cada recovery
 const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, height }>
 
+// Renovación proactiva de tokens: intervalos de re-scraping por proceso
+const tokenRefreshIntervals = new Map(); // Map<processId, intervalId>
+const TOKEN_REFRESH_INTERVAL_MS = 15 * 60 * 1000; // 15 minutos
+
+// Mapa de channelIds para renovación proactiva
+const CHANNEL_IDS = {
+  '1': '641cba02e4b068d89b2344e3', // FUTV
+  '2': '664237788f085ac1f2a15f81', // Tigo Sports
+  '3': '66608d188f0839b8a740cfe9', // TDmas 1
+  '4': '617c2f66e4b045a692106126', // Teletica
+  '5': '65d7aca4e4b0140cbf380bd0', // Canal 6
+  '6': '664e5de58f089fa849a58697', // Multimedios
+};
+
+// Iniciar renovación proactiva de token para un proceso
+const startTokenRefresh = (processId) => {
+  stopTokenRefresh(processId);
+  
+  const pid = String(processId);
+  
+  const intervalId = setInterval(async () => {
+    if (!ffmpegProcesses.has(pid) && !ffmpegProcesses.has(parseInt(pid))) {
+      stopTokenRefresh(pid);
+      return;
+    }
+    
+    let channelId = CHANNEL_IDS[pid];
+    
+    // Para Evento (8), extraer channelId de source_url en DB
+    if ((pid === '8') && !channelId && supabase) {
+      try {
+        const { data } = await supabase
+          .from('emission_processes')
+          .select('source_url')
+          .eq('id', 8)
+          .single();
+        if (data?.source_url) {
+          const match = data.source_url.match(/id=([a-f0-9]+)/i);
+          if (match) channelId = match[1];
+        }
+      } catch (e) {}
+    }
+    
+    if (!channelId) return;
+    
+    sendLog(pid, 'info', `🔑 Renovación proactiva de token (cada 15min)...`);
+    
+    try {
+      const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'apikey': SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ channel_id: channelId }),
+      });
+      
+      const data = await resp.json();
+      
+      if (data.success && data.url) {
+        if (supabase) {
+          await supabase
+            .from('emission_processes')
+            .update({ m3u8: data.url })
+            .eq('id', parseInt(pid));
+        }
+        sendLog(pid, 'success', `🔑 Token renovado exitosamente - URL actualizada en DB`);
+      } else {
+        sendLog(pid, 'warn', `⚠️ Renovación de token falló: ${data.error || 'sin URL'}`);
+      }
+    } catch (err) {
+      sendLog(pid, 'warn', `⚠️ Error renovando token: ${err.message}`);
+    }
+  }, TOKEN_REFRESH_INTERVAL_MS);
+  
+  tokenRefreshIntervals.set(pid, intervalId);
+  sendLog(pid, 'info', `🔑 Renovación proactiva de token activada (cada 15min)`);
+};
+
+const stopTokenRefresh = (processId) => {
+  const pid = String(processId);
+  const intervalId = tokenRefreshIntervals.get(pid);
+  if (intervalId) {
+    clearInterval(intervalId);
+    tokenRefreshIntervals.delete(pid);
+  }
+};
+
+
 // Espera a que el proceso FFmpeg esté completamente muerto (con timeout agresivo)
 const waitForProcessDeath = (proc, timeoutMs = 1500) => {
   return new Promise((resolve) => {
@@ -659,6 +749,10 @@ app.post('/api/emit', async (req, res) => {
         if (currentStatus === 'starting') {
           emissionStatuses.set(process_id, 'running');
           sendLog(process_id, 'success', `Emisión iniciada exitosamente`);
+          // Activar renovación proactiva de token para procesos con scraping
+          if (CHANNEL_IDS[process_id] || process_id === '8' || process_id === 8) {
+            startTokenRefresh(process_id);
+          }
           
           // Actualizar base de datos a estado 'running'
           if (supabase) {
@@ -746,6 +840,7 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
+      stopTokenRefresh(process_id);
       
       // AUTO-RECOVERY: Para canales con scraping
       const autoRecoveryMap = {
@@ -760,16 +855,23 @@ app.post('/api/emit', async (req, res) => {
       if (manualStopProcesses.has(process_id)) {
         sendLog(process_id, 'info', '🛑 Parada manual detectada - Auto-recovery desactivado');
         manualStopProcesses.delete(process_id);
-      } else if (code !== 0 && code !== null) {
+      } else if (code !== null) {
+        // Auto-recovery para CUALQUIER código de salida (incluyendo 0)
+        // FFmpeg puede salir con código 0 cuando la fuente M3U8 expira limpiamente (EOF)
+        // y eso también requiere recuperación automática
+        const isCleanExit = code === 0;
+        if (isCleanExit) {
+          sendLog(process_id, 'warn', `⚠️ FFmpeg salió con código 0 (fuente expirada o EOF) - Intentando auto-recovery...`);
+        }
         if (autoRecoveryMap[process_id]) {
           const { channelId, channelName } = autoRecoveryMap[process_id];
-          sendLog(process_id, 'warn', `🔄 ${channelName} caído - Iniciando auto-recovery en 500ms...`);
+          sendLog(process_id, 'warn', `🔄 ${channelName} caído (código ${code}) - Iniciando auto-recovery en 500ms...`);
           setTimeout(() => {
             autoRecoverChannel(process_id, channelId, channelName);
           }, 500);
         } else if (process_id === '8' || process_id === 8) {
           // Proceso 8 (Evento): extraer channelId del source_url guardado en DB
-          sendLog(process_id, 'warn', `🔄 Evento caído - Iniciando auto-recovery dinámico...`);
+          sendLog(process_id, 'warn', `🔄 Evento caído (código ${code}) - Iniciando auto-recovery dinámico...`);
           setTimeout(async () => {
             try {
               const { data: procData } = await supabase
@@ -822,6 +924,7 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
+      stopTokenRefresh(process_id);
     });
 
     // Timeout de inicio simple
@@ -1195,7 +1298,8 @@ app.post('/api/emit/stop', async (req, res) => {
       }, 5000);
       
       ffmpegProcesses.delete(process_id);
-      resolutionCache.delete(process_id); // Limpiar caché al detener manualmente
+      resolutionCache.delete(process_id);
+      stopTokenRefresh(process_id);
       emissionStatuses.set(process_id, 'idle');
       sendLog(process_id, 'success', `Emisión detenida correctamente`);
       
