@@ -15,9 +15,10 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 9;
+const NUM_PROCESSES = 10;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const EVENTO_INDEX = 8; // "Evento" process - dynamic channel ID from TDMax URL
+const DEMO_TIGO_INDEX = 9; // "Demo TIGO" process - dynamic channel ID from TDMax URL
 
 // Tipo para un proceso de emisión
 interface EmissionProcess {
@@ -35,6 +36,7 @@ interface EmissionProcess {
   failureDetails?: string;
   logs: LogEntry[];
   processLogsFromDB?: string;
+  recoveryCount: number;
 }
 
 // Tipo para una entrada de log
@@ -64,6 +66,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "Multimedios", scrapeFn: "scrape-channel", channelId: "664e5de58f089fa849a58697", fetchLabel: "🔄 Multi" },
   { name: "Subida", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Evento", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer Fuente" },
+  { name: "Demo TIGO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer Fuente" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -77,7 +80,8 @@ const defaultProcess = (): EmissionProcess => ({
   emitMsg: '',
   reconnectAttempts: 0,
   lastReconnectTime: 0,
-  logs: []
+  logs: [],
+  recoveryCount: 0,
 });
 
 export default function EmisorM3U8Panel() {
@@ -106,6 +110,7 @@ export default function EmisorM3U8Panel() {
         
         if (data && data.length > 0) {
           let initialEventoUrl = '';
+          let initialDemoTigoUrl = '';
           const loadedProcesses: EmissionProcess[] = Array.from({ length: NUM_PROCESSES }, (_, index) => {
             const row = data.find(d => d.id === index);
             if (row) {
@@ -121,6 +126,10 @@ export default function EmisorM3U8Panel() {
               if (index === EVENTO_INDEX && (row as any).source_url) {
                 initialEventoUrl = (row as any).source_url;
               }
+              // Restore demoTigoUrl for Demo TIGO process
+              if (index === DEMO_TIGO_INDEX && (row as any).source_url) {
+                initialDemoTigoUrl = (row as any).source_url;
+              }
               return {
                 m3u8: row.m3u8 || '',
                 rtmp: row.rtmp || '',
@@ -135,7 +144,8 @@ export default function EmisorM3U8Panel() {
                 failureReason: row.failure_reason || undefined,
                 failureDetails: row.failure_details || undefined,
                 logs: [],
-                processLogsFromDB: row.process_logs || ''
+                processLogsFromDB: row.process_logs || '',
+                recoveryCount: (row as any).recovery_count || 0,
               };
             } else {
               return defaultProcess();
@@ -143,6 +153,7 @@ export default function EmisorM3U8Panel() {
           });
           setProcesses(loadedProcesses);
           if (initialEventoUrl) setEventoUrl(initialEventoUrl);
+          if (initialDemoTigoUrl) setDemoTigoUrl(initialDemoTigoUrl);
           
           // Crear filas faltantes en la base de datos
           for (let i = 0; i < NUM_PROCESSES; i++) {
@@ -225,7 +236,8 @@ export default function EmisorM3U8Panel() {
                   failureReason: row.failure_reason,
                   failureDetails: row.failure_details,
                   logs: prev[row.id]?.logs || [],
-                  processLogsFromDB: row.process_logs || ''
+                  processLogsFromDB: row.process_logs || '',
+                  recoveryCount: row.recovery_count || 0,
                 };
               }
               return newProcesses;
@@ -261,6 +273,7 @@ export default function EmisorM3U8Panel() {
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
   const [eventoUrl, setEventoUrl] = useState<string>('');
+  const [demoTigoUrl, setDemoTigoUrl] = useState<string>('');
   const { metricsHistory, latestMetrics } = useServerMetrics();
 
   // Extraer channel ID de una URL de TDMax
@@ -280,10 +293,16 @@ export default function EmisorM3U8Panel() {
     const config = CHANNEL_CONFIGS[processIndex];
     if (!config.scrapeFn) return;
     
-    // Para Evento, extraer channelId de la URL pegada
+    // Para Evento o Demo TIGO, extraer channelId de la URL pegada
     let channelId = config.channelId;
     if (processIndex === EVENTO_INDEX) {
       channelId = extractChannelId(eventoUrl);
+      if (!channelId) {
+        toast.error('Pega una URL válida de TDMax con el parámetro id');
+        return;
+      }
+    } else if (processIndex === DEMO_TIGO_INDEX) {
+      channelId = extractChannelId(demoTigoUrl);
       if (!channelId) {
         toast.error('Pega una URL válida de TDMax con el parámetro id');
         return;
@@ -313,7 +332,7 @@ export default function EmisorM3U8Panel() {
     } finally {
       setFetchingChannel(null);
     }
-  }, [eventoUrl]);
+  }, [eventoUrl, demoTigoUrl]);
 
 
 
@@ -791,7 +810,8 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-orange-500", text: "text-orange-500", stroke: "#f97316", name: "Canal 6" },
       { bg: "bg-red-500", text: "text-red-500", stroke: "#ef4444", name: "Multimedios" },
       { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Subida" },
-      { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "Evento" }
+      { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "Evento" },
+      { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "Demo TIGO" },
     ];
     return colors[processIndex];
   };
@@ -848,27 +868,34 @@ export default function EmisorM3U8Panel() {
                   </div>
                 )}
               </>
-            ) : processIndex === EVENTO_INDEX ? (
-              // Proceso Evento: URL de TDMax + extracción automática
+            ) : processIndex === EVENTO_INDEX || processIndex === DEMO_TIGO_INDEX ? (
+              // Proceso Evento / Demo TIGO: URL de TDMax + extracción automática
               <>
-                <label className="block text-sm mb-2 text-muted-foreground">URL del Evento (TDMax)</label>
+                <label className="block text-sm mb-2 text-muted-foreground">URL del {processIndex === EVENTO_INDEX ? 'Evento' : 'Demo TIGO'} (TDMax)</label>
                 <div className="flex gap-2 mb-4">
                   <input
                     type="url"
                     placeholder="https://www.tdmax.com/player?id=...&type=channel"
-                    value={eventoUrl}
+                    value={processIndex === EVENTO_INDEX ? eventoUrl : demoTigoUrl}
                     onChange={(e) => {
                       const val = e.target.value;
-                      setEventoUrl(val);
-                      supabase.from('emission_processes').update({ source_url: val } as any).eq('id', EVENTO_INDEX).then(({ error }) => {
-                        if (error) console.error('Error guardando source_url:', error);
-                      });
+                      if (processIndex === EVENTO_INDEX) {
+                        setEventoUrl(val);
+                        supabase.from('emission_processes').update({ source_url: val } as any).eq('id', EVENTO_INDEX).then(({ error }) => {
+                          if (error) console.error('Error guardando source_url:', error);
+                        });
+                      } else {
+                        setDemoTigoUrl(val);
+                        supabase.from('emission_processes').update({ source_url: val } as any).eq('id', DEMO_TIGO_INDEX).then(({ error }) => {
+                          if (error) console.error('Error guardando source_url:', error);
+                        });
+                      }
                     }}
                     className="flex-1 bg-card border border-border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
                   />
                   <button
                     onClick={() => fetchChannelUrl(processIndex)}
-                    disabled={fetchingChannel !== null || !eventoUrl}
+                    disabled={fetchingChannel !== null || !(processIndex === EVENTO_INDEX ? eventoUrl : demoTigoUrl)}
                     className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
                     title="Extraer fuente M3U8 del evento"
                   >
@@ -882,13 +909,17 @@ export default function EmisorM3U8Panel() {
                     )}
                   </button>
                 </div>
-                {eventoUrl && extractChannelId(eventoUrl) && (
-                  <div className="mb-3 p-2 rounded-lg bg-card/50 border border-border">
-                    <p className="text-xs text-muted-foreground">
-                      Channel ID detectado: <span className="font-mono text-primary">{extractChannelId(eventoUrl)}</span>
-                    </p>
-                  </div>
-                )}
+                {(() => {
+                  const currentUrl = processIndex === EVENTO_INDEX ? eventoUrl : demoTigoUrl;
+                  const channelId = currentUrl ? extractChannelId(currentUrl) : null;
+                  return currentUrl && channelId ? (
+                    <div className="mb-3 p-2 rounded-lg bg-card/50 border border-border">
+                      <p className="text-xs text-muted-foreground">
+                        Channel ID detectado: <span className="font-mono text-primary">{channelId}</span>
+                      </p>
+                    </div>
+                  ) : null;
+                })()}
                 <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 extraída</label>
                 <input
                   type="url"
@@ -1023,6 +1054,17 @@ export default function EmisorM3U8Panel() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Contador de Reinicios / Cambios de URL */}
+              <div className="bg-card/50 rounded-xl p-5 border border-border">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">🔄 Reinicios / Cambios URL:</span>
+                  <span className={`font-mono text-2xl font-bold ${process.recoveryCount > 0 ? 'text-warning' : 'text-muted-foreground'}`}>
+                    {process.recoveryCount}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">Veces que se ha reiniciado o cambiado la URL automáticamente</p>
               </div>
 
               {/* Duración de emisión (si hay caída) */}
