@@ -288,6 +288,17 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       sendLog(process_id, 'error', `❌ AUTO-RECOVERY: El endpoint /api/emit respondió ${emitResp.status}: ${errText.substring(0, 100)}`);
     } else {
       sendLog(process_id, 'success', '✅ AUTO-RECOVERY completado: Emisión reiniciada correctamente');
+      // Incrementar contador de recovery en la base de datos
+      if (supabase) {
+        await supabase.rpc('increment_recovery_count', { process_id: parseInt(process_id) }).catch(err => {
+          // Fallback: update directamente si la función no existe
+          supabase
+            .from('emission_processes')
+            .update({ recovery_count: (recoveryAttempts.get(process_id) || 1) })
+            .eq('id', parseInt(process_id))
+            .then(() => {});
+        });
+      }
       // Si fue exitoso con URL oficial, resetear intentos
       if (newUrl === fallbackUrl) {
         recoveryAttempts.set(process_id, 0);
@@ -779,30 +790,32 @@ app.post('/api/emit', async (req, res) => {
           setTimeout(() => {
             autoRecoverChannel(process_id, channelId, channelName);
           }, 500);
-        } else if (process_id === '8' || process_id === 8) {
-          // Proceso 8 (Evento): extraer channelId del source_url guardado en DB
-          sendLog(process_id, 'warn', `🔄 Evento caído (código ${code}) - Iniciando auto-recovery dinámico...`);
+        } else if (process_id === '8' || process_id === 8 || process_id === '9' || process_id === 9) {
+          // Proceso 8 (Evento) y 9 (Demo TIGO): extraer channelId del source_url guardado en DB
+          const procId = parseInt(process_id);
+          const procName = procId === 8 ? 'Evento' : 'Demo TIGO';
+          sendLog(process_id, 'warn', `🔄 ${procName} caído (código ${code}) - Iniciando auto-recovery dinámico...`);
           setTimeout(async () => {
             try {
               const { data: procData } = await supabase
                 .from('emission_processes')
                 .select('source_url')
-                .eq('id', 8)
+                .eq('id', procId)
                 .single();
               
               if (procData && procData.source_url) {
                 const idMatch = procData.source_url.match(/id=([a-f0-9]+)/i);
                 if (idMatch) {
-                  sendLog(8, 'info', `🔄 AUTO-RECOVERY Evento: channelId extraído = ${idMatch[1]}`);
-                  await autoRecoverChannel(8, idMatch[1], 'Evento');
+                  sendLog(procId, 'info', `🔄 AUTO-RECOVERY ${procName}: channelId extraído = ${idMatch[1]}`);
+                  await autoRecoverChannel(procId, idMatch[1], procName);
                 } else {
-                  sendLog(8, 'error', '❌ AUTO-RECOVERY Evento: No se pudo extraer channelId del source_url');
+                  sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procName}: No se pudo extraer channelId del source_url`);
                 }
               } else {
-                sendLog(8, 'error', '❌ AUTO-RECOVERY Evento: No hay source_url guardado');
+                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procName}: No hay source_url guardado`);
               }
             } catch (err) {
-              sendLog(8, 'error', `❌ AUTO-RECOVERY Evento error: ${err.message}`);
+              sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procName} error: ${err.message}`);
             }
           }, 500);
         } else if (process_id === '0' || process_id === 0) {
@@ -841,6 +854,10 @@ app.post('/api/emit', async (req, res) => {
                 
                 if (emitResp.ok) {
                   sendLog(0, 'success', '✅ AUTO-RECOVERY Libre completado: Emisión reiniciada');
+                  // Incrementar contador de recovery
+                  if (supabase) {
+                    await supabase.rpc('increment_recovery_count', { process_id: 0 }).catch(() => {});
+                  }
                 } else {
                   sendLog(0, 'error', `❌ AUTO-RECOVERY Libre falló: ${emitResp.status}`);
                 }
@@ -1458,7 +1475,7 @@ app.get('/api/status', (req, res) => {
   } else {
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 10; i++) {
       const id = i.toString();
       const processData = ffmpegProcesses.get(id);
       allStatuses[id] = {

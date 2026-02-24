@@ -32,6 +32,7 @@ export type Database = {
           m3u8: string
           preview_suffix: string
           process_logs: string | null
+          recovery_count: number
           rtmp: string
           source_url: string
           start_time: number
@@ -54,6 +55,7 @@ export type Database = {
           m3u8?: string
           preview_suffix?: string
           process_logs?: string | null
+          recovery_count?: number
           rtmp?: string
           source_url?: string
           start_time?: number
@@ -76,6 +78,7 @@ export type Database = {
           m3u8?: string
           preview_suffix?: string
           process_logs?: string | null
+          recovery_count?: number
           rtmp?: string
           source_url?: string
           start_time?: number
@@ -93,6 +96,10 @@ export type Database = {
         Returns: undefined
       }
       increment_down_time: { Args: { process_id: number }; Returns: undefined }
+      increment_recovery_count: {
+        Args: { process_id: number }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
