@@ -1337,11 +1337,12 @@ app.post('/api/emit/drop-signal', async (req, res) => {
     };
     
     const channelInfo = dropSignalMap[process_id];
-    if (!channelInfo) {
-      return res.status(400).json({ success: false, error: `Proceso ${process_id} no soporta cambio de señal automático` });
-    }
     
-    sendLog(process_id, 'warn', `📡 BOTAR SEÑAL: Forzando cambio de señal para ${channelInfo.channelName}...`);
+    // Para procesos sin scraping (Libre=0, Subida=7, etc.), solo matamos FFmpeg
+    // y dejamos que la auto-recuperación lo levante con la misma URL
+    const processName = channelInfo ? channelInfo.channelName : `Proceso ${process_id}`;
+    
+    sendLog(process_id, 'warn', `📡 BOTAR SEÑAL: Forzando caída de ${processName}...`);
     
     // Matar proceso existente y esperar que muera completamente
     const processData = ffmpegProcesses.get(process_id);
@@ -1351,19 +1352,25 @@ app.post('/api/emit/drop-signal', async (req, res) => {
       await waitForProcessDeath(processData.process, 4000);
       ffmpegProcesses.delete(process_id);
       emissionStatuses.set(process_id, 'idle');
-      sendLog(process_id, 'info', '✔ Proceso anterior terminado - iniciando cambio de señal...');
+      sendLog(process_id, 'info', '✔ Proceso anterior terminado - la auto-recuperación debería activarse...');
+    } else {
+      return res.json({ success: false, error: 'No hay proceso FFmpeg activo para matar' });
     }
     
-    // Resetear intentos para que haga scraping limpio (intento 1)
+    // Resetear intentos de recuperación
     recoveryAttempts.set(process_id, 0);
     
-    // Responder inmediatamente al cliente y ejecutar recovery en background
-    res.json({ success: true, message: `Cambiando señal de ${channelInfo.channelName}...` });
-    
-    // Disparar auto-recovery después de un breve delay
-    setTimeout(() => {
-      autoRecoverChannel(process_id, channelInfo.channelId, channelInfo.channelName);
-    }, 500);
+    if (channelInfo) {
+      // Procesos con scraping: disparar auto-recovery con scraping
+      res.json({ success: true, message: `Botando señal de ${channelInfo.channelName}...` });
+      setTimeout(() => {
+        autoRecoverChannel(process_id, channelInfo.channelId, channelInfo.channelName);
+      }, 500);
+    } else {
+      // Procesos sin scraping (Libre, Subida): solo respondemos OK
+      // La auto-recuperación del handler 'close' de FFmpeg se encargará
+      res.json({ success: true, message: `Señal botada para ${processName}, esperando auto-recuperación...` });
+    }
     
   } catch (error) {
     sendLog(req.body?.process_id || '?', 'error', `Error en drop-signal: ${error.message}`);

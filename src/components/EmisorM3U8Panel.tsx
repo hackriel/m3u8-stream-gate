@@ -701,11 +701,10 @@ export default function EmisorM3U8Panel() {
 
   async function dropSignal(processIndex: number) {
     const channelConfig = CHANNEL_CONFIGS[processIndex];
-    if (!channelConfig.scrapeFn) return;
     
     toast.info(`📡 Botando señal de ${channelConfig.name}...`);
     updateProcess(processIndex, {
-      emitMsg: "📡 Cambiando señal...",
+      emitMsg: "📡 Botando señal...",
     });
     
     try {
@@ -716,7 +715,7 @@ export default function EmisorM3U8Panel() {
       });
       const data = await resp.json();
       if (data.success) {
-        toast.success(`🔄 ${channelConfig.name}: Buscando nueva señal...`);
+        toast.success(`🔄 ${channelConfig.name}: señal botada, esperando auto-recuperación...`);
       } else {
         toast.error(`Error: ${data.error}`);
       }
