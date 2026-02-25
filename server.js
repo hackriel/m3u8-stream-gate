@@ -589,8 +589,8 @@ app.post('/api/emit', async (req, res) => {
         ];
       }
     } else {
-      // Procesos 1-6, 8 (scrapeados): 576p @ 2000kbps
-      sendLog(process_id, 'info', `Emitiendo a 576p @ 2000kbps (1600-2400k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
+      // Procesos 1-6, 8, 9 (scrapeados): 720p @ 3500kbps
+      sendLog(process_id, 'info', `Emitiendo a 720p @ 3500kbps (2800-4200k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
       
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -612,11 +612,11 @@ app.post('/api/emit', async (req, res) => {
         '-c:v', 'libx264',
         '-preset', 'veryfast',
         '-profile:v', 'baseline',
-        '-b:v', '2000k',
-        '-minrate', '1600k',
-        '-maxrate', '2400k',
-        '-bufsize', '4000k',
-        '-vf', 'scale=-2:576',
+        '-b:v', '3500k',
+        '-minrate', '2800k',
+        '-maxrate', '4200k',
+        '-bufsize', '7000k',
+        '-vf', 'scale=-2:720',
         '-r', '30',
         '-g', '60',
         '-keyint_min', '60',
