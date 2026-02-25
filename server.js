@@ -1261,17 +1261,32 @@ app.post('/api/emit/stop', async (req, res) => {
           .eq('id', parseInt(process_id));
       }
       
-      // Intentar terminar graciosamente
-      processData.process.kill('SIGTERM');
+      // Guardar referencia antes de borrar del mapa
+      const procRef = processData.process;
       
-      // Si no termina en 5 segundos, forzar terminación
+      // Intentar terminar graciosamente
+      procRef.kill('SIGTERM');
+      
+      // Si no termina en 3 segundos, forzar terminación con SIGKILL
       setTimeout(() => {
-        const currentProcessData = ffmpegProcesses.get(process_id);
-        if (currentProcessData && currentProcessData.process && !currentProcessData.process.killed) {
-          sendLog(process_id, 'warn', `Forzando terminación de ffmpeg`);
-          currentProcessData.process.kill('SIGKILL');
+        if (procRef && !procRef.killed) {
+          sendLog(process_id, 'warn', `Forzando terminación de ffmpeg con SIGKILL`);
+          procRef.kill('SIGKILL');
         }
-      }, 5000);
+      }, 3000);
+      
+      // Además, matar por PID directamente como último recurso
+      if (procRef.pid) {
+        setTimeout(() => {
+          try {
+            process.kill(procRef.pid, 0); // Verificar si sigue vivo
+            sendLog(process_id, 'warn', `⚠️ Proceso PID ${procRef.pid} sigue vivo, matando con kill -9`);
+            execSync(`kill -9 ${procRef.pid}`, { timeout: 2000 });
+          } catch (e) {
+            // El proceso ya murió, ok
+          }
+        }, 5000);
+      }
       
       ffmpegProcesses.delete(process_id);
       resolutionCache.delete(process_id);
@@ -1366,9 +1381,20 @@ app.delete('/api/emit/:process_id', async (req, res) => {
     const processData = ffmpegProcesses.get(process_id);
     if (processData && processData.process && !processData.process.killed) {
       manualStopProcesses.add(process_id); // Marcar como manual para evitar auto-recovery
-      processData.process.kill('SIGKILL');
+      const procRef = processData.process;
+      procRef.kill('SIGKILL');
       ffmpegProcesses.delete(process_id);
       emissionStatuses.set(process_id, 'idle');
+      
+      // Matar por PID como respaldo
+      if (procRef.pid) {
+        setTimeout(() => {
+          try {
+            process.kill(procRef.pid, 0);
+            execSync(`kill -9 ${procRef.pid}`, { timeout: 2000 });
+          } catch (e) { /* ya murió */ }
+        }, 2000);
+      }
     }
     
     // Eliminar de la base de datos solo este proceso específico (solo si Supabase está disponible)
