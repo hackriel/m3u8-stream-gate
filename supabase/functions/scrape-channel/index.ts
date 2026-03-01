@@ -16,6 +16,70 @@ const CHANNEL_MAP: Record<string, string> = {
   '61a8c0e8e4b010fa97ffde55': 'Evento Alterno',
 };
 
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Origin': 'https://www.tdmax.com',
+  'Referer': 'https://www.tdmax.com/',
+};
+
+// Login and return accessToken + deviceId
+async function loginAndGetToken(email: string, password: string): Promise<{ accessToken: string; deviceId: string }> {
+  const loginResp = await fetch(
+    `${BASE_URL}/web/services/v3/external/login?r=${RESELLER_ID}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...BROWSER_HEADERS,
+      },
+      body: JSON.stringify({
+        username: email.toLowerCase(),
+        password: password,
+      }),
+    }
+  );
+
+  const loginData = await loginResp.json();
+
+  if (loginData.errorMessage) {
+    throw new Error(`Login error: ${loginData.errorMessage}`);
+  }
+
+  const accessToken = loginData.accessToken || loginData.access_token;
+  if (!accessToken) {
+    throw new Error('No se obtuvo token de acceso');
+  }
+
+  const deviceId = crypto.randomUUID();
+  return { accessToken, deviceId };
+}
+
+// Use an existing token to get stream URL for a channel
+async function getStreamUrl(channelId: string, accessToken: string, deviceId: string): Promise<string> {
+  const lbUrl = `${BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?r=${RESELLER_ID}&deviceId=${deviceId}&accessToken=${encodeURIComponent(accessToken)}&doNotUseRedirect=true&countryCode=CR&deviceType=web&appType=web`;
+
+  const lbResp = await fetch(lbUrl, {
+    headers: {
+      ...BROWSER_HEADERS,
+      'Authorization': `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!lbResp.ok) {
+    const errorText = await lbResp.text();
+    throw new Error(`Error obteniendo stream: ${lbResp.status} - ${errorText.substring(0, 200)}`);
+  }
+
+  const lbData = await lbResp.json();
+  const streamUrl = lbData.url;
+
+  if (!streamUrl) {
+    throw new Error('No se encontró URL de stream');
+  }
+
+  return streamUrl;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -23,16 +87,8 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
+    const mode = body.mode || 'full'; // 'full' (default), 'token_only', 'stream_only'
     const channelId = body.channel_id;
-
-    if (!channelId) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Falta channel_id' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const channelName = CHANNEL_MAP[channelId] || channelId;
 
     const email = Deno.env.get('TDMAX_EMAIL');
     const password = Deno.env.get('TDMAX_PASSWORD');
@@ -44,72 +100,61 @@ Deno.serve(async (req) => {
       );
     }
 
-    const loginResp = await fetch(
-      `${BASE_URL}/web/services/v3/external/login?r=${RESELLER_ID}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Origin': 'https://www.tdmax.com',
-          'Referer': 'https://www.tdmax.com/',
-        },
-        body: JSON.stringify({
-          username: email.toLowerCase(),
-          password: password,
-        }),
+    // MODE: token_only — just login and return token+deviceId
+    if (mode === 'token_only') {
+      const { accessToken, deviceId } = await loginAndGetToken(email, password);
+      return new Response(
+        JSON.stringify({ success: true, accessToken, deviceId }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // MODE: stream_only — use provided token to get stream URL
+    if (mode === 'stream_only') {
+      if (!channelId) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Falta channel_id' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
-    );
+      const accessToken = body.access_token;
+      const deviceId = body.device_id;
+      if (!accessToken || !deviceId) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Falta access_token o device_id' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
 
-    const loginData = await loginResp.json();
+      const channelName = CHANNEL_MAP[channelId] || channelId;
+      try {
+        const streamUrl = await getStreamUrl(channelId, accessToken, deviceId);
+        return new Response(
+          JSON.stringify({ success: true, url: streamUrl, channel: channelName }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (streamError) {
+        return new Response(
+          JSON.stringify({ success: false, error: streamError.message, token_expired: true }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
 
-    if (loginData.errorMessage) {
+    // MODE: full (default) — login + get stream URL (original behavior)
+    if (!channelId) {
       return new Response(
-        JSON.stringify({ success: false, error: `Login error: ${loginData.errorMessage}` }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: 'Falta channel_id' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const accessToken = loginData.accessToken || loginData.access_token;
-    if (!accessToken) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'No se obtuvo token de acceso' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const deviceId = crypto.randomUUID();
-    const lbUrl = `${BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?r=${RESELLER_ID}&deviceId=${deviceId}&accessToken=${encodeURIComponent(accessToken)}&doNotUseRedirect=true&countryCode=CR&deviceType=web&appType=web`;
-
-    const lbResp = await fetch(lbUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Origin': 'https://www.tdmax.com',
-        'Referer': 'https://www.tdmax.com/',
-        'Authorization': `Bearer ${accessToken}`,
-      },
-    });
-
-    if (!lbResp.ok) {
-      const errorText = await lbResp.text();
-      return new Response(
-        JSON.stringify({ success: false, error: `Error obteniendo stream: ${lbResp.status}`, details: errorText.substring(0, 200) }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const lbData = await lbResp.json();
-    const streamUrl = lbData.url;
-
-    if (!streamUrl) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'No se encontró URL de stream' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    const channelName = CHANNEL_MAP[channelId] || channelId;
+    const { accessToken, deviceId } = await loginAndGetToken(email, password);
+    const streamUrl = await getStreamUrl(channelId, accessToken, deviceId);
 
     return new Response(
-      JSON.stringify({ success: true, url: streamUrl, channel: channelName }),
+      JSON.stringify({ success: true, url: streamUrl, channel: channelName, accessToken, deviceId }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {

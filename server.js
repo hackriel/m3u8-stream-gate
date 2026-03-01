@@ -148,6 +148,136 @@ const recoveryAttempts = new Map(); // Map<processId, number>
 // Cache de resolución por canal para evitar re-sondear en cada recovery
 const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, height }>
 
+// ==================== TOKEN POOL ====================
+// Pool de tokens pre-generados para recovery instantáneo
+// Cada token = { accessToken, deviceId, createdAt }
+const tokenPool = {
+  backup: null,       // Token de respaldo listo para usar
+  refreshing: false,  // Si estamos generando un nuevo backup
+};
+
+// Genera un nuevo token via edge function (mode: token_only)
+const generateToken = async () => {
+  try {
+    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ mode: 'token_only' }),
+    });
+    const data = await resp.json();
+    if (data.success && data.accessToken) {
+      return { accessToken: data.accessToken, deviceId: data.deviceId, createdAt: Date.now() };
+    }
+    console.error('❌ Token pool: fallo generando token:', data.error);
+    return null;
+  } catch (err) {
+    console.error('❌ Token pool: error de red generando token:', err.message);
+    return null;
+  }
+};
+
+// Repone el token de backup en background
+const replenishBackupToken = async () => {
+  if (tokenPool.refreshing) return;
+  tokenPool.refreshing = true;
+  try {
+    const newToken = await generateToken();
+    if (newToken) {
+      tokenPool.backup = newToken;
+      sendLog('system', 'info', `🔑 Token pool: backup repuesto (deviceId: ${newToken.deviceId.substring(0, 8)}...)`);
+    }
+  } finally {
+    tokenPool.refreshing = false;
+  }
+};
+
+// Obtiene stream URL usando un token del pool (instantáneo) o fallback a scraping completo
+const getStreamWithPool = async (channelId, channelName) => {
+  // Intentar con token de backup si existe y tiene menos de 30 minutos
+  if (tokenPool.backup) {
+    const tokenAge = Date.now() - tokenPool.backup.createdAt;
+    const MAX_TOKEN_AGE = 30 * 60 * 1000; // 30 minutos
+    
+    if (tokenAge < MAX_TOKEN_AGE) {
+      sendLog('system', 'info', `🔑 Token pool: usando backup para ${channelName} (edad: ${Math.floor(tokenAge / 1000)}s)`);
+      const { accessToken, deviceId } = tokenPool.backup;
+      tokenPool.backup = null; // Consumir el backup
+      
+      // Reponer en background
+      replenishBackupToken();
+      
+      try {
+        const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'apikey': SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ mode: 'stream_only', channel_id: channelId, access_token: accessToken, device_id: deviceId }),
+        });
+        const data = await resp.json();
+        if (data.success && data.url) {
+          sendLog('system', 'success', `✅ Token pool: stream obtenido instantáneamente para ${channelName}`);
+          return { url: data.url, fromPool: true };
+        }
+        // Token expirado o inválido
+        sendLog('system', 'warn', `⚠️ Token pool: backup falló (${data.error}), cayendo a scraping completo`);
+      } catch (err) {
+        sendLog('system', 'warn', `⚠️ Token pool: error usando backup (${err.message}), cayendo a scraping completo`);
+      }
+    } else {
+      sendLog('system', 'warn', `⚠️ Token pool: backup expirado (${Math.floor(tokenAge / 60000)}min), descartando`);
+      tokenPool.backup = null;
+    }
+  }
+  
+  // Fallback: scraping completo (login + stream) como antes
+  sendLog('system', 'info', `🔄 Token pool: sin backup disponible, haciendo scraping completo para ${channelName}`);
+  const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'apikey': SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify({ mode: 'full', channel_id: channelId }),
+  });
+  const data = await resp.json();
+  
+  if (data.success && data.url) {
+    // El modo full también devuelve token, guardarlo como backup
+    if (data.accessToken && !tokenPool.backup) {
+      // No usar este mismo token como backup (ya se usó para el stream)
+      // Generar uno nuevo en background
+      replenishBackupToken();
+    }
+    return { url: data.url, fromPool: false };
+  }
+  
+  return { url: null, error: data.error, fromPool: false };
+};
+
+// Inicializar pool al arrancar el servidor (después de un delay para dar tiempo a que todo cargue)
+setTimeout(async () => {
+  if (SUPABASE_FUNCTIONS_URL && SUPABASE_ANON_KEY) {
+    sendLog('system', 'info', '🔑 Token pool: generando token de backup inicial...');
+    await replenishBackupToken();
+  }
+}, 5000);
+
+// Renovar backup cada 20 minutos si no se ha usado
+setInterval(async () => {
+  if (!tokenPool.backup || (Date.now() - tokenPool.backup.createdAt) > 20 * 60 * 1000) {
+    sendLog('system', 'info', '🔑 Token pool: renovación periódica del backup...');
+    await replenishBackupToken();
+  }
+}, 20 * 60 * 1000);
+// ==================== FIN TOKEN POOL ====================
 
 
 
@@ -194,39 +324,30 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
     sendLog(process_id, 'warn', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Usando URL oficial de respaldo...`);
     newUrl = fallbackUrl;
   } else {
-    // Primer intento: intentar scraping normal
-    sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Obteniendo nueva URL...`);
+    // Primer intento: usar token pool para recovery instantáneo
+    sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Obteniendo nueva URL via pool...`);
     
     try {
-      const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'apikey': SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ channel_id: channelId }),
-      });
+      const poolResult = await getStreamWithPool(channelId, channelName);
       
-      const data = await resp.json();
-      
-      if (data.success && data.url) {
-        newUrl = data.url;
-        sendLog(process_id, 'success', `✅ URL scrapeada correctamente para ${channelName}`);
+      if (poolResult.url) {
+        newUrl = poolResult.url;
+        const source = poolResult.fromPool ? '🔑 POOL (instantáneo)' : '🔄 scraping completo';
+        sendLog(process_id, 'success', `✅ URL obtenida via ${source} para ${channelName}`);
       } else if (fallbackUrl) {
-        sendLog(process_id, 'warn', `⚠️ Scraping falló (${data.error || 'sin URL'}), usando URL oficial de respaldo para ${channelName}`);
+        sendLog(process_id, 'warn', `⚠️ Pool+scraping falló (${poolResult.error || 'sin URL'}), usando URL oficial de respaldo para ${channelName}`);
         newUrl = fallbackUrl;
       } else {
-        sendLog(process_id, 'error', `❌ AUTO-RECOVERY falló: ${data.error || 'No se obtuvo URL'}`);
+        sendLog(process_id, 'error', `❌ AUTO-RECOVERY falló: ${poolResult.error || 'No se obtuvo URL'}`);
         autoRecoveryInProgress.set(process_id, false);
         return;
       }
     } catch (scrapeError) {
       if (fallbackUrl) {
-        sendLog(process_id, 'warn', `⚠️ Error en scraping (${scrapeError.message}), usando URL oficial de respaldo`);
+        sendLog(process_id, 'warn', `⚠️ Error en pool+scraping (${scrapeError.message}), usando URL oficial de respaldo`);
         newUrl = fallbackUrl;
       } else {
-        sendLog(process_id, 'error', `❌ AUTO-RECOVERY error scraping: ${scrapeError.message}`);
+        sendLog(process_id, 'error', `❌ AUTO-RECOVERY error: ${scrapeError.message}`);
         autoRecoveryInProgress.set(process_id, false);
         return;
       }
