@@ -418,7 +418,8 @@ const detectSourceInfo = async (source) => {
 // Endpoint para iniciar emisión
 app.post('/api/emit', async (req, res) => {
   try {
-    const { source_m3u8, target_rtmp, process_id = '0' } = req.body;
+    const { source_m3u8, target_rtmp, process_id: rawProcessId = '0' } = req.body;
+    const process_id = String(rawProcessId);
 
     // Resetear contador de recovery al iniciar emisión manualmente
     recoveryAttempts.set(process_id, 0);
@@ -773,9 +774,16 @@ app.post('/api/emit', async (req, res) => {
         '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
       };
       
-      if (manualStopProcesses.has(process_id)) {
+      const isManualStop =
+        manualStopProcesses.has(process_id) ||
+        manualStopProcesses.has(String(process_id)) ||
+        manualStopProcesses.has(Number(process_id));
+
+      if (isManualStop) {
         sendLog(process_id, 'info', '🛑 Parada manual detectada - Auto-recovery desactivado');
         manualStopProcesses.delete(process_id);
+        manualStopProcesses.delete(String(process_id));
+        manualStopProcesses.delete(Number(process_id));
       } else if (code !== null) {
         // Auto-recovery para CUALQUIER código de salida (incluyendo 0)
         // FFmpeg puede salir con código 0 cuando la fuente M3U8 expira limpiamente (EOF)
@@ -790,11 +798,12 @@ app.post('/api/emit', async (req, res) => {
           setTimeout(() => {
             autoRecoverChannel(process_id, channelId, channelName);
           }, 500);
-        } else if (process_id === '8' || process_id === 8 || process_id === '9' || process_id === 9) {
+        } else if (String(process_id) === '8' || String(process_id) === '9') {
           // Proceso 8 (Evento) y 9 (Demo TIGO): extraer channelId del source_url guardado en DB
-          const procId = parseInt(process_id);
-          const procName = procId === 8 ? 'Evento' : 'Demo TIGO';
-          sendLog(process_id, 'warn', `🔄 ${procName} caído (código ${code}) - Iniciando auto-recovery dinámico...`);
+          const processKey = String(process_id);
+          const procId = parseInt(processKey, 10);
+          const procName = processKey === '8' ? 'Evento' : 'Demo TIGO';
+          sendLog(processKey, 'warn', `🔄 ${procName} caído (código ${code}) - Iniciando auto-recovery dinámico...`);
           setTimeout(async () => {
             try {
               const { data: procData } = await supabase
@@ -806,16 +815,16 @@ app.post('/api/emit', async (req, res) => {
               if (procData && procData.source_url) {
                 const idMatch = procData.source_url.match(/id=([a-f0-9]+)/i);
                 if (idMatch) {
-                  sendLog(procId, 'info', `🔄 AUTO-RECOVERY ${procName}: channelId extraído = ${idMatch[1]}`);
-                  await autoRecoverChannel(procId, idMatch[1], procName);
+                  sendLog(processKey, 'info', `🔄 AUTO-RECOVERY ${procName}: channelId extraído = ${idMatch[1]}`);
+                  await autoRecoverChannel(processKey, idMatch[1], procName);
                 } else {
-                  sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procName}: No se pudo extraer channelId del source_url`);
+                  sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName}: No se pudo extraer channelId del source_url`);
                 }
               } else {
-                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procName}: No hay source_url guardado`);
+                sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName}: No hay source_url guardado`);
               }
             } catch (err) {
-              sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procName} error: ${err.message}`);
+              sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName} error: ${err.message}`);
             }
           }, 500);
         } else if (process_id === '0' || process_id === 0) {
@@ -1237,13 +1246,15 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
 // Endpoint para detener emisión
 app.post('/api/emit/stop', async (req, res) => {
   try {
-    const { process_id = '0' } = req.body;
+    const { process_id: rawProcessId = '0' } = req.body;
+    const process_id = String(rawProcessId);
     sendLog(process_id, 'info', `Solicitada detención de emisión`);
     
-    const processData = ffmpegProcesses.get(process_id);
+    const processData = ffmpegProcesses.get(process_id) ?? ffmpegProcesses.get(Number(process_id));
     if (processData && processData.process && !processData.process.killed) {
-    emissionStatuses.set(process_id, 'stopping');
+      emissionStatuses.set(process_id, 'stopping');
       manualStopProcesses.add(process_id); // Marcar como parada manual para evitar auto-recovery
+      manualStopProcesses.add(Number(process_id));
       
       // Actualizar base de datos antes de detener (solo si Supabase está disponible)
       if (supabase) {
@@ -1321,7 +1332,8 @@ app.post('/api/emit/stop', async (req, res) => {
 // Mata FFmpeg, espera que muera, y dispara auto-recovery como si fuera una caída
 app.post('/api/emit/drop-signal', async (req, res) => {
   try {
-    const { process_id } = req.body;
+    const { process_id: rawProcessId } = req.body;
+    const process_id = String(rawProcessId ?? '');
     
     if (!process_id) {
       return res.status(400).json({ success: false, error: 'Falta process_id' });
@@ -1345,7 +1357,7 @@ app.post('/api/emit/drop-signal', async (req, res) => {
     sendLog(process_id, 'warn', `📡 BOTAR SEÑAL: Forzando caída de ${processName}...`);
     
     // Matar proceso existente y esperar que muera completamente
-    const processData = ffmpegProcesses.get(process_id);
+    const processData = ffmpegProcesses.get(process_id) ?? ffmpegProcesses.get(Number(process_id));
     if (processData && processData.process && !processData.process.killed) {
       sendLog(process_id, 'info', '🔪 Terminando proceso FFmpeg actual...');
       processData.process.kill('SIGTERM');
