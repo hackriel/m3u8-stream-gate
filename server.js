@@ -454,6 +454,9 @@ const checkRTMPConflict = (target_rtmp, current_process_id) => {
   return null;
 };
 
+// Mapa para debounce de kills por error de fuente (evitar múltiples kills)
+const sourceErrorKillTimers = new Map();
+
 // Función mejorada para detectar y categorizar problemas
 const detectAndCategorizeError = (output, processId) => {
   // Detectar errores de fuente M3U8
@@ -471,6 +474,23 @@ const detectAndCategorizeError = (output, processId) => {
                    'URL Fuente M3U8 no accesible';
     sendLog(processId, 'error', `ERROR DE FUENTE: ${reason}`);
     sendFailureNotification(processId, 'source', reason);
+    
+    // MEJORA: Matar FFmpeg inmediatamente en error fatal de fuente para disparar recovery
+    // Usar debounce para no matar múltiples veces si llegan varios errores seguidos
+    if (!sourceErrorKillTimers.has(String(processId))) {
+      sourceErrorKillTimers.set(String(processId), setTimeout(() => {
+        sourceErrorKillTimers.delete(String(processId));
+        const proc = ffmpegProcesses.get(processId) || ffmpegProcesses.get(String(processId));
+        if (proc && proc.process) {
+          sendLog(processId, 'warn', `⚡ Matando FFmpeg por error fatal de fuente → recovery automático`);
+          try { proc.process.kill('SIGTERM'); } catch(e) {}
+          setTimeout(() => {
+            try { proc.process.kill('SIGKILL'); } catch(e) {}
+          }, 2000);
+        }
+      }, 1500)); // Esperar 1.5s para confirmar que es persistente, no transitorio
+    }
+    
     return true;
   }
   
