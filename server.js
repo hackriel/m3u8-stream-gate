@@ -653,9 +653,10 @@ app.post('/api/emit', async (req, res) => {
     let ffmpegArgs;
     
     // Si es un recovery (hay caché) usar parámetros más agresivos para arrancar más rápido
+    // FUTV y otros streams de TDMax tienen tokens de ~1 min, necesitamos arrancar RÁPIDO
     const isRecovery = !!resolutionCache.get(process_id);
-    const analyzeDuration = isRecovery ? '3000000' : '5000000';
-    const probeSize      = isRecovery ? '1000000' : '2000000';
+    const analyzeDuration = isRecovery ? '1500000' : '3000000';  // 1.5s / 3s
+    const probeSize      = isRecovery ? '500000'  : '1000000';   // 500KB / 1MB
     resolutionCache.set(process_id, { recovery: true });
 
     // Detectar el dominio de la fuente para usar el Referer correcto
@@ -693,6 +694,7 @@ app.post('/api/emit', async (req, res) => {
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
         '-i', source_m3u8,
+        '-map', '0:v:0?', '-map', '0:a:0?',
       ];
       
       if (bitrateKbps > 0 && bitrateKbps <= 5000) {
@@ -757,6 +759,7 @@ app.post('/api/emit', async (req, res) => {
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
         '-i', source_m3u8,
+        '-map', '0:v:0?', '-map', '0:a:0?',
         '-c:v', 'libx264',
         '-preset', 'veryfast',
         '-profile:v', 'baseline',
