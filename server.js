@@ -411,13 +411,22 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       sendLog(process_id, 'success', '✅ AUTO-RECOVERY completado: Emisión reiniciada correctamente');
       // Incrementar contador de recovery en la base de datos
       if (supabase) {
-        await supabase.rpc('increment_recovery_count', { process_id: parseInt(process_id) }).catch(err => {
-          // Fallback: update directamente si la función no existe
-          supabase
-            .from('emission_processes')
-            .update({ recovery_count: (recoveryAttempts.get(process_id) || 1) })
-            .eq('id', parseInt(process_id))
-            .then(() => {});
+        await supabase.rpc('increment_recovery_count', { process_id: parseInt(process_id) }).catch(async (err) => {
+          // Fallback: leer valor actual y sumar 1 si la función RPC no existe
+          try {
+            const { data: currentRow } = await supabase
+              .from('emission_processes')
+              .select('recovery_count')
+              .eq('id', parseInt(process_id))
+              .single();
+            const currentCount = currentRow?.recovery_count || 0;
+            await supabase
+              .from('emission_processes')
+              .update({ recovery_count: currentCount + 1 })
+              .eq('id', parseInt(process_id));
+          } catch (fallbackErr) {
+            console.error('Error en fallback de recovery_count:', fallbackErr.message);
+          }
         });
       }
       // Si fue exitoso con URL oficial, resetear intentos
@@ -958,6 +967,12 @@ app.post('/api/emit', async (req, res) => {
                 
                 if (emitResp.ok) {
                   sendLog(process_id, 'success', `✅ RETRY RÁPIDO: Reiniciado con misma URL exitosamente`);
+                  // Incrementar recovery_count en DB para contabilizar este retry
+                  if (supabase) {
+                    supabase.rpc('increment_recovery_count', { process_id: parseInt(process_id) }).catch(err => {
+                      console.error('Error incrementando recovery_count en retry rápido:', err.message);
+                    });
+                  }
                   // Monitorear: si cae de nuevo rápido (<15s), la próxima vez va directo a recovery
                 } else {
                   sendLog(process_id, 'warn', `⚠️ RETRY RÁPIDO falló, iniciando recovery completo...`);
