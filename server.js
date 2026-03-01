@@ -196,12 +196,14 @@ const replenishBackupToken = async () => {
 };
 
 // Obtiene stream URL usando un token del pool (instantáneo) o fallback a scraping completo
-const getStreamWithPool = async (channelId, channelName) => {
-  // Intentar con token de backup si existe y tiene menos de 30 minutos
-  if (tokenPool.backup) {
+const getStreamWithPool = async (channelId, channelName, options = {}) => {
+  const { skipPool = false } = options;
+
+  // Intentar con token de backup si existe y es MUY reciente (estos streams vencen rápido)
+  if (!skipPool && tokenPool.backup) {
     const tokenAge = Date.now() - tokenPool.backup.createdAt;
-    const MAX_TOKEN_AGE = 30 * 60 * 1000; // 30 minutos
-    
+    const MAX_TOKEN_AGE = 45 * 1000; // 45 segundos
+
     if (tokenAge < MAX_TOKEN_AGE) {
       sendLog('system', 'info', `🔑 Token pool: usando backup para ${channelName} (edad: ${Math.floor(tokenAge / 1000)}s)`);
       const { accessToken, deviceId } = tokenPool.backup;
@@ -231,11 +233,14 @@ const getStreamWithPool = async (channelId, channelName) => {
         sendLog('system', 'warn', `⚠️ Token pool: error usando backup (${err.message}), cayendo a scraping completo`);
       }
     } else {
-      sendLog('system', 'warn', `⚠️ Token pool: backup expirado (${Math.floor(tokenAge / 60000)}min), descartando`);
+      sendLog('system', 'warn', `⚠️ Token pool: backup expirado (${Math.floor(tokenAge / 1000)}s), descartando`);
       tokenPool.backup = null;
     }
   }
-  
+  if (skipPool) {
+    sendLog('system', 'info', `⏭️ Token pool: omitido para ${channelName}, usando scraping completo`);
+  }
+
   // Fallback: scraping completo (login + stream) como antes
   sendLog('system', 'info', `🔄 Token pool: sin backup disponible, haciendo scraping completo para ${channelName}`);
   const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
@@ -270,13 +275,13 @@ setTimeout(async () => {
   }
 }, 5000);
 
-// Renovar backup cada 20 minutos si no se ha usado
+// Renovar backup frecuentemente porque los tokens de estas fuentes expiran rápido (~1 min)
 setInterval(async () => {
-  if (!tokenPool.backup || (Date.now() - tokenPool.backup.createdAt) > 20 * 60 * 1000) {
+  if (!tokenPool.backup || (Date.now() - tokenPool.backup.createdAt) > 35 * 1000) {
     sendLog('system', 'info', '🔑 Token pool: renovación periódica del backup...');
     await replenishBackupToken();
   }
-}, 20 * 60 * 1000);
+}, 30 * 1000);
 // ==================== FIN TOKEN POOL ====================
 
 
@@ -324,11 +329,11 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
     sendLog(process_id, 'warn', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Usando URL oficial de respaldo...`);
     newUrl = fallbackUrl;
   } else {
-    // Primer intento: usar token pool para recovery instantáneo
-    sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Obteniendo nueva URL via pool...`);
+    // Primer intento: token pool. Si ya falló una vez, forzar scraping completo.
+    sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Obteniendo nueva URL...`);
     
     try {
-      const poolResult = await getStreamWithPool(channelId, channelName);
+      const poolResult = await getStreamWithPool(channelId, channelName, { skipPool: attempts > 1 });
       
       if (poolResult.url) {
         newUrl = poolResult.url;
@@ -400,7 +405,8 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       body: JSON.stringify({
         source_m3u8: newUrl,
         target_rtmp: targetRtmp,
-        process_id: process_id
+        process_id: process_id,
+        is_recovery: true
       })
     });
     
@@ -455,9 +461,6 @@ const checkRTMPConflict = (target_rtmp, current_process_id) => {
   return null;
 };
 
-// Mapa para debounce de kills por error de fuente (evitar múltiples kills)
-const sourceErrorKillTimers = new Map();
-
 // Función mejorada para detectar y categorizar problemas
 const detectAndCategorizeError = (output, processId) => {
   // Detectar errores de fuente M3U8
@@ -476,22 +479,9 @@ const detectAndCategorizeError = (output, processId) => {
     sendLog(processId, 'error', `ERROR DE FUENTE: ${reason}`);
     sendFailureNotification(processId, 'source', reason);
     
-    // MEJORA: Matar FFmpeg inmediatamente en error fatal de fuente para disparar recovery
-    // Usar debounce para no matar múltiples veces si llegan varios errores seguidos
-    if (!sourceErrorKillTimers.has(String(processId))) {
-      sourceErrorKillTimers.set(String(processId), setTimeout(() => {
-        sourceErrorKillTimers.delete(String(processId));
-        const proc = ffmpegProcesses.get(processId) || ffmpegProcesses.get(String(processId));
-        if (proc && proc.process) {
-          sendLog(processId, 'warn', `⚡ Matando FFmpeg por error fatal de fuente → recovery automático`);
-          try { proc.process.kill('SIGTERM'); } catch(e) {}
-          setTimeout(() => {
-            try { proc.process.kill('SIGKILL'); } catch(e) {}
-          }, 2000);
-        }
-      }, 1500)); // Esperar 1.5s para confirmar que es persistente, no transitorio
-    }
-    
+    // No matamos el proceso aquí para evitar carreras con reinicios nuevos.
+    // Dejamos que FFmpeg cierre naturalmente y el handler "close" dispare el recovery.
+
     return true;
   }
   
@@ -569,11 +559,13 @@ const detectSourceInfo = async (source) => {
 // Endpoint para iniciar emisión
 app.post('/api/emit', async (req, res) => {
   try {
-    const { source_m3u8, target_rtmp, process_id: rawProcessId = '0' } = req.body;
+    const { source_m3u8, target_rtmp, process_id: rawProcessId = '0', is_recovery = false } = req.body;
     const process_id = String(rawProcessId);
 
-    // Resetear contador de recovery al iniciar emisión manualmente
-    recoveryAttempts.set(process_id, 0);
+    // Resetear contador SOLO cuando es inicio manual
+    if (!is_recovery) {
+      recoveryAttempts.set(process_id, 0);
+    }
     
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
 
@@ -982,7 +974,8 @@ app.post('/api/emit', async (req, res) => {
                   body: JSON.stringify({
                     source_m3u8: procData.m3u8,
                     target_rtmp: procData.rtmp,
-                    process_id: process_id
+                    process_id: process_id,
+                    is_recovery: true
                   })
                 });
                 
@@ -1101,7 +1094,8 @@ app.post('/api/emit', async (req, res) => {
                   body: JSON.stringify({
                     source_m3u8: procData.m3u8,
                     target_rtmp: procData.rtmp,
-                    process_id: '0'
+                    process_id: '0',
+                    is_recovery: true
                   })
                 });
                 
