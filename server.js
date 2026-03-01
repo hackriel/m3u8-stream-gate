@@ -655,10 +655,12 @@ app.post('/api/emit', async (req, res) => {
       const inputArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-        '-timeout', '10000000',
+        '-timeout', '8000000',
+        '-rw_timeout', '8000000',
         '-reconnect', '1',
+        '-reconnect_at_eof', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
+        '-reconnect_delay_max', '2',
         '-reconnect_on_network_error', '1',
         '-reconnect_on_http_error', '4xx,5xx',
         '-multiple_requests', '1',
@@ -717,10 +719,12 @@ app.post('/api/emit', async (req, res) => {
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-        '-timeout', '10000000',
+        '-timeout', '8000000',
+        '-rw_timeout', '8000000',
         '-reconnect', '1',
+        '-reconnect_at_eof', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
+        '-reconnect_delay_max', '2',
         '-reconnect_on_network_error', '1',
         '-reconnect_on_http_error', '4xx,5xx',
         '-multiple_requests', '1',
@@ -907,15 +911,94 @@ app.post('/api/emit', async (req, res) => {
         manualStopProcesses.delete(Number(process_id));
       } else if (code !== null) {
         // Auto-recovery para CUALQUIER código de salida (incluyendo 0)
-        // FFmpeg puede salir con código 0 cuando la fuente M3U8 expira limpiamente (EOF)
-        // y eso también requiere recuperación automática
         const isCleanExit = code === 0;
         if (isCleanExit) {
           sendLog(process_id, 'warn', `⚠️ FFmpeg salió con código 0 (fuente expirada o EOF) - Intentando auto-recovery...`);
         }
-        if (autoRecoveryMap[process_id]) {
+        
+        // MEJORA #2: Retry con misma URL antes de recovery completo
+        // Para canales scrapeados (1-6, 8, 9), intentar primero con la misma URL
+        // ya que muchas caídas son micro-cortes del CDN donde la URL sigue válida
+        const shouldRetryFirst = autoRecoveryMap[process_id] || String(process_id) === '8' || String(process_id) === '9';
+        
+        if (shouldRetryFirst && runtime > 10000) {
+          // Solo retry si el proceso corrió más de 10s (evitar loops en URLs inválidas)
+          sendLog(process_id, 'info', `🔁 RETRY RÁPIDO: Intentando reiniciar con misma URL antes de recovery completo...`);
+          
+          setTimeout(async () => {
+            try {
+              if (!supabase) {
+                sendLog(process_id, 'error', '❌ RETRY: Base de datos no disponible, saltando a recovery completo');
+                // Ir directo a recovery completo
+                if (autoRecoveryMap[process_id]) {
+                  const { channelId, channelName } = autoRecoveryMap[process_id];
+                  autoRecoverChannel(process_id, channelId, channelName);
+                }
+                return;
+              }
+              
+              const { data: procData } = await supabase
+                .from('emission_processes')
+                .select('m3u8, rtmp')
+                .eq('id', parseInt(process_id))
+                .single();
+              
+              if (procData && procData.m3u8 && procData.rtmp) {
+                // Reiniciar con misma URL
+                const emitUrl = `http://localhost:${PORT}/api/emit`;
+                const emitResp = await fetch(emitUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    source_m3u8: procData.m3u8,
+                    target_rtmp: procData.rtmp,
+                    process_id: process_id
+                  })
+                });
+                
+                if (emitResp.ok) {
+                  sendLog(process_id, 'success', `✅ RETRY RÁPIDO: Reiniciado con misma URL exitosamente`);
+                  // Monitorear: si cae de nuevo rápido (<15s), la próxima vez va directo a recovery
+                } else {
+                  sendLog(process_id, 'warn', `⚠️ RETRY RÁPIDO falló, iniciando recovery completo...`);
+                  if (autoRecoveryMap[process_id]) {
+                    const { channelId, channelName } = autoRecoveryMap[process_id];
+                    await autoRecoverChannel(process_id, channelId, channelName);
+                  } else if (String(process_id) === '8' || String(process_id) === '9') {
+                    // Evento/Demo TIGO: recovery dinámico
+                    const processKey = String(process_id);
+                    const procId = parseInt(processKey, 10);
+                    const procName = processKey === '8' ? 'Evento' : 'Demo TIGO';
+                    const { data: srcData } = await supabase.from('emission_processes').select('source_url').eq('id', procId).single();
+                    if (srcData?.source_url) {
+                      const idMatch = srcData.source_url.match(/id=([a-f0-9]+)/i);
+                      if (idMatch) await autoRecoverChannel(processKey, idMatch[1], procName);
+                    }
+                  }
+                }
+              } else {
+                sendLog(process_id, 'warn', `⚠️ RETRY: No hay URL guardada, saltando a recovery completo`);
+                if (autoRecoveryMap[process_id]) {
+                  const { channelId, channelName } = autoRecoveryMap[process_id];
+                  await autoRecoverChannel(process_id, channelId, channelName);
+                }
+              }
+            } catch (retryErr) {
+              sendLog(process_id, 'error', `❌ RETRY error: ${retryErr.message}, iniciando recovery completo...`);
+              if (autoRecoveryMap[process_id]) {
+                const { channelId, channelName } = autoRecoveryMap[process_id];
+                await autoRecoverChannel(process_id, channelId, channelName);
+              }
+            }
+          }, 500);
+        } else if (autoRecoveryMap[process_id]) {
+          // Recovery completo directo (proceso corrió <10s = URL probablemente inválida)
           const { channelId, channelName } = autoRecoveryMap[process_id];
-          sendLog(process_id, 'warn', `🔄 ${channelName} caído (código ${code}) - Iniciando auto-recovery en 500ms...`);
+          if (runtime <= 10000) {
+            sendLog(process_id, 'warn', `🔄 ${channelName} caído rápido (${Math.floor(runtime/1000)}s) - URL inválida, recovery completo directo...`);
+          } else {
+            sendLog(process_id, 'warn', `🔄 ${channelName} caído (código ${code}) - Iniciando recovery completo...`);
+          }
           setTimeout(() => {
             autoRecoverChannel(process_id, channelId, channelName);
           }, 500);
