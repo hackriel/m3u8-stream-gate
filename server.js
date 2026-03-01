@@ -411,9 +411,10 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       sendLog(process_id, 'success', '✅ AUTO-RECOVERY completado: Emisión reiniciada correctamente');
       // Incrementar contador de recovery en la base de datos
       if (supabase) {
-        await supabase.rpc('increment_recovery_count', { process_id: parseInt(process_id) }).catch(async (err) => {
-          // Fallback: leer valor actual y sumar 1 si la función RPC no existe
-          try {
+        try {
+          const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: parseInt(process_id) });
+          if (rpcErr) {
+            // Fallback: leer valor actual y sumar 1 si la función RPC falla
             const { data: currentRow } = await supabase
               .from('emission_processes')
               .select('recovery_count')
@@ -424,10 +425,10 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
               .from('emission_processes')
               .update({ recovery_count: currentCount + 1 })
               .eq('id', parseInt(process_id));
-          } catch (fallbackErr) {
-            console.error('Error en fallback de recovery_count:', fallbackErr.message);
           }
-        });
+        } catch (fallbackErr) {
+          console.error('Error incrementando recovery_count:', fallbackErr.message);
+        }
       }
       // Si fue exitoso con URL oficial, resetear intentos
       if (newUrl === fallbackUrl) {
@@ -989,9 +990,14 @@ app.post('/api/emit', async (req, res) => {
                   sendLog(process_id, 'success', `✅ RETRY RÁPIDO: Reiniciado con misma URL exitosamente`);
                   // Incrementar recovery_count en DB para contabilizar este retry
                   if (supabase) {
-                    supabase.rpc('increment_recovery_count', { process_id: parseInt(process_id) }).catch(err => {
-                      console.error('Error incrementando recovery_count en retry rápido:', err.message);
-                    });
+                    const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: parseInt(process_id) });
+                    if (rpcErr) {
+                      console.error('Error incrementando recovery_count en retry rápido:', rpcErr.message);
+                      // Fallback directo
+                      const { data: row } = await supabase.from('emission_processes').select('recovery_count').eq('id', parseInt(process_id)).single();
+                      await supabase.from('emission_processes').update({ recovery_count: (row?.recovery_count || 0) + 1 }).eq('id', parseInt(process_id));
+                    }
+                  }
                   }
                   // Monitorear: si cae de nuevo rápido (<15s), la próxima vez va directo a recovery
                 } else {
@@ -1104,7 +1110,11 @@ app.post('/api/emit', async (req, res) => {
                   sendLog(0, 'success', '✅ AUTO-RECOVERY Libre completado: Emisión reiniciada');
                   // Incrementar contador de recovery
                   if (supabase) {
-                    await supabase.rpc('increment_recovery_count', { process_id: 0 }).catch(() => {});
+                    const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: 0 });
+                    if (rpcErr) {
+                      const { data: row } = await supabase.from('emission_processes').select('recovery_count').eq('id', 0).single();
+                      await supabase.from('emission_processes').update({ recovery_count: (row?.recovery_count || 0) + 1 }).eq('id', 0);
+                    }
                   }
                 } else {
                   sendLog(0, 'error', `❌ AUTO-RECOVERY Libre falló: ${emitResp.status}`);
