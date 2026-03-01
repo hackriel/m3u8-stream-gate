@@ -998,7 +998,6 @@ app.post('/api/emit', async (req, res) => {
                       await supabase.from('emission_processes').update({ recovery_count: (row?.recovery_count || 0) + 1 }).eq('id', parseInt(process_id));
                     }
                   }
-                  }
                   // Monitorear: si cae de nuevo rápido (<15s), la próxima vez va directo a recovery
                 } else {
                   sendLog(process_id, 'warn', `⚠️ RETRY RÁPIDO falló, iniciando recovery completo...`);
