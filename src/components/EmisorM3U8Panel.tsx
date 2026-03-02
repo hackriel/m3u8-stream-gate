@@ -37,6 +37,7 @@ interface EmissionProcess {
   logs: LogEntry[];
   processLogsFromDB?: string;
   recoveryCount: number;
+  lastSignalDuration: number;
 }
 
 // Tipo para una entrada de log
@@ -82,6 +83,7 @@ const defaultProcess = (): EmissionProcess => ({
   lastReconnectTime: 0,
   logs: [],
   recoveryCount: 0,
+  lastSignalDuration: 0,
 });
 
 export default function EmisorM3U8Panel() {
@@ -146,6 +148,7 @@ export default function EmisorM3U8Panel() {
                 logs: [],
                 processLogsFromDB: row.process_logs || '',
                 recoveryCount: (row as any).recovery_count || 0,
+                lastSignalDuration: (row as any).last_signal_duration || 0,
               };
             } else {
               return defaultProcess();
@@ -238,6 +241,7 @@ export default function EmisorM3U8Panel() {
                   logs: prev[row.id]?.logs || [],
                   processLogsFromDB: row.process_logs || '',
                   recoveryCount: row.recovery_count || 0,
+                  lastSignalDuration: (row as any).last_signal_duration || 0,
                 };
               }
               return newProcesses;
@@ -685,7 +689,9 @@ export default function EmisorM3U8Panel() {
       emitStatus: "idle",
       emitMsg: "",
       failureReason: undefined,
-      failureDetails: undefined
+      failureDetails: undefined,
+      recoveryCount: 0,
+      lastSignalDuration: 0,
     });
     
     await supabase
@@ -694,7 +700,9 @@ export default function EmisorM3U8Panel() {
         start_time: 0,
         elapsed: 0,
         is_emitting: false,
-        emit_status: 'idle'
+        emit_status: 'idle',
+        recovery_count: 0,
+        last_signal_duration: 0,
       })
       .eq('id', processIndex);
   }
@@ -752,8 +760,19 @@ export default function EmisorM3U8Panel() {
       emitStatus: "idle",
       emitMsg: "",
       failureReason: undefined,
-      failureDetails: undefined
+      failureDetails: undefined,
+      recoveryCount: 0,
+      lastSignalDuration: 0,
     });
+    
+    // Reset recovery_count and last_signal_duration in DB
+    await supabase
+      .from('emission_processes')
+      .update({ 
+        recovery_count: 0,
+        last_signal_duration: 0,
+      })
+      .eq('id', processIndex);
     
     toast.success(`${CHANNEL_CONFIGS[processIndex].name} eliminado`);
     console.log(`🧹 ${CHANNEL_CONFIGS[processIndex].name} limpiado completamente`);
@@ -1071,6 +1090,22 @@ export default function EmisorM3U8Panel() {
                     {process.recoveryCount}
                   </span>
                 </div>
+                {process.lastSignalDuration > 0 && (
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
+                    <span className="text-sm text-muted-foreground">⏱️ Última señal duró:</span>
+                    <span className="font-mono text-sm font-semibold text-foreground">
+                      {(() => {
+                        const d = process.lastSignalDuration;
+                        const h = Math.floor(d / 3600);
+                        const m = Math.floor((d % 3600) / 60);
+                        const s = d % 60;
+                        if (h > 0) return `${h}h ${m}m ${s}s`;
+                        if (m > 0) return `${m}m ${s}s`;
+                        return `${s}s`;
+                      })()}
+                    </span>
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground mt-1">Veces que se ha reiniciado o cambiado la URL automáticamente</p>
               </div>
 
