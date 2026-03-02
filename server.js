@@ -585,8 +585,8 @@ app.post('/api/emit', async (req, res) => {
     // Si es recovery, damos un poco menos de análisis para reenganchar rápido,
     // pero suficiente para evitar fallos por parámetros incompletos de streams HLS.
     const isRecovery = Boolean(is_recovery);
-    const analyzeDuration = isRecovery ? '5000000' : '10000000';  // 5s / 10s
-    const probeSize      = isRecovery ? '2000000' : '5000000';    // 2MB / 5MB
+    const analyzeDuration = isRecovery ? '1500000' : '3000000';  // 1.5s / 3s
+    const probeSize      = isRecovery ? '500000'  : '1500000';   // 500KB / 1.5MB
 
     // Detectar cabeceras HTTP según dominio fuente para mayor compatibilidad
     let refererDomain = 'https://www.tdmax.com/';
