@@ -777,6 +777,20 @@ app.post('/api/emit', async (req, res) => {
           sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}, bitrate=${bitrateMatch ? bitrateMatch[1] + 'kbps' : 'N/A'}`);
         }
       } else if (output.includes('error') || output.includes('Error') || output.includes('failed') || output.includes('Failed')) {
+        // Filtrar ruido de FFmpeg que NO son errores reales:
+        // 1. "Conversion failed!" es el mensaje genérico de salida, ya lo captura el handler 'close'
+        // 2. Líneas de estadísticas del encoder ([libx264], [aac], [h264]) que contienen "error" casualmente
+        // 3. "Skip ('#EXT-X-VERSION')" no es un error
+        const isNoise =
+          output.includes('Conversion failed') ||
+          /\[libx264 @/.test(output) ||
+          /\[aac @/.test(output) ||
+          /\[h264 @/.test(output) ||
+          output.includes("Skip ('#EXT-X-");
+        if (isNoise) {
+          // Solo guardar en buffer para diagnóstico, no mostrar al usuario
+          return;
+        }
         // Error detectado - categorizar y notificar
         const wasHandled = detectAndCategorizeError(output, process_id);
         if (!wasHandled) {
@@ -1310,7 +1324,13 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         if (frameMatch && fpsMatch) {
           sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}`);
         }
-      } else if (output.includes('error') || output.includes('Error')) {
+      } else if (output.includes('error') || output.includes('Error') || output.includes('failed') || output.includes('Failed')) {
+        const isNoise =
+          output.includes('Conversion failed') ||
+          /\[libx264 @/.test(output) ||
+          /\[aac @/.test(output) ||
+          /\[h264 @/.test(output);
+        if (isNoise) return;
         const wasHandled = detectAndCategorizeError(output, process_id);
         if (!wasHandled) {
           sendLog(process_id, 'error', `FFmpeg error: ${output.trim()}`);
