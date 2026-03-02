@@ -746,8 +746,8 @@ app.post('/api/emit', async (req, res) => {
         ];
       }
     } else {
-      // Procesos 1-6, 8, 9 (scrapeados): 720p @ 3500kbps
-      sendLog(process_id, 'info', `Emitiendo a 720p @ 3500kbps (2800-4200k rango)${isRecovery ? ' [recovery rápido]' : ''}...`);
+      // Procesos 1-6, 8, 9 (scrapeados): 720p @ 2500kbps (equivalente a OBS NVENC P6)
+      sendLog(process_id, 'info', `Emitiendo a 720p @ 2500kbps (2200-2800k rango, profile high)${isRecovery ? ' [recovery rápido]' : ''}...`);
       
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -770,19 +770,20 @@ app.post('/api/emit', async (req, res) => {
         '-i', source_m3u8,
         '-map', '0:v:0?', '-map', '0:a:0?',
         '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-profile:v', 'baseline',
-        '-b:v', '3500k',
-        '-minrate', '2800k',
-        '-maxrate', '4200k',
-        '-bufsize', '7000k',
+        '-preset', 'medium',
+        '-profile:v', 'high',
+        '-b:v', '2500k',
+        '-minrate', '2200k',
+        '-maxrate', '2800k',
+        '-bufsize', '5000k',
+        '-bf', '2',
         '-vf', 'scale=-2:720',
         '-r', '30',
         '-g', '60',
         '-keyint_min', '60',
         '-sc_threshold', '0',
         '-c:a', 'aac',
-        '-b:a', '96k',
+        '-b:a', '128k',
         '-ac', '2',
         '-ar', '44100',
         '-max_muxing_queue_size', '1024',
