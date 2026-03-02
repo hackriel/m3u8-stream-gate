@@ -471,6 +471,15 @@ const detectAndCategorizeError = (output, processId) => {
       output.includes('End of file') ||
       output.includes('error=End of file') ||
       (output.includes('Connection refused') && output.includes('http'))) {
+    
+    // Filtrar errores de "End of file" durante los primeros 10 segundos (son normales al arrancar HLS multi-variante)
+    const isEOF = output.includes('End of file') || output.includes('error=End of file');
+    const proc = ffmpegProcesses.get(processId);
+    const elapsed = proc ? (Date.now() - proc.startTime) / 1000 : 999;
+    if (isEOF && elapsed < 10) {
+      return false; // Ignorar silenciosamente, no es un error real
+    }
+
     const reason = output.includes('404') ? 'URL Fuente M3U8 no encontrada (404)' :
                    output.includes('403') ? 'URL Fuente M3U8 prohibida (403)' :
                    output.includes('End of file') ? 'Fuente M3U8 agotada o no disponible (End of file)' :
