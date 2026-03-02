@@ -512,6 +512,8 @@ app.post('/api/emit', async (req, res) => {
       
       // Detener el proceso conflictivo
       if (conflictingProcess && conflictingProcess.process && !conflictingProcess.process.killed) {
+        manualStopProcesses.add(String(conflictingProcessId));
+        manualStopProcesses.add(Number(conflictingProcessId));
         conflictingProcess.process.kill('SIGTERM');
         ffmpegProcesses.delete(conflictingProcessId);
         emissionStatuses.set(conflictingProcessId, 'idle');
@@ -523,6 +525,8 @@ app.post('/api/emit', async (req, res) => {
     manualStopProcesses.delete(process_id); // Limpiar flag de parada manual al iniciar nueva emisión
     if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
       sendLog(process_id, 'warn', `Deteniendo proceso ffmpeg existente para reinicio`);
+      manualStopProcesses.add(String(process_id));
+      manualStopProcesses.add(Number(process_id));
       existingProcess.process.kill('SIGTERM');
       ffmpegProcesses.delete(process_id);
       
@@ -585,12 +589,17 @@ app.post('/api/emit', async (req, res) => {
     const probeSize      = isRecovery ? '500000'  : '1000000';   // 500KB / 1MB
     resolutionCache.set(process_id, { recovery: true });
 
-    // Detectar el dominio de la fuente para usar el Referer correcto
+    // Detectar cabeceras HTTP según dominio fuente para mayor compatibilidad
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
-    if (source_m3u8.includes('teletica.com') && !source_m3u8.includes('wmsAuthSign')) {
-      refererDomain = 'https://www.teletica.com/';
-      originDomain = 'https://www.teletica.com';
+    try {
+      const sourceUrl = new URL(source_m3u8);
+      if (sourceUrl.hostname.includes('teletica.com')) {
+        refererDomain = 'https://www.teletica.com/';
+        originDomain = 'https://www.teletica.com';
+      }
+    } catch (_) {
+      // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
     // Proceso 0 (Libre): lógica por bitrate — copy si ≤5000kbps, re-encode 720p si >5000kbps
@@ -604,8 +613,8 @@ app.post('/api/emit', async (req, res) => {
       const inputArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-        '-timeout', '8000000',
-        '-rw_timeout', '8000000',
+        '-timeout', '30000000',
+        '-rw_timeout', '30000000',
         '-reconnect', '1',
         '-reconnect_at_eof', '1',
         '-reconnect_streamed', '1',
@@ -669,8 +678,8 @@ app.post('/api/emit', async (req, res) => {
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-        '-timeout', '8000000',
-        '-rw_timeout', '8000000',
+        '-timeout', '30000000',
+        '-rw_timeout', '30000000',
         '-reconnect', '1',
         '-reconnect_at_eof', '1',
         '-reconnect_streamed', '1',
@@ -777,16 +786,24 @@ app.post('/api/emit', async (req, res) => {
           sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}, bitrate=${bitrateMatch ? bitrateMatch[1] + 'kbps' : 'N/A'}`);
         }
       } else if (output.includes('error') || output.includes('Error') || output.includes('failed') || output.includes('Failed')) {
+        const isStoppingNow =
+          emissionStatuses.get(process_id) === 'stopping' ||
+          manualStopProcesses.has(process_id) ||
+          manualStopProcesses.has(String(process_id)) ||
+          manualStopProcesses.has(Number(process_id));
+
         // Filtrar ruido de FFmpeg que NO son errores reales:
-        // 1. "Conversion failed!" es el mensaje genérico de salida, ya lo captura el handler 'close'
-        // 2. Líneas de estadísticas del encoder ([libx264], [aac], [h264]) que contienen "error" casualmente
-        // 3. "Skip ('#EXT-X-VERSION')" no es un error
+        // - cierre manual (SIGTERM) mientras FFmpeg todavía parsea HLS
+        // - estadísticas finales del encoder y mensaje genérico "Conversion failed"
         const isNoise =
           output.includes('Conversion failed') ||
           /\[libx264 @/.test(output) ||
           /\[aac @/.test(output) ||
           /\[h264 @/.test(output) ||
-          output.includes("Skip ('#EXT-X-");
+          output.includes("Skip ('#EXT-X-") ||
+          (isStoppingNow && output.includes('Immediate exit requested')) ||
+          (isStoppingNow && output.includes('Output file #0 does not contain any stream')) ||
+          (isStoppingNow && output.includes('received signal 15'));
         if (isNoise) {
           // Solo guardar en buffer para diagnóstico, no mostrar al usuario
           return;
@@ -811,30 +828,48 @@ app.post('/api/emit', async (req, res) => {
     ffmpegProcess.on('close', async (code) => {
       const processInfo = ffmpegProcesses.get(process_id);
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
-      
-      const finalStatus = code === 0 ? 'stopped' : 'error';
-      const logMessage = code === 0 
-        ? `FFmpeg terminó exitosamente (código: ${code}, runtime: ${Math.floor(runtime/1000)}s)`
-        : `FFmpeg terminó con error (código: ${code}, runtime: ${Math.floor(runtime/1000)}s)`;
-      
-      if (code === 0) {
+      const statusAtClose = emissionStatuses.get(process_id);
+      const isManualStop =
+        statusAtClose === 'stopping' ||
+        manualStopProcesses.has(process_id) ||
+        manualStopProcesses.has(String(process_id)) ||
+        manualStopProcesses.has(Number(process_id));
+
+      const diagnosticLines = stderrBuffer
+        .filter(l => !l.includes('frame=') && !l.includes('fps='))
+        .filter(l =>
+          !/\[libx264 @/.test(l) &&
+          !/\[aac @/.test(l) &&
+          !/\[h264 @/.test(l) &&
+          !l.includes('Conversion failed') &&
+          !l.includes('Immediate exit requested') &&
+          !l.includes('Output file #0 does not contain any stream') &&
+          !l.includes('Exiting normally, received signal 15')
+        )
+        .slice(-8);
+
+      const finalStatus = isManualStop ? 'stopped' : (code === 0 ? 'stopped' : 'error');
+      const logMessage = isManualStop
+        ? `FFmpeg detenido manualmente (runtime: ${Math.floor(runtime / 1000)}s)`
+        : code === 0
+          ? `FFmpeg terminó exitosamente (código: ${code}, runtime: ${Math.floor(runtime / 1000)}s)`
+          : `FFmpeg terminó con error (código: ${code}, runtime: ${Math.floor(runtime / 1000)}s)`;
+
+      if (isManualStop || code === 0) {
         sendLog(process_id, 'success', logMessage);
-      } else {
+      } else if (diagnosticLines.length > 0) {
         sendLog(process_id, 'error', logMessage);
-        // Mostrar las últimas líneas de stderr para diagnóstico
-        if (stderrBuffer.length > 0) {
-          const diagnosticLines = stderrBuffer.filter(l => !l.includes('frame=') && !l.includes('fps=')).slice(-8);
-          if (diagnosticLines.length > 0) {
-            sendLog(process_id, 'error', `📋 Últimas líneas de FFmpeg:\n${diagnosticLines.join('\n')}`);
-          }
-        }
+        sendLog(process_id, 'error', `📋 Últimas líneas de FFmpeg:\n${diagnosticLines.join('\n')}`);
         sendFailureNotification(process_id, 'server', `Proceso terminado con código de error ${code}`);
+      } else {
+        // Cierre sin diagnóstico útil (común en terminaciones transitorias): evitar ruido rojo
+        sendLog(process_id, 'warn', `⚠️ ${logMessage} (sin diagnóstico crítico)`);
       }
       
       // Actualizar base de datos (solo si Supabase está disponible)
       if (supabase) {
-        const diagInfo = code !== 0 && stderrBuffer.length > 0 
-          ? `\n[DIAGNÓSTICO] ${stderrBuffer.filter(l => !l.includes('frame=')).slice(-5).join(' | ')}`
+        const diagInfo = !isManualStop && code !== 0 && diagnosticLines.length > 0
+          ? `\n[DIAGNÓSTICO] ${diagnosticLines.slice(-5).join(' | ')}`
           : '';
         await supabase
           .from('emission_processes')
@@ -855,11 +890,6 @@ app.post('/api/emit', async (req, res) => {
       resolutionCache.delete(process_id); // Limpiar caché de resolución
       
       // AUTO-RECOVERY: Para canales con scraping (usa CHANNEL_MAP global)
-      
-      const isManualStop =
-        manualStopProcesses.has(process_id) ||
-        manualStopProcesses.has(String(process_id)) ||
-        manualStopProcesses.has(Number(process_id));
 
       if (isManualStop) {
         sendLog(process_id, 'info', '🛑 Parada manual detectada - Auto-recovery desactivado');
@@ -1162,6 +1192,8 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       
       // Detener el proceso conflictivo
       if (conflictingProcess && conflictingProcess.process && !conflictingProcess.process.killed) {
+        manualStopProcesses.add(String(conflictingProcessId));
+        manualStopProcesses.add(Number(conflictingProcessId));
         conflictingProcess.process.kill('SIGTERM');
         ffmpegProcesses.delete(conflictingProcessId);
         emissionStatuses.set(conflictingProcessId, 'idle');
@@ -1172,6 +1204,8 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     const existingProcess = ffmpegProcesses.get(process_id);
     if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
       sendLog(process_id, 'warn', `Deteniendo proceso ffmpeg existente para reinicio`);
+      manualStopProcesses.add(String(process_id));
+      manualStopProcesses.add(Number(process_id));
       existingProcess.process.kill('SIGTERM');
       ffmpegProcesses.delete(process_id);
       
@@ -1805,32 +1839,46 @@ const getNetworkStats = () => {
 };
 
 app.get('/api/metrics', (req, res) => {
-  const totalMem = os.totalmem();
-  const freeMem = os.freemem();
-  const usedMem = totalMem - freeMem;
-  
-  const cpuUsage = getCpuUsage();
-  const network = getNetworkStats();
-  
-  res.json({
-    timestamp: Date.now(),
-    cpu: {
-      usage: cpuUsage,
-      cores: os.cpus().length
-    },
-    memory: {
-      total: Math.round(totalMem / 1024 / 1024), // MB
-      used: Math.round(usedMem / 1024 / 1024),
-      free: Math.round(freeMem / 1024 / 1024),
-      percent: Math.round((usedMem / totalMem) * 1000) / 10
-    },
-    network: {
-      rxMbps: network.rxMbps,
-      txMbps: network.txMbps
-    },
-    uptime: os.uptime(),
-    loadAvg: os.loadavg()
-  });
+  try {
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    
+    const cpuUsage = getCpuUsage();
+    const network = getNetworkStats();
+    
+    res.json({
+      timestamp: Date.now(),
+      cpu: {
+        usage: cpuUsage,
+        cores: os.cpus().length
+      },
+      memory: {
+        total: Math.round(totalMem / 1024 / 1024), // MB
+        used: Math.round(usedMem / 1024 / 1024),
+        free: Math.round(freeMem / 1024 / 1024),
+        percent: Math.round((usedMem / totalMem) * 1000) / 10
+      },
+      network: {
+        rxMbps: network.rxMbps,
+        txMbps: network.txMbps
+      },
+      uptime: os.uptime(),
+      loadAvg: os.loadavg()
+    });
+  } catch (error) {
+    // Nunca devolver 500 al dashboard de métricas
+    res.status(200).json({
+      timestamp: Date.now(),
+      cpu: { usage: 0, cores: 0 },
+      memory: { total: 0, used: 0, free: 0, percent: 0 },
+      network: { rxMbps: 0, txMbps: 0 },
+      uptime: 0,
+      loadAvg: [0, 0, 0],
+      degraded: true,
+      reason: 'metrics_unavailable'
+    });
+  }
 });
 
 // Ruta catch-all para servir la aplicación React (debe ir después de todas las rutas API)
