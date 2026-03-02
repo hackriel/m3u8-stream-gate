@@ -883,22 +883,32 @@ app.post('/api/emit', async (req, res) => {
       }
       
       // Actualizar base de datos (solo si Supabase está disponible)
+      const runtimeSeconds = Math.floor(runtime / 1000);
       if (supabase) {
         const diagSource = diagnosticLines.length > 0 ? diagnosticLines : rawDiagnosticLines;
         const diagInfo = !isManualStop && code !== 0 && diagSource.length > 0
           ? `\n[DIAGNÓSTICO] ${diagSource.slice(-5).join(' | ')}`
           : '';
+        
+        const updateData = {
+          is_active: false,
+          is_emitting: false,
+          emit_status: finalStatus,
+          ended_at: new Date().toISOString(),
+          process_logs: `[${new Date().toISOString()}] ${logMessage}${diagInfo}\n`,
+          elapsed: runtimeSeconds,
+          start_time: 0
+        };
+        
+        // Guardar duración de la última señal antes de reiniciar (solo si no es parada manual)
+        if (!isManualStop && runtimeSeconds > 0) {
+          updateData.last_signal_duration = runtimeSeconds;
+          sendLog(process_id, 'info', `⏱️ Última señal duró: ${Math.floor(runtimeSeconds / 3600)}h ${Math.floor((runtimeSeconds % 3600) / 60)}m ${runtimeSeconds % 60}s`);
+        }
+        
         await supabase
           .from('emission_processes')
-          .update({
-            is_active: false,
-            is_emitting: false,
-            emit_status: finalStatus,
-            ended_at: new Date().toISOString(),
-            process_logs: `[${new Date().toISOString()}] ${logMessage}${diagInfo}\n`,
-            elapsed: Math.floor(runtime / 1000),
-            start_time: 0
-          })
+          .update(updateData)
           .eq('id', parseInt(process_id));
       }
       
@@ -1514,8 +1524,10 @@ app.post('/api/emit/stop', async (req, res) => {
             is_emitting: false,
             emit_status: 'stopped',
             ended_at: new Date().toISOString(),
-            start_time: 0, // Resetear start_time cuando se detiene
-            elapsed: 0, // Resetear elapsed cuando se detiene
+            start_time: 0,
+            elapsed: 0,
+            recovery_count: 0,
+            last_signal_duration: 0,
             process_logs: `[${new Date().toISOString()}] Emisión detenida manualmente\n`
           })
           .eq('id', parseInt(process_id));

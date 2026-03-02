@@ -29,6 +29,7 @@ export type Database = {
           id: number
           is_active: boolean
           is_emitting: boolean
+          last_signal_duration: number
           m3u8: string
           preview_suffix: string
           process_logs: string | null
@@ -52,6 +53,7 @@ export type Database = {
           id: number
           is_active?: boolean
           is_emitting?: boolean
+          last_signal_duration?: number
           m3u8?: string
           preview_suffix?: string
           process_logs?: string | null
@@ -75,6 +77,7 @@ export type Database = {
           id?: number
           is_active?: boolean
           is_emitting?: boolean
+          last_signal_duration?: number
           m3u8?: string
           preview_suffix?: string
           process_logs?: string | null
