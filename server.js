@@ -160,6 +160,7 @@ const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, heig
 
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
+const fillerProcesses = new Map(); // Map<processId, childProcess> - Freeze Frame Bridge
 
 // ==================== SCRAPING ON-DEMAND ====================
 // Scraping simple: login → obtener URL → listo. Sin pool ni sesiones persistentes.
@@ -193,6 +194,75 @@ const scrapeStreamUrl = async (channelId, channelName) => {
   }
 };
 // ==================== FIN SCRAPING ====================
+
+// ==================== FREEZE FRAME BRIDGE ====================
+// Mantiene el RTMP vivo con el último frame capturado mientras se recupera la señal
+const startFillerProcess = (processId, targetRtmp) => {
+  const frameFile = `/tmp/lastframe_${processId}.jpg`;
+  if (!fs.existsSync(frameFile)) {
+    sendLog(processId, 'warn', '⚠️ FREEZE FRAME: No hay frame capturado, RTMP se interrumpirá brevemente');
+    return;
+  }
+  
+  stopFillerProcess(processId);
+  
+  sendLog(processId, 'info', '🧊 FREEZE FRAME: Manteniendo RTMP vivo con último frame capturado...');
+  
+  const filler = spawn('ffmpeg', [
+    '-loop', '1',
+    '-re',
+    '-i', frameFile,
+    '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-tune', 'stillimage',
+    '-b:v', '500k',
+    '-maxrate', '500k',
+    '-bufsize', '1000k',
+    '-vf', 'scale=-2:720',
+    '-r', '15',
+    '-g', '30',
+    '-c:a', 'aac',
+    '-b:a', '128k',
+    '-ar', '44100',
+    '-t', '120',
+    '-f', 'flv',
+    '-flvflags', 'no_duration_filesize',
+    targetRtmp
+  ]);
+  
+  fillerProcesses.set(processId, filler);
+  
+  filler.stderr.on('data', () => {});
+  
+  filler.on('close', (code) => {
+    fillerProcesses.delete(processId);
+    if (code !== null && code !== 0 && code !== 255) {
+      sendLog(processId, 'warn', `🧊 Freeze Frame terminó (código ${code})`);
+    }
+  });
+  
+  filler.on('error', () => {
+    fillerProcesses.delete(processId);
+  });
+};
+
+const stopFillerProcess = (processId) => {
+  const filler = fillerProcesses.get(processId);
+  if (filler && !filler.killed) {
+    filler.kill('SIGKILL');
+    fillerProcesses.delete(processId);
+    sendLog(processId, 'info', '🧊 Freeze Frame detenido - señal real tomando control');
+  }
+};
+
+const cleanupFrameFile = (processId) => {
+  try {
+    const f = `/tmp/lastframe_${processId}.jpg`;
+    if (fs.existsSync(f)) fs.unlinkSync(f);
+  } catch (e) { /* ok */ }
+};
+// ==================== FIN FREEZE FRAME ====================
 
 
 
@@ -641,7 +711,13 @@ app.post('/api/emit', async (req, res) => {
           '-max_muxing_queue_size', '1024',
           '-f', 'flv',
           '-flvflags', 'no_duration_filesize',
-          target_rtmp
+          target_rtmp,
+          // Freeze Frame: captura último frame cada 5s
+          '-map', '0:v:0?',
+          '-vf', 'fps=1/5',
+          '-update', '1',
+          '-q:v', '5',
+          '-y', `/tmp/lastframe_${process_id}.jpg`
         ];
       } else {
         // >5000kbps o no detectado: re-encodear a 720p @ 2500kbps
@@ -667,7 +743,13 @@ app.post('/api/emit', async (req, res) => {
           '-max_muxing_queue_size', '1024',
           '-f', 'flv',
           '-flvflags', 'no_duration_filesize',
-          target_rtmp
+          target_rtmp,
+          // Freeze Frame: captura último frame cada 5s
+          '-map', '0:v:0?',
+          '-vf', 'fps=1/5',
+          '-update', '1',
+          '-q:v', '5',
+          '-y', `/tmp/lastframe_${process_id}.jpg`
         ];
       }
     } else {
@@ -713,12 +795,21 @@ app.post('/api/emit', async (req, res) => {
         '-max_muxing_queue_size', '1024',
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
-        target_rtmp
+        target_rtmp,
+        // Freeze Frame: captura último frame cada 5s
+        '-map', '0:v:0?',
+        '-vf', 'fps=1/5',
+        '-update', '1',
+        '-q:v', '5',
+        '-y', `/tmp/lastframe_${process_id}.jpg`
       ];
     }
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 100)}...`);
+
+    // Detener Freeze Frame filler si existe (la señal real toma control)
+    stopFillerProcess(process_id);
 
     // Ejecutar ffmpeg
     const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
@@ -836,6 +927,7 @@ app.post('/api/emit', async (req, res) => {
     ffmpegProcess.on('close', async (code, signal) => {
       const processInfo = ffmpegProcesses.get(process_id);
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
+      const targetRtmpForFiller = processInfo?.target_rtmp;
       const statusAtClose = emissionStatuses.get(process_id);
       const isManualStop =
         statusAtClose === 'stopping' ||
@@ -920,11 +1012,18 @@ app.post('/api/emit', async (req, res) => {
 
       if (isManualStop) {
         sendLog(process_id, 'info', '🛑 Parada manual detectada - Auto-recovery desactivado');
+        stopFillerProcess(process_id);
+        cleanupFrameFile(process_id);
         manualStopProcesses.delete(process_id);
         manualStopProcesses.delete(String(process_id));
         manualStopProcesses.delete(Number(process_id));
         quickRetryState.delete(process_id);
       } else if (code !== null) {
+        // 🧊 FREEZE FRAME BRIDGE: Mantener RTMP vivo mientras se recupera
+        if (targetRtmpForFiller) {
+          startFillerProcess(process_id, targetRtmpForFiller);
+        }
+        
         // Auto-recovery para CUALQUIER código de salida (incluyendo 0)
         const isCleanExit = code === 0;
         if (isCleanExit) {
@@ -1533,6 +1632,10 @@ app.post('/api/emit/stop', async (req, res) => {
           .eq('id', parseInt(process_id));
       }
       
+      // Detener Freeze Frame filler y limpiar
+      stopFillerProcess(process_id);
+      cleanupFrameFile(process_id);
+      
       // Guardar referencia antes de borrar del mapa
       const procRef = processData.process;
       
@@ -1923,6 +2026,8 @@ app.use((req, res, next) => {
 // Manejo de cierre limpio
 process.on('SIGINT', () => {
   sendLog('system', 'warn', 'Cerrando servidor...');
+  fillerProcesses.forEach((filler, id) => { try { filler.kill('SIGKILL'); } catch(e){} });
+  fillerProcesses.clear();
   ffmpegProcesses.forEach((processData, processId) => {
     if (processData.process && !processData.process.killed) {
       sendLog(processId, 'warn', `Deteniendo ffmpeg por cierre del servidor`);
@@ -1934,6 +2039,8 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   sendLog('system', 'warn', 'Recibida señal SIGTERM, cerrando servidor...');
+  fillerProcesses.forEach((filler, id) => { try { filler.kill('SIGKILL'); } catch(e){} });
+  fillerProcesses.clear();
   ffmpegProcesses.forEach((processData, processId) => {
     if (processData.process && !processData.process.killed) {
       sendLog(processId, 'warn', `Deteniendo ffmpeg por SIGTERM`);
