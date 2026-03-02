@@ -582,12 +582,11 @@ app.post('/api/emit', async (req, res) => {
     
     let ffmpegArgs;
     
-    // Si es un recovery (hay caché) usar parámetros más agresivos para arrancar más rápido
-    // FUTV y otros streams de TDMax tienen tokens de ~1 min, necesitamos arrancar RÁPIDO
-    const isRecovery = !!resolutionCache.get(process_id);
-    const analyzeDuration = isRecovery ? '1500000' : '3000000';  // 1.5s / 3s
-    const probeSize      = isRecovery ? '500000'  : '1000000';   // 500KB / 1MB
-    resolutionCache.set(process_id, { recovery: true });
+    // Si es recovery, damos un poco menos de análisis para reenganchar rápido,
+    // pero suficiente para evitar fallos por parámetros incompletos de streams HLS.
+    const isRecovery = Boolean(is_recovery);
+    const analyzeDuration = isRecovery ? '5000000' : '10000000';  // 5s / 10s
+    const probeSize      = isRecovery ? '2000000' : '5000000';    // 2MB / 5MB
 
     // Detectar cabeceras HTTP según dominio fuente para mayor compatibilidad
     let refererDomain = 'https://www.tdmax.com/';
@@ -624,6 +623,7 @@ app.post('/api/emit', async (req, res) => {
         '-multiple_requests', '1',
         '-http_persistent', '1',
         '-live_start_index', '-3',
+        '-re',
         '-fflags', '+genpts+discardcorrupt',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
@@ -688,6 +688,7 @@ app.post('/api/emit', async (req, res) => {
         '-multiple_requests', '1',
         '-http_persistent', '1',
         '-live_start_index', '-3',
+        '-re',
         '-fflags', '+genpts+discardcorrupt',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
@@ -708,7 +709,6 @@ app.post('/api/emit', async (req, res) => {
         '-sc_threshold', '0',
         '-c:a', 'aac',
         '-b:a', '128k',
-        '-ac', '2',
         '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-f', 'flv',
@@ -750,6 +750,10 @@ app.post('/api/emit', async (req, res) => {
         stderrBuffer.push(line.trim());
         if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
       }
+
+      // 1) Clasificar primero causas reales (aunque no contengan "error/failed")
+      const wasCategorized = detectAndCategorizeError(output, process_id);
+      if (wasCategorized) return;
       
       // Detectar diferentes tipos de mensajes
       if (output.includes('frame=') || output.includes('fps=')) {
@@ -783,7 +787,18 @@ app.post('/api/emit', async (req, res) => {
         if (frameMatch && fpsMatch) {
           sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}, bitrate=${bitrateMatch ? bitrateMatch[1] + 'kbps' : 'N/A'}`);
         }
-      } else if (output.includes('error') || output.includes('Error') || output.includes('failed') || output.includes('Failed')) {
+      } else if (
+        output.includes('not enough frames to estimate rate') ||
+        output.includes('Could not find codec parameters') ||
+        output.includes('consider increasing the value for the')
+      ) {
+        sendLog(process_id, 'warn', `FFmpeg warning: ${output.trim()}`);
+      } else if (
+        output.includes('error') || output.includes('Error') ||
+        output.includes('failed') || output.includes('Failed') ||
+        output.includes('Connection reset by peer') ||
+        output.includes('Broken pipe')
+      ) {
         const isStoppingNow =
           emissionStatuses.get(process_id) === 'stopping' ||
           manualStopProcesses.has(process_id) ||
@@ -792,9 +807,8 @@ app.post('/api/emit', async (req, res) => {
 
         // Filtrar ruido de FFmpeg que NO son errores reales:
         // - cierre manual (SIGTERM) mientras FFmpeg todavía parsea HLS
-        // - estadísticas finales del encoder y mensaje genérico "Conversion failed"
+        // - estadísticas finales del encoder
         const isNoise =
-          output.includes('Conversion failed') ||
           /\[libx264 @/.test(output) ||
           /\[aac @/.test(output) ||
           /\[h264 @/.test(output) ||
@@ -803,14 +817,10 @@ app.post('/api/emit', async (req, res) => {
           (isStoppingNow && output.includes('Output file #0 does not contain any stream')) ||
           (isStoppingNow && output.includes('received signal 15'));
         if (isNoise) {
-          // Solo guardar en buffer para diagnóstico, no mostrar al usuario
           return;
         }
-        // Error detectado - categorizar y notificar
-        const wasHandled = detectAndCategorizeError(output, process_id);
-        if (!wasHandled) {
-          sendLog(process_id, 'error', `FFmpeg error: ${output.trim()}`);
-        }
+
+        sendLog(process_id, 'error', `FFmpeg error: ${output.trim()}`);
       } else if (output.includes('warning') || output.includes('Warning')) {
         // Advertencia
         sendLog(process_id, 'warn', `FFmpeg warning: ${output.trim()}`);
@@ -823,7 +833,7 @@ app.post('/api/emit', async (req, res) => {
     });
 
     // Manejar cierre del proceso
-    ffmpegProcess.on('close', async (code) => {
+    ffmpegProcess.on('close', async (code, signal) => {
       const processInfo = ffmpegProcesses.get(process_id);
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
       const statusAtClose = emissionStatuses.get(process_id);
@@ -833,8 +843,11 @@ app.post('/api/emit', async (req, res) => {
         manualStopProcesses.has(String(process_id)) ||
         manualStopProcesses.has(Number(process_id));
 
-      const diagnosticLines = stderrBuffer
+      const rawDiagnosticLines = stderrBuffer
         .filter(l => !l.includes('frame=') && !l.includes('fps='))
+        .slice(-8);
+
+      const diagnosticLines = rawDiagnosticLines
         .filter(l =>
           !/\[libx264 @/.test(l) &&
           !/\[aac @/.test(l) &&
@@ -847,11 +860,12 @@ app.post('/api/emit', async (req, res) => {
         .slice(-8);
 
       const finalStatus = isManualStop ? 'stopped' : (code === 0 ? 'stopped' : 'error');
+      const signalInfo = signal ? `, signal: ${signal}` : '';
       const logMessage = isManualStop
-        ? `FFmpeg detenido manualmente (runtime: ${Math.floor(runtime / 1000)}s)`
+        ? `FFmpeg detenido manualmente (runtime: ${Math.floor(runtime / 1000)}s${signalInfo})`
         : code === 0
-          ? `FFmpeg terminó exitosamente (código: ${code}, runtime: ${Math.floor(runtime / 1000)}s)`
-          : `FFmpeg terminó con error (código: ${code}, runtime: ${Math.floor(runtime / 1000)}s)`;
+          ? `FFmpeg terminó exitosamente (código: ${code}, runtime: ${Math.floor(runtime / 1000)}s${signalInfo})`
+          : `FFmpeg terminó con error (código: ${code}, runtime: ${Math.floor(runtime / 1000)}s${signalInfo})`;
 
       if (isManualStop || code === 0) {
         sendLog(process_id, 'success', logMessage);
@@ -859,15 +873,20 @@ app.post('/api/emit', async (req, res) => {
         sendLog(process_id, 'error', logMessage);
         sendLog(process_id, 'error', `📋 Últimas líneas de FFmpeg:\n${diagnosticLines.join('\n')}`);
         sendFailureNotification(process_id, 'server', `Proceso terminado con código de error ${code}`);
+      } else if (rawDiagnosticLines.length > 0) {
+        // Si no hay diagnóstico "limpio", mostrar crudo para no ocultar la causa real
+        sendLog(process_id, 'error', logMessage);
+        sendLog(process_id, 'error', `📋 Diagnóstico crudo FFmpeg:\n${rawDiagnosticLines.join('\n')}`);
+        sendFailureNotification(process_id, 'server', `Proceso terminado con código de error ${code}`);
       } else {
-        // Cierre sin diagnóstico útil (común en terminaciones transitorias): evitar ruido rojo
-        sendLog(process_id, 'warn', `⚠️ ${logMessage} (sin diagnóstico crítico)`);
+        sendLog(process_id, 'error', `${logMessage} (sin salida de diagnóstico)`);
       }
       
       // Actualizar base de datos (solo si Supabase está disponible)
       if (supabase) {
-        const diagInfo = !isManualStop && code !== 0 && diagnosticLines.length > 0
-          ? `\n[DIAGNÓSTICO] ${diagnosticLines.slice(-5).join(' | ')}`
+        const diagSource = diagnosticLines.length > 0 ? diagnosticLines : rawDiagnosticLines;
+        const diagInfo = !isManualStop && code !== 0 && diagSource.length > 0
+          ? `\n[DIAGNÓSTICO] ${diagSource.slice(-5).join(' | ')}`
           : '';
         await supabase
           .from('emission_processes')
