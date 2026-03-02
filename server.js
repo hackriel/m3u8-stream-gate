@@ -136,6 +136,16 @@ const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hac
 const SUPABASE_FUNCTIONS_URL = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1`;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
 
+// Mapa de canales scrapeados (definido una sola vez, usado en recovery y drop-signal)
+const CHANNEL_MAP = {
+  '1': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV' },
+  '2': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Sports' },
+  '3': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
+  '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
+  '5': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
+  '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
+};
+
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
   '5': 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8', // Canal 6 oficial
@@ -818,18 +828,9 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
-
-
+      resolutionCache.delete(process_id); // Limpiar caché de resolución
       
-      // AUTO-RECOVERY: Para canales con scraping
-      const autoRecoveryMap = {
-        '1': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV' },
-        '2': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Sports' },
-        '3': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
-        '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
-        '5': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
-        '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
-      };
+      // AUTO-RECOVERY: Para canales con scraping (usa CHANNEL_MAP global)
       
       const isManualStop =
         manualStopProcesses.has(process_id) ||
@@ -851,7 +852,7 @@ app.post('/api/emit', async (req, res) => {
         // MEJORA #2: Retry con misma URL antes de recovery completo
         // Para canales scrapeados (1-6, 8, 9), intentar primero con la misma URL
         // ya que muchas caídas son micro-cortes del CDN donde la URL sigue válida
-        const shouldRetryFirst = autoRecoveryMap[process_id] || String(process_id) === '8' || String(process_id) === '9';
+        const shouldRetryFirst = CHANNEL_MAP[process_id] || String(process_id) === '8' || String(process_id) === '9';
         
         if (shouldRetryFirst && runtime > 10000) {
           // Solo retry si el proceso corrió más de 10s (evitar loops en URLs inválidas)
@@ -862,8 +863,8 @@ app.post('/api/emit', async (req, res) => {
               if (!supabase) {
                 sendLog(process_id, 'error', '❌ RETRY: Base de datos no disponible, saltando a recovery completo');
                 // Ir directo a recovery completo
-                if (autoRecoveryMap[process_id]) {
-                  const { channelId, channelName } = autoRecoveryMap[process_id];
+                if (CHANNEL_MAP[process_id]) {
+                  const { channelId, channelName } = CHANNEL_MAP[process_id];
                   autoRecoverChannel(process_id, channelId, channelName);
                 }
                 return;
@@ -904,8 +905,8 @@ app.post('/api/emit', async (req, res) => {
                   // Monitorear: si cae de nuevo rápido (<15s), la próxima vez va directo a recovery
                 } else {
                   sendLog(process_id, 'warn', `⚠️ RETRY RÁPIDO falló, iniciando recovery completo...`);
-                  if (autoRecoveryMap[process_id]) {
-                    const { channelId, channelName } = autoRecoveryMap[process_id];
+                  if (CHANNEL_MAP[process_id]) {
+                    const { channelId, channelName } = CHANNEL_MAP[process_id];
                     await autoRecoverChannel(process_id, channelId, channelName);
                   } else if (String(process_id) === '8' || String(process_id) === '9') {
                     // Evento/Demo TIGO: recovery dinámico
@@ -921,22 +922,22 @@ app.post('/api/emit', async (req, res) => {
                 }
               } else {
                 sendLog(process_id, 'warn', `⚠️ RETRY: No hay URL guardada, saltando a recovery completo`);
-                if (autoRecoveryMap[process_id]) {
-                  const { channelId, channelName } = autoRecoveryMap[process_id];
+                if (CHANNEL_MAP[process_id]) {
+                  const { channelId, channelName } = CHANNEL_MAP[process_id];
                   await autoRecoverChannel(process_id, channelId, channelName);
                 }
               }
             } catch (retryErr) {
               sendLog(process_id, 'error', `❌ RETRY error: ${retryErr.message}, iniciando recovery completo...`);
-              if (autoRecoveryMap[process_id]) {
-                const { channelId, channelName } = autoRecoveryMap[process_id];
+              if (CHANNEL_MAP[process_id]) {
+                const { channelId, channelName } = CHANNEL_MAP[process_id];
                 await autoRecoverChannel(process_id, channelId, channelName);
               }
             }
           }, 500);
-        } else if (autoRecoveryMap[process_id]) {
+        } else if (CHANNEL_MAP[process_id]) {
           // Recovery completo directo (proceso corrió <10s = URL probablemente inválida)
-          const { channelId, channelName } = autoRecoveryMap[process_id];
+          const { channelId, channelName } = CHANNEL_MAP[process_id];
           if (runtime <= 10000) {
             sendLog(process_id, 'warn', `🔄 ${channelName} caído rápido (${Math.floor(runtime/1000)}s) - URL inválida, recovery completo directo...`);
           } else {
@@ -1060,8 +1061,7 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
-
-
+      resolutionCache.delete(process_id);
     });
 
     // Timeout de inicio simple
@@ -1159,7 +1159,12 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     
     // Crear o actualizar registro en base de datos
     const fileNames = files.map(f => f.originalname).join(', ');
-    const { data: dbRecord, error: dbError } = await supabase
+    
+    if (!supabase) {
+      sendLog(process_id, 'warn', 'Supabase no configurado: no se guardará el proceso en base de datos.');
+    }
+    
+    const dbRecord = supabase ? (await supabase
       .from('emission_processes')
       .upsert({
         id: parseInt(process_id),
@@ -1174,11 +1179,9 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         updated_at: new Date().toISOString()
       }, { onConflict: 'id' })
       .select()
-      .single();
+      .single()).data : null;
     
-    if (dbError) {
-      sendLog(process_id, 'warn', `Error guardando en DB: ${dbError.message}`);
-    } else {
+    if (supabase && dbRecord) {
       sendLog(process_id, 'info', `✅ Proceso guardado en base de datos (ID: ${process_id})`);
     }
     
@@ -1471,7 +1474,8 @@ app.post('/api/emit/stop', async (req, res) => {
     }
     
   } catch (error) {
-    sendLog(process_id || '0', 'error', `Error deteniendo emisión: ${error.message}`);
+    const pid = req.body?.process_id || '0';
+    sendLog(pid, 'error', `Error deteniendo emisión: ${error.message}`);
     res.status(500).json({ 
       error: 'Error interno del servidor', 
       details: error.message 
@@ -1491,16 +1495,7 @@ app.post('/api/emit/drop-signal', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Falta process_id' });
     }
     
-    const dropSignalMap = {
-      '1': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV' },
-      '2': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Sports' },
-      '3': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
-      '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
-      '5': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
-      '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
-    };
-    
-    const channelInfo = dropSignalMap[process_id];
+    const channelInfo = CHANNEL_MAP[process_id];
     
     // Para procesos sin scraping (Libre=0, Subida=7, etc.), solo matamos FFmpeg
     // y dejamos que la auto-recuperación lo levante con la misma URL
