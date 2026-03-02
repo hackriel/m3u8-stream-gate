@@ -158,6 +158,9 @@ const recoveryAttempts = new Map(); // Map<processId, number>
 // Cache de resolución por canal para evitar re-sondear en cada recovery
 const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, height }>
 
+// Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
+const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
+
 // ==================== SCRAPING ON-DEMAND ====================
 // Scraping simple: login → obtener URL → listo. Sin pool ni sesiones persistentes.
 // Se usa un deviceId fijo por servidor para no crear sesiones fantasma en TDMax.
@@ -370,6 +373,16 @@ const checkRTMPConflict = (target_rtmp, current_process_id) => {
 
 // Función mejorada para detectar y categorizar problemas
 const detectAndCategorizeError = (output, processId) => {
+  const isEOF = output.includes('End of file') || output.includes('error=End of file');
+  const isReconnectEOF = isEOF && output.includes('Will reconnect at');
+  const proc = ffmpegProcesses.get(processId);
+  const elapsed = proc ? (Date.now() - proc.startTime) / 1000 : 999;
+
+  // Mensaje transitorio de FFmpeg durante reconexión automática: no tratar como error.
+  if (isReconnectEOF) {
+    return true;
+  }
+
   // Detectar errores de fuente M3U8
   if (output.includes('Invalid data found') || 
       output.includes('Server returned 404') ||
@@ -380,11 +393,8 @@ const detectAndCategorizeError = (output, processId) => {
       (output.includes('Connection refused') && output.includes('http'))) {
     
     // Filtrar errores de "End of file" durante los primeros 10 segundos (son normales al arrancar HLS multi-variante)
-    const isEOF = output.includes('End of file') || output.includes('error=End of file');
-    const proc = ffmpegProcesses.get(processId);
-    const elapsed = proc ? (Date.now() - proc.startTime) / 1000 : 999;
     if (isEOF && elapsed < 10) {
-      return false; // Ignorar silenciosamente, no es un error real
+      return true; // Ignorar silenciosamente, no es un error real
     }
 
     const reason = output.includes('404') ? 'URL Fuente M3U8 no encontrada (404)' :
@@ -842,6 +852,7 @@ app.post('/api/emit', async (req, res) => {
         manualStopProcesses.delete(process_id);
         manualStopProcesses.delete(String(process_id));
         manualStopProcesses.delete(Number(process_id));
+        quickRetryState.delete(process_id);
       } else if (code !== null) {
         // Auto-recovery para CUALQUIER código de salida (incluyendo 0)
         const isCleanExit = code === 0;
@@ -853,8 +864,19 @@ app.post('/api/emit', async (req, res) => {
         // Para canales scrapeados (1-6, 8, 9), intentar primero con la misma URL
         // ya que muchas caídas son micro-cortes del CDN donde la URL sigue válida
         const shouldRetryFirst = CHANNEL_MAP[process_id] || String(process_id) === '8' || String(process_id) === '9';
+        const lastQuickRetryAt = quickRetryState.get(process_id) || 0;
+        const quickRetryRecentlyFailed = lastQuickRetryAt > 0 && (Date.now() - lastQuickRetryAt) < 30000;
+
+        // Si duró estable suficiente tiempo, permitimos nuevamente retry rápido en futuras caídas.
+        if (runtime > 30000 && lastQuickRetryAt > 0) {
+          quickRetryState.delete(process_id);
+        }
+
+        if (shouldRetryFirst && runtime > 10000 && quickRetryRecentlyFailed) {
+          sendLog(process_id, 'warn', '⚠️ RETRY RÁPIDO omitido: caída repetida tras retry reciente, iniciando recovery completo...');
+        }
         
-        if (shouldRetryFirst && runtime > 10000) {
+        if (shouldRetryFirst && runtime > 10000 && !quickRetryRecentlyFailed) {
           // Solo retry si el proceso corrió más de 10s (evitar loops en URLs inválidas)
           sendLog(process_id, 'info', `🔁 RETRY RÁPIDO: Intentando reiniciar con misma URL antes de recovery completo...`);
           
@@ -891,6 +913,7 @@ app.post('/api/emit', async (req, res) => {
                 });
                 
                 if (emitResp.ok) {
+                  quickRetryState.set(process_id, Date.now());
                   sendLog(process_id, 'success', `✅ RETRY RÁPIDO: Reiniciado con misma URL exitosamente`);
                   // Incrementar recovery_count en DB para contabilizar este retry
                   if (supabase) {
