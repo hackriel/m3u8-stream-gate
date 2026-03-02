@@ -50,7 +50,8 @@ async function loginAndGetToken(email: string, password: string): Promise<{ acce
     throw new Error('No se obtuvo token de acceso');
   }
 
-  const deviceId = crypto.randomUUID();
+  // Usar deviceId fijo para no crear sesiones fantasma en TDMax
+  const deviceId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
   return { accessToken, deviceId };
 }
 
@@ -87,7 +88,6 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const mode = body.mode || 'full'; // 'full' (default), 'token_only', 'stream_only'
     const channelId = body.channel_id;
 
     const email = Deno.env.get('TDMAX_EMAIL');
@@ -100,48 +100,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // MODE: token_only — just login and return token+deviceId
-    if (mode === 'token_only') {
-      const { accessToken, deviceId } = await loginAndGetToken(email, password);
-      return new Response(
-        JSON.stringify({ success: true, accessToken, deviceId }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // MODE: stream_only — use provided token to get stream URL
-    if (mode === 'stream_only') {
-      if (!channelId) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'Falta channel_id' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      const accessToken = body.access_token;
-      const deviceId = body.device_id;
-      if (!accessToken || !deviceId) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'Falta access_token o device_id' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const channelName = CHANNEL_MAP[channelId] || channelId;
-      try {
-        const streamUrl = await getStreamUrl(channelId, accessToken, deviceId);
-        return new Response(
-          JSON.stringify({ success: true, url: streamUrl, channel: channelName }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      } catch (streamError) {
-        return new Response(
-          JSON.stringify({ success: false, error: streamError.message, token_expired: true }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-    }
-
-    // MODE: full (default) — login + get stream URL (original behavior)
     if (!channelId) {
       return new Response(
         JSON.stringify({ success: false, error: 'Falta channel_id' }),
@@ -154,7 +112,7 @@ Deno.serve(async (req) => {
     const streamUrl = await getStreamUrl(channelId, accessToken, deviceId);
 
     return new Response(
-      JSON.stringify({ success: true, url: streamUrl, channel: channelName, accessToken, deviceId }),
+      JSON.stringify({ success: true, url: streamUrl, channel: channelName }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
