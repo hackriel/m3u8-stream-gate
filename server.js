@@ -389,6 +389,7 @@ const detectAndCategorizeError = (output, processId) => {
   if (output.includes('Invalid data found') || 
       output.includes('Server returned 404') ||
       output.includes('Server returned 403') ||
+      output.includes('HTTP error 403') ||
       output.includes('Server returned 5') ||
       output.includes('End of file') ||
       output.includes('error=End of file') ||
@@ -621,7 +622,7 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '2',
         '-reconnect_on_network_error', '1',
-        '-reconnect_on_http_error', '4xx,5xx',
+        '-reconnect_on_http_error', '5xx',
         '-multiple_requests', '1',
         '-http_persistent', '1',
         '-live_start_index', '-3',
@@ -688,7 +689,7 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '2',
         '-reconnect_on_network_error', '1',
-        '-reconnect_on_http_error', '4xx,5xx',
+        '-reconnect_on_http_error', '5xx',
         '-multiple_requests', '1',
         '-http_persistent', '1',
         '-live_start_index', '-3',
