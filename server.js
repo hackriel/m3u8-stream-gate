@@ -131,6 +131,7 @@ const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTim
 const emissionStatuses = new Map(); // Map<processId, status>
 const autoRecoveryInProgress = new Map(); // Map<processId, boolean>
 const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hacer auto-recovery)
+const detectedErrors = new Map(); // Map<processId, { type, reason }> — último error detectado por stderr
 
 // FUTV Auto-recovery: obtener nueva URL y reiniciar emisión
 const SUPABASE_FUNCTIONS_URL = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1`;
@@ -401,12 +402,15 @@ const detectAndCategorizeError = (output, processId) => {
     }
 
     const reason = output.includes('404') ? 'URL Fuente M3U8 no encontrada (404)' :
-                   output.includes('403') ? 'URL Fuente M3U8 prohibida (403)' :
-                   output.includes('End of file') ? 'Fuente M3U8 agotada o no disponible (End of file)' :
+                   output.includes('403') ? 'Sesión expirada o token inválido (403 Forbidden)' :
+                   output.includes('End of file') ? 'Fuente M3U8 agotada o CDN cortó conexión (EOF)' :
                    output.includes('Invalid data') ? 'URL Fuente M3U8 inválida o corrupta' :
+                   output.includes('Connection refused') ? 'CDN rechazó conexión (Connection refused)' :
                    'URL Fuente M3U8 no accesible';
     sendLog(processId, 'error', `ERROR DE FUENTE: ${reason}`);
     sendFailureNotification(processId, 'source', reason);
+    // Guardar error detectado para usarlo cuando FFmpeg cierre
+    detectedErrors.set(processId, { type: 'source', reason });
     
     // No matamos el proceso aquí para evitar carreras con reinicios nuevos.
     // Dejamos que FFmpeg cierre naturalmente y el handler "close" dispare el recovery.
@@ -428,6 +432,7 @@ const detectAndCategorizeError = (output, processId) => {
                    'No se pudo publicar al destino RTMP';
     sendLog(processId, 'error', `ERROR DE RTMP: ${reason}`);
     sendFailureNotification(processId, 'rtmp', reason);
+    detectedErrors.set(processId, { type: 'rtmp', reason });
     return true;
   }
   
@@ -441,6 +446,7 @@ const detectAndCategorizeError = (output, processId) => {
                    'Fallo crítico del servidor';
     sendLog(processId, 'error', `ERROR DEL SERVIDOR: ${reason}`);
     sendFailureNotification(processId, 'server', reason);
+    detectedErrors.set(processId, { type: 'server', reason });
     return true;
   }
   
@@ -741,7 +747,8 @@ app.post('/api/emit', async (req, res) => {
       process: ffmpegProcess, 
       status: 'starting',
       startTime: Date.now(),
-      target_rtmp: target_rtmp
+      target_rtmp: target_rtmp,
+      source_m3u8: source_m3u8
     };
     ffmpegProcesses.set(process_id, processInfo);
 
@@ -905,6 +912,17 @@ app.post('/api/emit', async (req, res) => {
           ? `\n[DIAGNÓSTICO] ${diagSource.slice(-5).join(' | ')}`
           : '';
         
+        // Recuperar el error detectado durante stderr parsing
+        const detectedError = detectedErrors.get(process_id);
+        detectedErrors.delete(process_id);
+        
+        // Log de la URL que estaba en uso al momento de la caída
+        const procAtClose = processInfo || {};
+        const urlAtFailure = procAtClose.source_m3u8 || source_m3u8 || 'desconocida';
+        if (!isManualStop && code !== 0) {
+          sendLog(process_id, 'warn', `📎 URL al momento de caída: ${urlAtFailure.substring(0, 120)}`);
+        }
+
         const updateData = {
           is_active: false,
           is_emitting: false,
@@ -914,6 +932,22 @@ app.post('/api/emit', async (req, res) => {
           elapsed: runtimeSeconds,
           start_time: 0
         };
+        
+        // Guardar failure_reason y failure_details si hubo error (no manual)
+        if (!isManualStop) {
+          if (detectedError) {
+            updateData.failure_reason = detectedError.type;
+            updateData.failure_details = detectedError.reason;
+          } else if (code !== 0 && code !== null) {
+            updateData.failure_reason = 'unknown';
+            updateData.failure_details = diagSource.length > 0 
+              ? `Exit code ${code}: ${diagSource.slice(-3).join(' | ')}` 
+              : `Exit code ${code} sin diagnóstico (posible crash silencioso o kill del sistema)`;
+          } else if (code === 0) {
+            updateData.failure_reason = 'eof';
+            updateData.failure_details = 'FFmpeg salió con código 0 (fuente expirada, EOF, o CDN cortó)';
+          }
+        }
         
         // Guardar duración de la última señal antes de reiniciar (solo si no es parada manual)
         if (!isManualStop && runtimeSeconds > 0) {
