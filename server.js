@@ -555,20 +555,29 @@ app.post('/api/emit', async (req, res) => {
     // Crear o actualizar registro en base de datos (solo si Supabase está disponible)
     let dbRecord = null;
     if (supabase) {
-      const { data, error: dbError } = await supabase
-        .from('emission_processes')
-        .upsert({
+      // Resetear recovery_count y failure state en inicio manual
+      const upsertData = {
           id: parseInt(process_id),
           m3u8: source_m3u8,
           rtmp: target_rtmp,
           is_active: true,
           is_emitting: true,
           emit_status: 'starting',
-          start_time: Math.floor(Date.now() / 1000), // Guardar en segundos
+          start_time: Math.floor(Date.now() / 1000),
           process_logs: `[${new Date().toISOString()}] Iniciando emisión desde M3U8\n`,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'id' })
+          updated_at: new Date().toISOString(),
+          failure_reason: null,
+          failure_details: null,
+      };
+      // Solo resetear contadores en inicio manual (no en recovery)
+      if (!is_recovery) {
+        upsertData.recovery_count = 0;
+        upsertData.last_signal_duration = 0;
+      }
+      const { data, error: dbError } = await supabase
+        .from('emission_processes')
+        .upsert(upsertData, { onConflict: 'id' })
         .select()
         .single();
 
@@ -1534,6 +1543,8 @@ app.post('/api/emit/stop', async (req, res) => {
             elapsed: 0,
             recovery_count: 0,
             last_signal_duration: 0,
+            failure_reason: null,
+            failure_details: null,
             process_logs: `[${new Date().toISOString()}] Emisión detenida manualmente\n`
           })
           .eq('id', parseInt(process_id));

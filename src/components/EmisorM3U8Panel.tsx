@@ -132,6 +132,8 @@ export default function EmisorM3U8Panel() {
               if (index === DEMO_TIGO_INDEX && (row as any).source_url) {
                 initialDemoTigoUrl = (row as any).source_url;
               }
+              // Solo cargar failure state si el proceso está activo
+              const loadFailure = isRunning || row.is_emitting;
               return {
                 m3u8: row.m3u8 || '',
                 rtmp: row.rtmp || '',
@@ -143,11 +145,11 @@ export default function EmisorM3U8Panel() {
                 emitMsg: row.emit_msg || '',
                 reconnectAttempts: 0,
                 lastReconnectTime: 0,
-                failureReason: row.failure_reason || undefined,
-                failureDetails: row.failure_details || undefined,
+                failureReason: loadFailure ? (row.failure_reason || undefined) : undefined,
+                failureDetails: loadFailure ? (row.failure_details || undefined) : undefined,
                 logs: [],
                 processLogsFromDB: row.process_logs || '',
-                recoveryCount: (row as any).recovery_count || 0,
+                recoveryCount: (isRunning || row.is_emitting) ? ((row as any).recovery_count || 0) : 0,
                 lastSignalDuration: (row as any).last_signal_duration || 0,
               };
             } else {
@@ -771,6 +773,8 @@ export default function EmisorM3U8Panel() {
       .update({ 
         recovery_count: 0,
         last_signal_duration: 0,
+        failure_reason: null,
+        failure_details: null,
       })
       .eq('id', processIndex);
     
