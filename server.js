@@ -162,6 +162,61 @@ const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, heig
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 
+// Watchdog: última vez que cada proceso produjo frames (timestamp ms)
+const lastFrameTime = new Map(); // Map<processId, timestampMs>
+const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames = proceso colgado
+const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
+
+// Watchdog interval: detecta procesos FFmpeg colgados que no producen frames
+setInterval(() => {
+  for (const [processId, processData] of ffmpegProcesses.entries()) {
+    if (!processData.process || processData.process.killed) continue;
+    
+    const lastFrame = lastFrameTime.get(processId);
+    const status = emissionStatuses.get(processId);
+    
+    // Solo verificar procesos que ya estaban en 'running' (no los que están arrancando)
+    if (status !== 'running') continue;
+    if (!lastFrame) continue;
+    
+    const stalledMs = Date.now() - lastFrame;
+    if (stalledMs > WATCHDOG_STALL_TIMEOUT) {
+      const stalledSecs = Math.floor(stalledMs / 1000);
+      sendLog(processId, 'error', `🐕 WATCHDOG: Proceso colgado — ${stalledSecs}s sin producir frames. Forzando cierre para recovery...`);
+      
+      // Guardar error detectado para diagnóstico
+      detectedErrors.set(processId, { 
+        type: 'source', 
+        reason: `Proceso colgado: ${stalledSecs}s sin frames (CDN/fuente dejó de responder)` 
+      });
+      
+      // Actualizar DB con failure info
+      if (supabase) {
+        supabase
+          .from('emission_processes')
+          .update({
+            failure_reason: 'stall',
+            failure_details: `Watchdog: ${stalledSecs}s sin frames — CDN/fuente dejó de enviar datos`,
+            emit_status: 'error',
+          })
+          .eq('id', parseInt(processId))
+          .then(() => {})
+          .catch(err => console.error('Watchdog DB error:', err));
+      }
+      
+      // Force kill → el handler 'close' disparará el recovery automáticamente
+      try {
+        processData.process.kill('SIGKILL');
+      } catch (e) {
+        console.error(`Watchdog: error matando proceso ${processId}:`, e);
+      }
+      
+      // Limpiar para no re-triggear
+      lastFrameTime.delete(processId);
+    }
+  }
+}, WATCHDOG_CHECK_INTERVAL);
+
 
 // ==================== SCRAPING ON-DEMAND ====================
 // Scraping simple: login → obtener URL → listo. Sin pool ni sesiones persistentes.
@@ -779,7 +834,8 @@ app.post('/api/emit', async (req, res) => {
       
       // Detectar diferentes tipos de mensajes
       if (output.includes('frame=') || output.includes('fps=')) {
-        // Progreso normal
+        // Progreso normal — actualizar watchdog
+        lastFrameTime.set(process_id, Date.now());
         const currentStatus = emissionStatuses.get(process_id);
         if (currentStatus === 'starting') {
           emissionStatuses.set(process_id, 'running');
@@ -964,6 +1020,7 @@ app.post('/api/emit', async (req, res) => {
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
       resolutionCache.delete(process_id); // Limpiar caché de resolución
+      lastFrameTime.delete(process_id); // Limpiar watchdog
       
       // AUTO-RECOVERY: Para canales con scraping (usa CHANNEL_MAP global)
 
@@ -1205,6 +1262,7 @@ app.post('/api/emit', async (req, res) => {
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
       resolutionCache.delete(process_id);
+      lastFrameTime.delete(process_id);
     });
 
     // Timeout de inicio simple
