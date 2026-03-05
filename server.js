@@ -1030,8 +1030,8 @@ app.post('/api/emit', async (req, res) => {
         manualStopProcesses.delete(String(process_id));
         manualStopProcesses.delete(Number(process_id));
         quickRetryState.delete(process_id);
-      } else if (code !== null) {
-        // Auto-recovery para CUALQUIER código de salida (incluyendo 0)
+      } else if (code !== null || signal) {
+        // Auto-recovery para CUALQUIER cierre no manual (código de salida o señal como SIGKILL del watchdog)
         const isCleanExit = code === 0;
         if (isCleanExit) {
           sendLog(process_id, 'warn', `⚠️ FFmpeg salió con código 0 (fuente expirada o EOF) - Intentando auto-recovery...`);
