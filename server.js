@@ -508,6 +508,59 @@ const detectAndCategorizeError = (output, processId) => {
   return false;
 };
 
+// Función para resolver la mejor variante de un master HLS playlist
+const resolveBestHLSVariant = async (masterUrl) => {
+  try {
+    const resp = await fetch(masterUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      },
+    });
+    const body = await resp.text();
+    
+    // Si no es un master playlist (no tiene #EXT-X-STREAM-INF), devolver la URL original
+    if (!body.includes('#EXT-X-STREAM-INF')) {
+      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'direct' };
+    }
+    
+    // Parsear variantes: buscar BANDWIDTH y la URL que sigue
+    const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
+    let bestBandwidth = 0;
+    let bestUrl = null;
+    
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
+        const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
+        const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
+        const variantUrl = lines[i + 1];
+        
+        if (bandwidth > bestBandwidth && variantUrl && !variantUrl.startsWith('#')) {
+          bestBandwidth = bandwidth;
+          bestUrl = variantUrl;
+        }
+      }
+    }
+    
+    if (!bestUrl) {
+      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'unknown' };
+    }
+    
+    // Resolver URL relativa
+    if (!bestUrl.startsWith('http')) {
+      const base = new URL(masterUrl);
+      bestUrl = new URL(bestUrl, base).toString();
+    }
+    
+    const resMatch = lines.find(l => l.includes(`BANDWIDTH=${bestBandwidth}`))?.match(/RESOLUTION=([\dx]+)/);
+    const resolution = resMatch ? resMatch[1] : `${Math.round(bestBandwidth / 1000)}kbps`;
+    
+    return { resolvedUrl: bestUrl, bandwidth: bestBandwidth, resolution };
+  } catch (err) {
+    console.error('Error parsing HLS master playlist:', err.message);
+    return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'fallback' };
+  }
+};
+
 // Función auxiliar para detectar resolución y bitrate de cualquier fuente (M3U8 o archivo)
 const detectSourceInfo = async (source) => {
   return new Promise((resolve) => {
@@ -674,15 +727,20 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
-    // Proceso 0 (Libre): lógica por bitrate — copy si ≤5000kbps, re-encode 720p si >5000kbps
+    // Proceso 0 (Libre): SIEMPRE stream copy — parsear mejor variante HLS primero
     const isLibre = String(process_id) === '0';
     
     if (isLibre) {
-      sendLog(process_id, 'info', '🔍 Proceso Libre: Detectando resolución y bitrate de la fuente...');
-      const { width, height, bitrateKbps } = await detectSourceInfo(source_m3u8);
-      sendLog(process_id, 'info', `📐 Fuente: ${width}x${height} @ ${bitrateKbps}kbps`);
+      // Resolver la mejor variante del master playlist HLS
+      sendLog(process_id, 'info', '🔍 Proceso Libre: Resolviendo mejor variante del playlist HLS...');
+      const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(source_m3u8);
+      const actualSource = resolvedUrl;
+      const bwKbps = Math.round(bandwidth / 1000);
+      sendLog(process_id, 'success', `📺 Libre: Variante seleccionada → ${resolution} @ ${bwKbps}kbps`);
+      sendLog(process_id, 'info', `🔗 URL variante: ${actualSource.substring(0, 120)}...`);
       
-      const inputArgs = [
+      sendLog(process_id, 'info', `✅ Libre: STREAM COPY directo — sin re-encodear, calidad original${isRecovery ? ' [recovery]' : ''}`);
+      ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
         '-timeout', '30000000',
@@ -700,50 +758,16 @@ app.post('/api/emit', async (req, res) => {
         '-fflags', '+genpts+discardcorrupt',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
-        '-i', source_m3u8,
+        '-i', actualSource,
         '-map', '0:v:0?', '-map', '0:a:0?',
+        '-c:v', 'copy',
+        '-c:a', 'copy',
+        '-max_muxing_queue_size', '1024',
+        '-reset_timestamps', '1',
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        target_rtmp,
       ];
-      
-      if (bitrateKbps > 0 && bitrateKbps <= 5000) {
-        // ≤5000kbps: stream copy — sin re-encodear
-        sendLog(process_id, 'info', `✅ Libre: ${bitrateKbps}kbps ≤ 5000 → COPY (sin re-encodear)${isRecovery ? ' [recovery]' : ''}`);
-        ffmpegArgs = [
-          ...inputArgs,
-          '-c:v', 'copy',
-          '-c:a', 'copy',
-          '-max_muxing_queue_size', '1024',
-          '-reset_timestamps', '1',
-          '-f', 'flv',
-          '-flvflags', 'no_duration_filesize',
-          target_rtmp,
-        ];
-      } else {
-        // >5000kbps o no detectado: re-encodear a 720p con CRF 23 + maxrate 3500k (preset faster para mejor compresión)
-        sendLog(process_id, 'info', `📺 Libre: ${bitrateKbps || '?'}kbps > 5000 → Re-encode 720p CRF 23 (maxrate 3500k, preset faster)${isRecovery ? ' [recovery]' : ''}`);
-        ffmpegArgs = [
-          ...inputArgs,
-          '-c:v', 'libx264',
-          '-preset', 'faster',
-          '-profile:v', 'high',
-          '-crf', '23',
-          '-maxrate', '3500k',
-          '-bufsize', '7000k',
-          '-bf', '2',
-          '-vf', 'scale=-2:720',
-          '-r', '30',
-          '-g', '60',
-          '-keyint_min', '60',
-          '-sc_threshold', '0',
-          '-c:a', 'aac',
-          '-b:a', '128k',
-          '-ar', '44100',
-          '-max_muxing_queue_size', '1024',
-          '-reset_timestamps', '1',
-          '-f', 'flv',
-          '-flvflags', 'no_duration_filesize',
-          target_rtmp,
-        ];
-      }
     } else {
       // Procesos 1-6, 8, 9 (scrapeados): 720p @ 2500kbps (equivalente a OBS NVENC P6)
       sendLog(process_id, 'info', `Emitiendo a 720p @ 2500kbps (2200-2800k rango, profile high)${isRecovery ? ' [recovery rápido]' : ''}...`);
