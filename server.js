@@ -1424,12 +1424,13 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       // >5000kbps o no detectado: re-encodear a 720p @ 2500kbps
       sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode 720p @ 2500kbps (2000-3000k)`);
       videoParams = [
-        '-c:v', 'libx264', '-preset', 'superfast', '-profile:v', 'baseline',
-        '-b:v', '2500k', '-minrate', '2000k', '-maxrate', '3000k', '-bufsize', '5000k',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'high',
+        '-b:v', '2500k', '-minrate', '2200k', '-maxrate', '2800k', '-bufsize', '5000k',
+        '-bf', '2',
         '-vf', 'scale=-2:720',
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
-      audioParams = ['-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100'];
+      audioParams = ['-c:a', 'aac', '-b:a', '128k', '-ar', '44100'];
     }
     
     let ffmpegArgs;
