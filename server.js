@@ -718,17 +718,16 @@ app.post('/api/emit', async (req, res) => {
           target_rtmp,
         ];
       } else {
-        // >5000kbps o no detectado: re-encodear a 720p @ 2500kbps
-        sendLog(process_id, 'info', `📺 Libre: ${bitrateKbps || '?'}kbps > 5000 → Re-encode 720p @ 2500kbps (2000-3000k)${isRecovery ? ' [recovery]' : ''}`);
+        // >5000kbps o no detectado: re-encodear a 720p con CRF 23 + maxrate 3500k (preset faster para mejor compresión)
+        sendLog(process_id, 'info', `📺 Libre: ${bitrateKbps || '?'}kbps > 5000 → Re-encode 720p CRF 23 (maxrate 3500k, preset faster)${isRecovery ? ' [recovery]' : ''}`);
         ffmpegArgs = [
           ...inputArgs,
           '-c:v', 'libx264',
-          '-preset', 'veryfast',
+          '-preset', 'faster',
           '-profile:v', 'high',
-          '-b:v', '2500k',
-          '-minrate', '2200k',
-          '-maxrate', '2800k',
-          '-bufsize', '5000k',
+          '-crf', '23',
+          '-maxrate', '3500k',
+          '-bufsize', '7000k',
           '-bf', '2',
           '-vf', 'scale=-2:720',
           '-r', '30',
