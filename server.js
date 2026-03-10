@@ -508,8 +508,10 @@ const detectAndCategorizeError = (output, processId) => {
   return false;
 };
 
-// Función para resolver la mejor variante de un master HLS playlist
-const resolveBestHLSVariant = async (masterUrl) => {
+// Función para resolver variante de un master HLS playlist
+// targetBandwidth: si se pasa (en bps), selecciona la variante más cercana sin exceder ese target.
+//                  Si no se pasa o es 0, selecciona la de mayor BANDWIDTH.
+const resolveBestHLSVariant = async (masterUrl, targetBandwidth = 0) => {
   try {
     const resp = await fetch(masterUrl, {
       headers: {
@@ -523,27 +525,43 @@ const resolveBestHLSVariant = async (masterUrl) => {
       return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'direct' };
     }
     
-    // Parsear variantes: buscar BANDWIDTH y la URL que sigue
+    // Parsear todas las variantes
     const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
-    let bestBandwidth = 0;
-    let bestUrl = null;
+    const variants = [];
     
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
         const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
         const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
+        const resMatch = lines[i].match(/RESOLUTION=([\dx]+)/);
+        const resolution = resMatch ? resMatch[1] : null;
         const variantUrl = lines[i + 1];
         
-        if (bandwidth > bestBandwidth && variantUrl && !variantUrl.startsWith('#')) {
-          bestBandwidth = bandwidth;
-          bestUrl = variantUrl;
+        if (variantUrl && !variantUrl.startsWith('#')) {
+          variants.push({ bandwidth, resolution, url: variantUrl });
         }
       }
     }
     
-    if (!bestUrl) {
+    if (variants.length === 0) {
       return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'unknown' };
     }
+
+    // Ordenar por bandwidth ascendente
+    variants.sort((a, b) => a.bandwidth - b.bandwidth);
+    
+    let selected;
+    if (targetBandwidth > 0) {
+      // Seleccionar la variante más alta que no exceda el target
+      // Si ninguna cabe, tomar la más baja disponible
+      const fitting = variants.filter(v => v.bandwidth <= targetBandwidth);
+      selected = fitting.length > 0 ? fitting[fitting.length - 1] : variants[0];
+    } else {
+      // Sin target: tomar la más alta
+      selected = variants[variants.length - 1];
+    }
+    
+    let bestUrl = selected.url;
     
     // Resolver URL relativa
     if (!bestUrl.startsWith('http')) {
@@ -551,13 +569,16 @@ const resolveBestHLSVariant = async (masterUrl) => {
       bestUrl = new URL(bestUrl, base).toString();
     }
     
-    const resMatch = lines.find(l => l.includes(`BANDWIDTH=${bestBandwidth}`))?.match(/RESOLUTION=([\dx]+)/);
-    const resolution = resMatch ? resMatch[1] : `${Math.round(bestBandwidth / 1000)}kbps`;
+    const resolution = selected.resolution || `${Math.round(selected.bandwidth / 1000)}kbps`;
     
-    return { resolvedUrl: bestUrl, bandwidth: bestBandwidth, resolution };
+    // Log de todas las variantes disponibles para diagnóstico
+    const variantList = variants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
+    console.log(`HLS variants: [${variantList}] → Selected: ${resolution} @ ${Math.round(selected.bandwidth / 1000)}kbps (target: ${targetBandwidth > 0 ? Math.round(targetBandwidth / 1000) + 'kbps' : 'MAX'})`);
+    
+    return { resolvedUrl: bestUrl, bandwidth: selected.bandwidth, resolution, allVariants: variants };
   } catch (err) {
     console.error('Error parsing HLS master playlist:', err.message);
-    return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'fallback' };
+    return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'fallback', allVariants: [] };
   }
 };
 
