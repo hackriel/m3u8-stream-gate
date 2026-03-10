@@ -752,12 +752,20 @@ app.post('/api/emit', async (req, res) => {
     const isLibre = String(process_id) === '0';
     
     if (isLibre) {
-      // Resolver la mejor variante del master playlist HLS
-      sendLog(process_id, 'info', '🔍 Proceso Libre: Resolviendo mejor variante del playlist HLS...');
-      const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(source_m3u8);
+      // Resolver variante HLS cercana a ~3000kbps (3_000_000 bps) para ahorrar ancho de banda
+      // Stream copy: 0% CPU, 0% pérdida — solo selecciona una variante más liviana
+      const TARGET_BW_LIBRE = 3_000_000; // 3000 kbps en bps
+      sendLog(process_id, 'info', `🔍 Proceso Libre: Buscando variante ≤ ${TARGET_BW_LIBRE / 1000}kbps del playlist HLS...`);
+      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(source_m3u8, TARGET_BW_LIBRE);
       const actualSource = resolvedUrl;
       const bwKbps = Math.round(bandwidth / 1000);
-      sendLog(process_id, 'success', `📺 Libre: Variante seleccionada → ${resolution} @ ${bwKbps}kbps`);
+      
+      // Mostrar todas las variantes disponibles en el log
+      if (allVariants && allVariants.length > 0) {
+        const varList = allVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
+        sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
+      }
+      sendLog(process_id, 'success', `📺 Libre: Variante seleccionada → ${resolution} @ ${bwKbps}kbps (target: ≤${TARGET_BW_LIBRE / 1000}kbps)`);
       sendLog(process_id, 'info', `🔗 URL variante: ${actualSource.substring(0, 120)}...`);
       
       sendLog(process_id, 'info', `✅ Libre: STREAM COPY directo — sin re-encodear, calidad original${isRecovery ? ' [recovery]' : ''}`);
