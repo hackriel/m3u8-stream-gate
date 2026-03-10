@@ -97,7 +97,7 @@ export default function EmisorM3U8Panel() {
     Array.from({ length: NUM_PROCESSES }, defaultProcess)
   );
 
-  const timerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<NodeJS.Timeout | null>(null));
+  const timerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<ReturnType<typeof setTimeout> | null>(null));
   
   // Cargar datos desde Supabase al montar el componente
   useEffect(() => {
