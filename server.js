@@ -508,6 +508,59 @@ const detectAndCategorizeError = (output, processId) => {
   return false;
 };
 
+// Función para resolver la mejor variante de un master HLS playlist
+const resolveBestHLSVariant = async (masterUrl) => {
+  try {
+    const resp = await fetch(masterUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      },
+    });
+    const body = await resp.text();
+    
+    // Si no es un master playlist (no tiene #EXT-X-STREAM-INF), devolver la URL original
+    if (!body.includes('#EXT-X-STREAM-INF')) {
+      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'direct' };
+    }
+    
+    // Parsear variantes: buscar BANDWIDTH y la URL que sigue
+    const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
+    let bestBandwidth = 0;
+    let bestUrl = null;
+    
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
+        const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
+        const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
+        const variantUrl = lines[i + 1];
+        
+        if (bandwidth > bestBandwidth && variantUrl && !variantUrl.startsWith('#')) {
+          bestBandwidth = bandwidth;
+          bestUrl = variantUrl;
+        }
+      }
+    }
+    
+    if (!bestUrl) {
+      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'unknown' };
+    }
+    
+    // Resolver URL relativa
+    if (!bestUrl.startsWith('http')) {
+      const base = new URL(masterUrl);
+      bestUrl = new URL(bestUrl, base).toString();
+    }
+    
+    const resMatch = lines.find(l => l.includes(`BANDWIDTH=${bestBandwidth}`))?.match(/RESOLUTION=([\dx]+)/);
+    const resolution = resMatch ? resMatch[1] : `${Math.round(bestBandwidth / 1000)}kbps`;
+    
+    return { resolvedUrl: bestUrl, bandwidth: bestBandwidth, resolution };
+  } catch (err) {
+    console.error('Error parsing HLS master playlist:', err.message);
+    return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'fallback' };
+  }
+};
+
 // Función auxiliar para detectar resolución y bitrate de cualquier fuente (M3U8 o archivo)
 const detectSourceInfo = async (source) => {
   return new Promise((resolve) => {
