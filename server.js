@@ -748,15 +748,12 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
-    // Proceso 0 (Libre): SIEMPRE stream copy — parsear mejor variante HLS primero
+    // Proceso 0 (Libre): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
     const isLibre = String(process_id) === '0';
     
     if (isLibre) {
-      // Resolver variante HLS cercana a ~3000kbps (3_000_000 bps) para ahorrar ancho de banda
-      // Stream copy: 0% CPU, 0% pérdida — solo selecciona una variante más liviana
-      const TARGET_BW_LIBRE = 3_000_000; // 3000 kbps en bps
-      sendLog(process_id, 'info', `🔍 Proceso Libre: Buscando variante ≤ ${TARGET_BW_LIBRE / 1000}kbps del playlist HLS...`);
-      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(source_m3u8, TARGET_BW_LIBRE);
+      // Resolver la variante de MAYOR calidad (sin límite de target)
+      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(source_m3u8, 0);
       const actualSource = resolvedUrl;
       const bwKbps = Math.round(bandwidth / 1000);
       
@@ -765,10 +762,10 @@ app.post('/api/emit', async (req, res) => {
         const varList = allVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
         sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
       }
-      sendLog(process_id, 'success', `📺 Libre: Variante seleccionada → ${resolution} @ ${bwKbps}kbps (target: ≤${TARGET_BW_LIBRE / 1000}kbps)`);
+      sendLog(process_id, 'success', `📺 Libre: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad disponible)`);
       sendLog(process_id, 'info', `🔗 URL variante: ${actualSource.substring(0, 120)}...`);
       
-      sendLog(process_id, 'info', `✅ Libre: STREAM COPY directo — sin re-encodear, calidad original${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 Libre: Re-codificando a 720p HD @ 2800kbps (rango 2500-3000k)${isRecovery ? ' [recovery]' : ''}`);
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
@@ -789,8 +786,20 @@ app.post('/api/emit', async (req, res) => {
         '-probesize', probeSize,
         '-i', actualSource,
         '-map', '0:v:0?', '-map', '0:a:0?',
-        '-c:v', 'copy',
-        '-c:a', 'copy',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-profile:v', 'high',
+        '-b:v', '2800k',
+        '-minrate', '2500k',
+        '-maxrate', '3000k',
+        '-bufsize', '5600k',
+        '-bf', '2',
+        '-g', '60',
+        '-r', '30',
+        '-vf', 'scale=-2:720',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-reset_timestamps', '1',
         '-f', 'flv',
