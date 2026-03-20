@@ -749,6 +749,9 @@ app.post('/api/emit', async (req, res) => {
       if (sourceUrl.hostname.includes('teletica.com')) {
         refererDomain = 'https://www.teletica.com/';
         originDomain = 'https://www.teletica.com';
+      } else if (sourceUrl.hostname.includes('cloudfront.net') || sourceUrl.hostname.includes('repretel.com')) {
+        refererDomain = 'https://www.repretel.com/';
+        originDomain = 'https://www.repretel.com';
       }
     } catch (_) {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
