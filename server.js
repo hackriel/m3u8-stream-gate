@@ -1002,6 +1002,7 @@ app.post('/api/emit', async (req, res) => {
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
+        ...extraFfmpegInputArgs,
         '-timeout', '30000000',
         '-rw_timeout', '30000000',
         '-reconnect', '1',
