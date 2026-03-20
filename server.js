@@ -2304,7 +2304,65 @@ app.delete('/api/emit/files', (req, res) => {
   }
 });
 
-// Endpoint para verificar estado
+// ==================== TIGO PROXY ENDPOINT ====================
+// FFmpeg lee de http://127.0.0.1:PORT/tigo-proxy/playlist.m3u8
+// El proxy fetch el playlist real con el token fresco actual y reescribe URLs relativas a absolutas
+app.get('/tigo-proxy/playlist.m3u8', async (req, res) => {
+  if (!tigoProxyState.active || !tigoProxyState.currentMasterUrl) {
+    return res.status(503).send('#EXTM3U\n#EXT-X-ERROR:Proxy not active');
+  }
+  try {
+    const variantUrl = getTigoVariantUrl();
+    if (!variantUrl) return res.status(503).send('#EXTM3U\n#EXT-X-ERROR:No variant URL');
+    
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'Origin': 'https://www.tdmax.com',
+      'Referer': 'https://www.tdmax.com/',
+    };
+    if (tigoProxyState.accessToken) headers['Authorization'] = `Bearer ${tigoProxyState.accessToken}`;
+    if (tigoProxyState.cookies) headers['Cookie'] = tigoProxyState.cookies;
+    
+    const resp = await fetch(variantUrl, { headers });
+    if (!resp.ok) {
+      // Token might be stale, force refresh
+      sendLog('2', 'warn', `⚠️ Proxy: playlist fetch ${resp.status}, forzando refresh...`);
+      await refreshTigoToken();
+      const retryUrl = getTigoVariantUrl();
+      if (!retryUrl) return res.status(502).send('#EXTM3U\n#EXT-X-ERROR:Refresh failed');
+      const resp2 = await fetch(retryUrl, { headers: { ...headers, Authorization: tigoProxyState.accessToken ? `Bearer ${tigoProxyState.accessToken}` : undefined } });
+      if (!resp2.ok) return res.status(502).send(`#EXTM3U\n#EXT-X-ERROR:${resp2.status}`);
+      let body = await resp2.text();
+      // Reescribir URLs relativas a absolutas
+      const baseUrl = new URL(retryUrl);
+      const baseDir = baseUrl.origin + baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+      body = body.replace(/^(?!#)(.*\.ts.*)$/gm, (match) => {
+        if (match.startsWith('http')) return match;
+        return baseDir + match;
+      });
+      res.set('Content-Type', 'application/vnd.apple.mpegurl');
+      res.set('Cache-Control', 'no-cache, no-store');
+      return res.send(body);
+    }
+    
+    let body = await resp.text();
+    const baseUrl = new URL(variantUrl);
+    const baseDir = baseUrl.origin + baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+    body = body.replace(/^(?!#)(.*\.ts.*)$/gm, (match) => {
+      if (match.startsWith('http')) return match;
+      return baseDir + match;
+    });
+    res.set('Content-Type', 'application/vnd.apple.mpegurl');
+    res.set('Cache-Control', 'no-cache, no-store');
+    return res.send(body);
+  } catch (err) {
+    sendLog('2', 'error', `❌ Proxy playlist error: ${err.message}`);
+    return res.status(500).send(`#EXTM3U\n#EXT-X-ERROR:${err.message}`);
+  }
+});
+// ==================== FIN TIGO PROXY ENDPOINT ====================
+
+
 app.get('/api/status', (req, res) => {
   const { process_id } = req.query;
   
