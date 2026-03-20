@@ -968,6 +968,20 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
+    // Tigo: entrar a una sola variante HLS en vez del master playlist.
+    // En pruebas internas, el master hace que FFmpeg abra múltiples variants a la vez,
+    // lo que termina provocando expiración/timeout de segmentos y falsos 403 al reconectar.
+    let inputSourceUrl = effectiveSourceM3u8;
+    if (isTigo) {
+      const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(effectiveSourceM3u8, 2500000);
+      if (resolvedUrl && resolvedUrl !== effectiveSourceM3u8) {
+        inputSourceUrl = resolvedUrl;
+        sendLog(process_id, 'success', `🎯 Tigo: variante directa seleccionada → ${resolution} @ ${Math.round((bandwidth || 0) / 1000)}kbps`);
+      } else {
+        sendLog(process_id, 'warn', '⚠️ Tigo: no se pudo resolver variante directa, usando master playlist');
+      }
+    }
+
     // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
     const isHDReencode = String(process_id) === '0' || String(process_id) === '5' || String(process_id) === '10';
     
@@ -1003,7 +1017,6 @@ app.post('/api/emit', async (req, res) => {
         '-multiple_requests', '1',
         '-http_persistent', '1',
         '-live_start_index', '-3',
-        '-re',
         '-fflags', '+genpts+discardcorrupt',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
@@ -1048,11 +1061,10 @@ app.post('/api/emit', async (req, res) => {
         '-multiple_requests', '1',
         '-http_persistent', '1',
         '-live_start_index', '-3',
-        '-re',
         '-fflags', '+genpts+discardcorrupt',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
-        '-i', effectiveSourceM3u8,
+        '-i', inputSourceUrl,
         '-map', '0:v:0?', '-map', '0:a:0?',
         '-c:v', 'libx264',
         '-preset', 'veryfast',
