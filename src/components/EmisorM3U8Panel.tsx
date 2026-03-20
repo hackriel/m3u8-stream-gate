@@ -1249,8 +1249,8 @@ export default function EmisorM3U8Panel() {
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="mb-6 flex justify-center">
-            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border flex flex-wrap">
+          <div className="mb-6 px-1">
+            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border grid grid-cols-4 sm:grid-cols-6 md:flex md:flex-wrap gap-1 w-full md:w-auto md:mx-auto">
               {Array.from({ length: NUM_PROCESSES }, (_, i) => {
                 const color = getProcessColor(i);
                 const process = processes[i];
@@ -1258,7 +1258,7 @@ export default function EmisorM3U8Panel() {
                   <TabsTrigger 
                     key={i} 
                     value={i.toString()}
-                    className={`px-4 py-2.5 rounded-xl transition-all duration-200 relative ${
+                    className={`px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all duration-200 relative ${
                       process.isEmitiendo 
                         ? 'bg-green-500/20 border-2 border-green-500 text-green-400 shadow-lg shadow-green-500/50 hover:bg-green-500/30' 
                         : activeTab === i.toString() 
@@ -1266,9 +1266,9 @@ export default function EmisorM3U8Panel() {
                           : 'hover:bg-muted/50'
                     }`}
                   >
-                    <span className="relative flex items-center gap-1.5 text-sm">
+                    <span className="relative flex items-center justify-center gap-1 sm:gap-1.5 text-xs sm:text-sm whitespace-nowrap">
                       {process.isEmitiendo && (
-                        <span className="inline-flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
+                        <span className="inline-flex h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-green-500 animate-pulse"></span>
                       )}
                       {color.name}
                     </span>
