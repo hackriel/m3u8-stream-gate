@@ -911,6 +911,29 @@ app.post('/api/emit', async (req, res) => {
       originDomain = 'https://www.tdmax.com';
     }
 
+    // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
+    const cachedSession = scrapeSessionCache.get(process_id);
+    let extraFfmpegInputArgs = [];
+    if (cachedSession) {
+      const sessionAge = Date.now() - cachedSession.timestamp;
+      if (sessionAge < 300000) { // Solo usar si tiene menos de 5 minutos
+        if (cachedSession.cookies) {
+          // FFmpeg -cookies espera formato: "key=value; path=/; domain=.example.com\n"
+          // Pero para simplificar, pasamos las cookies crudas
+          extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
+          sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
+        }
+        if (cachedSession.accessToken) {
+          // Agregar Authorization header para CDNs que lo validen (como Tigo/Streann)
+          extraFfmpegInputArgs.push('-headers', `Authorization: Bearer ${cachedSession.accessToken}\r\n`);
+          sendLog(process_id, 'info', `🔑 Inyectando accessToken a FFmpeg`);
+        }
+      } else {
+        sendLog(process_id, 'warn', `⚠️ Sesión cacheada expirada (${Math.round(sessionAge/1000)}s), no se inyectan cookies`);
+        scrapeSessionCache.delete(process_id);
+      }
+    }
+
     // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
     const isHDReencode = String(process_id) === '0' || String(process_id) === '5' || String(process_id) === '10';
     
