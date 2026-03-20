@@ -771,10 +771,11 @@ app.post('/api/emit', async (req, res) => {
         const varList = allVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
         sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
       }
-      sendLog(process_id, 'success', `📺 Libre: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad disponible)`);
+      const procLabel = String(process_id) === '0' ? 'Libre' : 'Canal 6';
+      sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad disponible)`);
       sendLog(process_id, 'info', `🔗 URL variante: ${actualSource.substring(0, 120)}...`);
       
-      sendLog(process_id, 'info', `🎬 Libre: Re-codificando a 720p HD @ 2800kbps (rango 2500-3000k)${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: Re-codificando a 720p HD @ 2800kbps (rango 2500-3000k)${isRecovery ? ' [recovery]' : ''}`);
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
