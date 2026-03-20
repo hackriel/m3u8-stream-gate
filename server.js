@@ -969,14 +969,79 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Tigo: entrar a una sola variante HLS en vez del master playlist.
-    // En pruebas internas, el master hace que FFmpeg abra múltiples variants a la vez,
-    // lo que termina provocando expiración/timeout de segmentos y falsos 403 al reconectar.
+    // IMPORTANTE: No podemos hacer fetch del master para descubrir variantes porque eso
+    // "quema" el token de un solo uso. En su lugar, descubrimos el path relativo de la variante
+    // con un primer token sacrificado, y luego hacemos un SEGUNDO scrape fresco para que
+    // FFmpeg reciba un token virgen con la URL de variante ya construida.
     let inputSourceUrl = effectiveSourceM3u8;
     if (isTigo) {
-      const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(effectiveSourceM3u8, 2500000);
-      if (resolvedUrl && resolvedUrl !== effectiveSourceM3u8) {
-        inputSourceUrl = resolvedUrl;
-        sendLog(process_id, 'success', `🎯 Tigo: variante directa seleccionada → ${resolution} @ ${Math.round((bandwidth || 0) / 1000)}kbps`);
+      // Paso 1: Sacrificar el token actual para descubrir el path de la variante
+      sendLog(process_id, 'info', '🔍 Tigo: descubriendo variantes (token de exploración)...');
+      const { resolvedUrl: exploredUrl, bandwidth, resolution } = await resolveBestHLSVariant(effectiveSourceM3u8, 2500000);
+      
+      if (exploredUrl && exploredUrl !== effectiveSourceM3u8) {
+        // Extraer el path relativo de la variante (ej: "chunklist_b2138000.m3u8")
+        let variantPath = null;
+        try {
+          const exploredParsed = new URL(exploredUrl);
+          const masterParsed = new URL(effectiveSourceM3u8);
+          // El path de la variante es la parte que difiere del master
+          const masterDir = masterParsed.pathname.substring(0, masterParsed.pathname.lastIndexOf('/') + 1);
+          if (exploredParsed.pathname.startsWith(masterDir)) {
+            variantPath = exploredParsed.pathname.substring(masterDir.length);
+          } else {
+            variantPath = exploredParsed.pathname.split('/').pop();
+          }
+        } catch (_) {
+          variantPath = exploredUrl.split('/').pop()?.split('?')[0] || null;
+        }
+        
+        sendLog(process_id, 'info', `🎯 Tigo: variante descubierta → ${resolution} @ ${Math.round((bandwidth || 0) / 1000)}kbps (path: ${variantPath})`);
+        
+        // Paso 2: Segundo scrape fresco para obtener token virgen
+        sendLog(process_id, 'info', '🆕 Tigo: obteniendo SEGUNDO token virgen para FFmpeg...');
+        const freshResult = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
+        
+        if (freshResult.url) {
+          effectiveSourceM3u8 = freshResult.url;
+          // Actualizar sesión con el token fresco
+          scrapeSessionCache.set(process_id, {
+            cookies: freshResult.cookies || null,
+            accessToken: freshResult.accessToken || null,
+            timestamp: Date.now(),
+          });
+          
+          // Construir la URL de variante con el nuevo token/base
+          if (variantPath) {
+            try {
+              const freshMasterParsed = new URL(freshResult.url);
+              const freshMasterDir = freshMasterParsed.pathname.substring(0, freshMasterParsed.pathname.lastIndexOf('/') + 1);
+              inputSourceUrl = `${freshMasterParsed.origin}${freshMasterDir}${variantPath}${freshMasterParsed.search}`;
+              sendLog(process_id, 'success', `✅ Tigo: URL de variante con token virgen lista → ${resolution}`);
+            } catch (_) {
+              inputSourceUrl = freshResult.url;
+              sendLog(process_id, 'warn', '⚠️ Tigo: no se pudo construir variante, usando master fresco');
+            }
+          } else {
+            inputSourceUrl = freshResult.url;
+          }
+          
+          // Re-inyectar headers con nuevo token
+          extraFfmpegInputArgs = [];
+          const freshSession = scrapeSessionCache.get(process_id);
+          if (freshSession) {
+            if (freshSession.cookies) {
+              extraFfmpegInputArgs.push('-cookies', freshSession.cookies + '\n');
+            }
+            if (freshSession.accessToken) {
+              extraFfmpegInputArgs.push('-headers', `Authorization: Bearer ${freshSession.accessToken}\r\n`);
+              sendLog(process_id, 'info', `🔑 Inyectando accessToken fresco a FFmpeg`);
+            }
+          }
+        } else {
+          sendLog(process_id, 'warn', `⚠️ Tigo: segundo scrape falló, usando URL original`);
+          inputSourceUrl = effectiveSourceM3u8;
+        }
       } else {
         sendLog(process_id, 'warn', '⚠️ Tigo: no se pudo resolver variante directa, usando master playlist');
       }
