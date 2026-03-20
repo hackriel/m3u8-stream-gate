@@ -802,9 +802,9 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // Tigo Sports: obtener SIEMPRE una URL fresca justo antes de arrancar FFmpeg.
-    // Esto evita reutilizar una URL/token ya expuesta en la UI o consumida previamente.
-    const shouldForceFreshTigoScrape = process_id === '2' && !is_recovery;
+    // Tigo Sports: obtener SIEMPRE una URL virgen justo antes de arrancar FFmpeg.
+    // Aplica tanto en emisión normal como en recovery, ya que los tokens son de un solo uso.
+    const shouldForceFreshTigoScrape = process_id === '2';
     if (shouldForceFreshTigoScrape) {
       sendLog(process_id, 'info', '🆕 Tigo: obteniendo URL virgen inmediatamente antes de iniciar FFmpeg...');
       const freshTigoResult = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
