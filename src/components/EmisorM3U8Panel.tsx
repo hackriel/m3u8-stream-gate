@@ -63,7 +63,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "Tigo Sports", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
   { name: "TDmas 1", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "Teletica", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
-  { name: "Canal 6", scrapeFn: "scrape-channel", channelId: "65d7aca4e4b0140cbf380bd0", fetchLabel: "🔄 Canal6" },
+  { name: "Canal 6", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Multimedios", scrapeFn: "scrape-channel", channelId: "664e5de58f089fa849a58697", fetchLabel: "🔄 Multi" },
   { name: "Subida", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Evento", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer Fuente" },

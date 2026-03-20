@@ -143,13 +143,19 @@ const CHANNEL_MAP = {
   '2': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Sports' },
   '3': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
   '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
-  '5': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
+};
+
+// Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL
+const DIRECT_URL_CHANNELS = {
+  '5': { 
+    channelName: 'Canal 6', 
+    url: 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8'
+  },
 };
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
-  '5': 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8', // Canal 6 oficial
   '6': 'https://mdstrm.com/live-stream-playlist/5a7b1e63a8da282c34d65445.m3u8', // Multimedios oficial
 };
 
@@ -743,15 +749,18 @@ app.post('/api/emit', async (req, res) => {
       if (sourceUrl.hostname.includes('teletica.com')) {
         refererDomain = 'https://www.teletica.com/';
         originDomain = 'https://www.teletica.com';
+      } else if (sourceUrl.hostname.includes('cloudfront.net') || sourceUrl.hostname.includes('repretel.com')) {
+        refererDomain = 'https://www.repretel.com/';
+        originDomain = 'https://www.repretel.com';
       }
     } catch (_) {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
-    // Proceso 0 (Libre): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
-    const isLibre = String(process_id) === '0';
+    // Proceso 0 (Libre) y 5 (Canal 6): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
+    const isHDReencode = String(process_id) === '0' || String(process_id) === '5';
     
-    if (isLibre) {
+    if (isHDReencode) {
       // Resolver la variante de MAYOR calidad (sin límite de target)
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(source_m3u8, 0);
       const actualSource = resolvedUrl;
@@ -762,10 +771,11 @@ app.post('/api/emit', async (req, res) => {
         const varList = allVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
         sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
       }
-      sendLog(process_id, 'success', `📺 Libre: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad disponible)`);
+      const procLabel = String(process_id) === '0' ? 'Libre' : 'Canal 6';
+      sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad disponible)`);
       sendLog(process_id, 'info', `🔗 URL variante: ${actualSource.substring(0, 120)}...`);
       
-      sendLog(process_id, 'info', `🎬 Libre: Re-codificando a 720p HD @ 2800kbps (rango 2500-3000k)${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: Re-codificando a 720p HD @ 2800kbps (rango 2500-3000k)${isRecovery ? ' [recovery]' : ''}`);
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
@@ -1236,61 +1246,70 @@ app.post('/api/emit', async (req, res) => {
               sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName} error: ${err.message}`);
             }
           }, 500);
-        } else if (process_id === '0' || process_id === 0) {
-          // Proceso 0 (Libre): reutilizar la misma URL M3U8 guardada en DB
-          sendLog(process_id, 'warn', `🔄 Libre caído (código ${code}) - Reiniciando con misma URL en 500ms...`);
+        } else if (process_id === '0' || process_id === 0 || DIRECT_URL_CHANNELS[String(process_id)]) {
+          // Proceso 0 (Libre) o canales con URL directa (Canal 6): reutilizar la misma URL M3U8 guardada en DB
+          const procId = parseInt(String(process_id), 10);
+          const directChannel = DIRECT_URL_CHANNELS[String(process_id)];
+          const procLabel = directChannel ? directChannel.channelName : 'Libre';
+          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code}) - Reiniciando con misma URL en 500ms...`);
           setTimeout(async () => {
             try {
               if (!supabase) {
-                sendLog(0, 'error', '❌ AUTO-RECOVERY Libre: Supabase no disponible');
+                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: Base de datos no disponible`);
                 return;
               }
               const { data: procData } = await supabase
                 .from('emission_processes')
                 .select('m3u8, rtmp')
-                .eq('id', 0)
+                .eq('id', procId)
                 .single();
               
-              if (procData && procData.m3u8 && procData.rtmp) {
-                sendLog(0, 'info', `🔄 AUTO-RECOVERY Libre: Reiniciando con URL existente...`);
-                autoRecoveryInProgress.set('0', true);
+              // Para canales directos, usar la URL fija si no hay guardada en DB
+              let sourceUrl = procData?.m3u8;
+              if (!sourceUrl && directChannel) {
+                sourceUrl = directChannel.url;
+              }
+              const targetRtmp = procData?.rtmp;
+              
+              if (sourceUrl && targetRtmp) {
+                sendLog(procId, 'info', `🔄 AUTO-RECOVERY ${procLabel}: Reiniciando con URL existente...`);
+                autoRecoveryInProgress.set(String(process_id), true);
                 
                 await supabase
                   .from('emission_processes')
                   .update({ emit_status: 'starting', is_emitting: true, is_active: true })
-                  .eq('id', 0);
+                  .eq('id', procId);
                 
                 const emitResp = await fetch(`http://localhost:${PORT}/api/emit`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    source_m3u8: procData.m3u8,
-                    target_rtmp: procData.rtmp,
-                    process_id: '0',
+                    source_m3u8: sourceUrl,
+                    target_rtmp: targetRtmp,
+                    process_id: String(process_id),
                     is_recovery: true
                   })
                 });
                 
                 if (emitResp.ok) {
-                  sendLog(0, 'success', '✅ AUTO-RECOVERY Libre completado: Emisión reiniciada');
-                  // Incrementar contador de recovery
+                  sendLog(procId, 'success', `✅ AUTO-RECOVERY ${procLabel} completado: Emisión reiniciada`);
                   if (supabase) {
-                    const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: 0 });
+                    const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: procId });
                     if (rpcErr) {
-                      const { data: row } = await supabase.from('emission_processes').select('recovery_count').eq('id', 0).single();
-                      await supabase.from('emission_processes').update({ recovery_count: (row?.recovery_count || 0) + 1 }).eq('id', 0);
+                      const { data: row } = await supabase.from('emission_processes').select('recovery_count').eq('id', procId).single();
+                      await supabase.from('emission_processes').update({ recovery_count: (row?.recovery_count || 0) + 1 }).eq('id', procId);
                     }
                   }
                 } else {
-                  sendLog(0, 'error', `❌ AUTO-RECOVERY Libre falló: ${emitResp.status}`);
+                  sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} falló: ${emitResp.status}`);
                 }
-                autoRecoveryInProgress.set('0', false);
+                autoRecoveryInProgress.set(String(process_id), false);
               } else {
-                sendLog(0, 'error', '❌ AUTO-RECOVERY Libre: No hay M3U8 o RTMP guardados');
+                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: No hay M3U8 o RTMP guardados`);
               }
             } catch (err) {
-              sendLog(0, 'error', `❌ AUTO-RECOVERY Libre error: ${err.message}`);
-              autoRecoveryInProgress.set('0', false);
+              sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
+              autoRecoveryInProgress.set(String(process_id), false);
             }
           }, 500);
         }
@@ -1773,10 +1792,11 @@ app.post('/api/emit/drop-signal', async (req, res) => {
     }
     
     const channelInfo = CHANNEL_MAP[process_id];
+    const directInfo = DIRECT_URL_CHANNELS[process_id];
     
     // Para procesos sin scraping (Libre=0, Subida=7, etc.), solo matamos FFmpeg
     // y dejamos que la auto-recuperación lo levante con la misma URL
-    const processName = channelInfo ? channelInfo.channelName : `Proceso ${process_id}`;
+    const processName = channelInfo ? channelInfo.channelName : (directInfo ? directInfo.channelName : `Proceso ${process_id}`);
     
     sendLog(process_id, 'warn', `📡 BOTAR SEÑAL: Forzando caída de ${processName}...`);
     
