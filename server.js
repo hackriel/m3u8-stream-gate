@@ -165,6 +165,10 @@ const recoveryAttempts = new Map(); // Map<processId, number>
 // Cache de resolución por canal para evitar re-sondear en cada recovery
 const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, height }>
 
+// Cache de sesión de scraping: guarda cookies + accessToken para pasarlos a FFmpeg
+// Esto es CRÍTICO para Tigo cuyo CDN valida cookies/token junto con la IP
+const scrapeSessionCache = new Map(); // Map<processId, { cookies, accessToken, timestamp }>
+
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 
@@ -244,7 +248,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
   }
   
   try {
-    // Paso 1: Login
+    // Paso 1: Login — capturar cookies de la respuesta
     const loginResp = await fetch(`${STREANN_BASE_URL}/web/services/v3/external/login?r=${STREANN_RESELLER_ID}`, {
       method: 'POST',
       headers: {
@@ -259,6 +263,10 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
       }),
     });
     
+    // Capturar todas las cookies del login
+    const loginCookies = loginResp.headers.getSetCookie ? loginResp.headers.getSetCookie() : [];
+    const loginCookieStr = loginCookies.map(c => c.split(';')[0]).join('; ');
+    
     const loginData = await loginResp.json();
     
     if (loginData.errorMessage) {
@@ -270,24 +278,36 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
       return { url: null, error: 'No se obtuvo token de acceso' };
     }
     
-    sendLog('system', 'info', `✅ Login exitoso para ${channelName}, obteniendo stream URL...`);
+    sendLog('system', 'info', `✅ Login exitoso para ${channelName}${loginCookies.length > 0 ? ` (${loginCookies.length} cookies capturadas)` : ''}, obteniendo stream URL...`);
     
-    // Paso 2: Obtener URL del stream
+    // Paso 2: Obtener URL del stream — pasar cookies del login y capturar nuevas
     const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?r=${STREANN_RESELLER_ID}&deviceId=${FIXED_DEVICE_ID}&accessToken=${encodeURIComponent(accessToken)}&doNotUseRedirect=true&countryCode=CR&deviceType=web&appType=web`;
     
-    const lbResp = await fetch(lbUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'Origin': 'https://www.tdmax.com',
-        'Referer': 'https://www.tdmax.com/',
-        'Authorization': `Bearer ${accessToken}`,
-      },
-    });
+    const lbHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'Origin': 'https://www.tdmax.com',
+      'Referer': 'https://www.tdmax.com/',
+      'Authorization': `Bearer ${accessToken}`,
+    };
+    // Pasar cookies del login al loadbalancer
+    if (loginCookieStr) {
+      lbHeaders['Cookie'] = loginCookieStr;
+    }
+    
+    const lbResp = await fetch(lbUrl, { headers: lbHeaders });
     
     if (!lbResp.ok) {
       const errorText = await lbResp.text();
       return { url: null, error: `Error obteniendo stream: ${lbResp.status} - ${errorText.substring(0, 200)}` };
     }
+    
+    // Capturar cookies del loadbalancer también
+    const lbCookies = lbResp.headers.getSetCookie ? lbResp.headers.getSetCookie() : [];
+    const allCookieParts = [
+      ...loginCookies.map(c => c.split(';')[0]),
+      ...lbCookies.map(c => c.split(';')[0]),
+    ];
+    const allCookieStr = allCookieParts.join('; ');
     
     const lbData = await lbResp.json();
     const streamUrl = lbData.url;
@@ -296,8 +316,11 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
       return { url: null, error: 'No se encontró URL de stream en la respuesta' };
     }
     
-    sendLog('system', 'success', `✅ URL LOCAL obtenida para ${channelName}`);
-    return { url: streamUrl };
+    const cookieCount = allCookieParts.filter(Boolean).length;
+    sendLog('system', 'success', `✅ URL LOCAL obtenida para ${channelName}${cookieCount > 0 ? ` (${cookieCount} cookies para CDN)` : ''}`);
+    
+    // Retornar URL + accessToken + cookies para que FFmpeg los use
+    return { url: streamUrl, accessToken, cookies: allCookieStr || null };
   } catch (err) {
     return { url: null, error: `Error en scraping local: ${err.message}` };
   }
@@ -400,6 +423,15 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       
       if (result.url) {
         newUrl = result.url;
+        // Cachear sesión para FFmpeg (cookies + token)
+        if (result.cookies || result.accessToken) {
+          scrapeSessionCache.set(String(process_id), {
+            cookies: result.cookies || null,
+            accessToken: result.accessToken || null,
+            timestamp: Date.now(),
+          });
+          sendLog(process_id, 'info', `🔐 Sesión de recovery cacheada (cookies: ${result.cookies ? 'sí' : 'no'})`);
+        }
         sendLog(process_id, 'success', `✅ URL obtenida para ${channelName}`);
       } else if (fallbackUrl) {
         sendLog(process_id, 'warn', `⚠️ Scraping falló (${result.error || 'sin URL'}), usando URL oficial de respaldo para ${channelName}`);
@@ -714,6 +746,40 @@ const detectSourceInfo = async (source) => {
   });
 };
 
+// Endpoint para scraping LOCAL desde el VPS (para que el token se genere con la IP del VPS)
+// Esto es CRÍTICO para canales como Tigo cuyo CDN valida IP del token vs IP del consumidor
+app.post('/api/local-scrape', async (req, res) => {
+  try {
+    const { channel_id, process_id } = req.body;
+    
+    if (!channel_id) {
+      return res.status(400).json({ success: false, error: 'Falta channel_id' });
+    }
+    
+    const channelName = CHANNEL_MAP[process_id]?.channelName || `Canal ${channel_id.substring(0, 8)}`;
+    const result = await scrapeStreamUrlLocal(channel_id, channelName);
+    
+    if (!result.url) {
+      return res.json({ success: false, error: result.error || 'No se obtuvo URL' });
+    }
+    
+    // Guardar sesión en cache para que /api/emit la use con FFmpeg
+    if (process_id !== undefined) {
+      scrapeSessionCache.set(String(process_id), {
+        cookies: result.cookies || null,
+        accessToken: result.accessToken || null,
+        timestamp: Date.now(),
+      });
+      sendLog(String(process_id), 'info', `🔐 Sesión de scraping guardada en cache (cookies: ${result.cookies ? 'sí' : 'no'}, token: ${result.accessToken ? 'sí' : 'no'})`);
+    }
+    
+    return res.json({ success: true, url: result.url, channel: channelName });
+  } catch (error) {
+    console.error('Error en /api/local-scrape:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Endpoint para iniciar emisión
 app.post('/api/emit', async (req, res) => {
   try {
@@ -854,6 +920,29 @@ app.post('/api/emit', async (req, res) => {
       originDomain = 'https://www.tdmax.com';
     }
 
+    // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
+    const cachedSession = scrapeSessionCache.get(process_id);
+    let extraFfmpegInputArgs = [];
+    if (cachedSession) {
+      const sessionAge = Date.now() - cachedSession.timestamp;
+      if (sessionAge < 300000) { // Solo usar si tiene menos de 5 minutos
+        if (cachedSession.cookies) {
+          // FFmpeg -cookies espera formato: "key=value; path=/; domain=.example.com\n"
+          // Pero para simplificar, pasamos las cookies crudas
+          extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
+          sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
+        }
+        if (cachedSession.accessToken) {
+          // Agregar Authorization header para CDNs que lo validen (como Tigo/Streann)
+          extraFfmpegInputArgs.push('-headers', `Authorization: Bearer ${cachedSession.accessToken}\r\n`);
+          sendLog(process_id, 'info', `🔑 Inyectando accessToken a FFmpeg`);
+        }
+      } else {
+        sendLog(process_id, 'warn', `⚠️ Sesión cacheada expirada (${Math.round(sessionAge/1000)}s), no se inyectan cookies`);
+        scrapeSessionCache.delete(process_id);
+      }
+    }
+
     // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
     const isHDReencode = String(process_id) === '0' || String(process_id) === '5' || String(process_id) === '10';
     
@@ -877,6 +966,7 @@ app.post('/api/emit', async (req, res) => {
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
+        ...extraFfmpegInputArgs,
         '-timeout', '30000000',
         '-rw_timeout', '30000000',
         '-reconnect', '1',
@@ -921,6 +1011,7 @@ app.post('/api/emit', async (req, res) => {
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
+        ...extraFfmpegInputArgs,
         '-timeout', '30000000',
         '-rw_timeout', '30000000',
         '-reconnect', '1',
