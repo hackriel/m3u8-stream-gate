@@ -1853,7 +1853,12 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         const frameMatch = output.match(/frame=\s*(\d+)/);
         const fpsMatch = output.match(/fps=\s*([\d.]+)/);
         if (frameMatch && fpsMatch) {
-          sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}`);
+          const now = Date.now();
+          const lastLog = lastProgressLog.get(process_id) || 0;
+          if (now - lastLog >= PROGRESS_LOG_INTERVAL) {
+            lastProgressLog.set(process_id, now);
+            sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}`);
+          }
         }
       } else if (output.includes('error') || output.includes('Error') || output.includes('failed') || output.includes('Failed')) {
         const isNoise =
