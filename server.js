@@ -244,7 +244,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
   }
   
   try {
-    // Paso 1: Login
+    // Paso 1: Login — capturar cookies de la respuesta
     const loginResp = await fetch(`${STREANN_BASE_URL}/web/services/v3/external/login?r=${STREANN_RESELLER_ID}`, {
       method: 'POST',
       headers: {
@@ -259,6 +259,10 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
       }),
     });
     
+    // Capturar todas las cookies del login
+    const loginCookies = loginResp.headers.getSetCookie ? loginResp.headers.getSetCookie() : [];
+    const loginCookieStr = loginCookies.map(c => c.split(';')[0]).join('; ');
+    
     const loginData = await loginResp.json();
     
     if (loginData.errorMessage) {
@@ -270,24 +274,36 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
       return { url: null, error: 'No se obtuvo token de acceso' };
     }
     
-    sendLog('system', 'info', `✅ Login exitoso para ${channelName}, obteniendo stream URL...`);
+    sendLog('system', 'info', `✅ Login exitoso para ${channelName}${loginCookies.length > 0 ? ` (${loginCookies.length} cookies capturadas)` : ''}, obteniendo stream URL...`);
     
-    // Paso 2: Obtener URL del stream
+    // Paso 2: Obtener URL del stream — pasar cookies del login y capturar nuevas
     const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?r=${STREANN_RESELLER_ID}&deviceId=${FIXED_DEVICE_ID}&accessToken=${encodeURIComponent(accessToken)}&doNotUseRedirect=true&countryCode=CR&deviceType=web&appType=web`;
     
-    const lbResp = await fetch(lbUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'Origin': 'https://www.tdmax.com',
-        'Referer': 'https://www.tdmax.com/',
-        'Authorization': `Bearer ${accessToken}`,
-      },
-    });
+    const lbHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'Origin': 'https://www.tdmax.com',
+      'Referer': 'https://www.tdmax.com/',
+      'Authorization': `Bearer ${accessToken}`,
+    };
+    // Pasar cookies del login al loadbalancer
+    if (loginCookieStr) {
+      lbHeaders['Cookie'] = loginCookieStr;
+    }
+    
+    const lbResp = await fetch(lbUrl, { headers: lbHeaders });
     
     if (!lbResp.ok) {
       const errorText = await lbResp.text();
       return { url: null, error: `Error obteniendo stream: ${lbResp.status} - ${errorText.substring(0, 200)}` };
     }
+    
+    // Capturar cookies del loadbalancer también
+    const lbCookies = lbResp.headers.getSetCookie ? lbResp.headers.getSetCookie() : [];
+    const allCookieParts = [
+      ...loginCookies.map(c => c.split(';')[0]),
+      ...lbCookies.map(c => c.split(';')[0]),
+    ];
+    const allCookieStr = allCookieParts.join('; ');
     
     const lbData = await lbResp.json();
     const streamUrl = lbData.url;
@@ -296,8 +312,11 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
       return { url: null, error: 'No se encontró URL de stream en la respuesta' };
     }
     
-    sendLog('system', 'success', `✅ URL LOCAL obtenida para ${channelName}`);
-    return { url: streamUrl };
+    const cookieCount = allCookieParts.filter(Boolean).length;
+    sendLog('system', 'success', `✅ URL LOCAL obtenida para ${channelName}${cookieCount > 0 ? ` (${cookieCount} cookies para CDN)` : ''}`);
+    
+    // Retornar URL + accessToken + cookies para que FFmpeg los use
+    return { url: streamUrl, accessToken, cookies: allCookieStr || null };
   } catch (err) {
     return { url: null, error: `Error en scraping local: ${err.message}` };
   }
