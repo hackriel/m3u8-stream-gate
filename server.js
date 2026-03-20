@@ -228,10 +228,84 @@ setInterval(() => {
 // Scraping simple: login → obtener URL → listo. Sin pool ni sesiones persistentes.
 // Se usa un deviceId fijo por servidor para no crear sesiones fantasma en TDMax.
 const FIXED_DEVICE_ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+const STREANN_RESELLER_ID = '61316705e4b0295f87dae396';
+const STREANN_BASE_URL = 'https://cf.streann.tech';
 
-// Obtiene stream URL: login + get URL en una sola llamada
-const scrapeStreamUrl = async (channelId, channelName) => {
-  sendLog('system', 'info', `🔄 Scraping ${channelName}: obteniendo URL...`);
+// Scraping LOCAL (directo desde el VPS) — el token se genera con la IP del VPS
+// así el CDN valida correctamente la IP que hace el request de video
+const scrapeStreamUrlLocal = async (channelId, channelName) => {
+  sendLog('system', 'info', `🔄 Scraping LOCAL ${channelName}: obteniendo URL desde VPS...`);
+  
+  const email = process.env.TDMAX_EMAIL;
+  const password = process.env.TDMAX_PASSWORD;
+  
+  if (!email || !password) {
+    return { url: null, error: 'Credenciales TDMAX no configuradas en el VPS (TDMAX_EMAIL / TDMAX_PASSWORD)' };
+  }
+  
+  try {
+    // Paso 1: Login
+    const loginResp = await fetch(`${STREANN_BASE_URL}/web/services/v3/external/login?r=${STREANN_RESELLER_ID}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Origin': 'https://www.tdmax.com',
+        'Referer': 'https://www.tdmax.com/',
+      },
+      body: JSON.stringify({
+        username: email.toLowerCase(),
+        password: password,
+      }),
+    });
+    
+    const loginData = await loginResp.json();
+    
+    if (loginData.errorMessage) {
+      return { url: null, error: `Login error: ${loginData.errorMessage}` };
+    }
+    
+    const accessToken = loginData.accessToken || loginData.access_token;
+    if (!accessToken) {
+      return { url: null, error: 'No se obtuvo token de acceso' };
+    }
+    
+    sendLog('system', 'info', `✅ Login exitoso para ${channelName}, obteniendo stream URL...`);
+    
+    // Paso 2: Obtener URL del stream
+    const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?r=${STREANN_RESELLER_ID}&deviceId=${FIXED_DEVICE_ID}&accessToken=${encodeURIComponent(accessToken)}&doNotUseRedirect=true&countryCode=CR&deviceType=web&appType=web`;
+    
+    const lbResp = await fetch(lbUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Origin': 'https://www.tdmax.com',
+        'Referer': 'https://www.tdmax.com/',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    });
+    
+    if (!lbResp.ok) {
+      const errorText = await lbResp.text();
+      return { url: null, error: `Error obteniendo stream: ${lbResp.status} - ${errorText.substring(0, 200)}` };
+    }
+    
+    const lbData = await lbResp.json();
+    const streamUrl = lbData.url;
+    
+    if (!streamUrl) {
+      return { url: null, error: 'No se encontró URL de stream en la respuesta' };
+    }
+    
+    sendLog('system', 'success', `✅ URL LOCAL obtenida para ${channelName}`);
+    return { url: streamUrl };
+  } catch (err) {
+    return { url: null, error: `Error en scraping local: ${err.message}` };
+  }
+};
+
+// Scraping vía Edge Function (fallback si el local no está disponible)
+const scrapeStreamUrlRemote = async (channelId, channelName) => {
+  sendLog('system', 'info', `🔄 Scraping REMOTO ${channelName}: obteniendo URL via Edge Function...`);
   
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
@@ -246,7 +320,7 @@ const scrapeStreamUrl = async (channelId, channelName) => {
     const data = await resp.json();
     
     if (data.success && data.url) {
-      sendLog('system', 'success', `✅ URL obtenida para ${channelName}`);
+      sendLog('system', 'success', `✅ URL REMOTA obtenida para ${channelName}`);
       return { url: data.url };
     }
     
@@ -254,6 +328,20 @@ const scrapeStreamUrl = async (channelId, channelName) => {
   } catch (err) {
     return { url: null, error: err.message };
   }
+};
+
+// Obtiene stream URL: primero intenta LOCAL (mismo IP), luego REMOTO (Edge Function)
+const scrapeStreamUrl = async (channelId, channelName) => {
+  // Intentar primero scraping local (para que el token se genere con la IP del VPS)
+  const localResult = await scrapeStreamUrlLocal(channelId, channelName);
+  if (localResult.url) {
+    return localResult;
+  }
+  
+  sendLog('system', 'warn', `⚠️ Scraping local falló (${localResult.error}), intentando vía Edge Function...`);
+  
+  // Fallback: Edge Function
+  return await scrapeStreamUrlRemote(channelId, channelName);
 };
 // ==================== FIN SCRAPING ====================
 
@@ -741,7 +829,7 @@ app.post('/api/emit', async (req, res) => {
     const analyzeDuration = isRecovery ? '1500000' : '3000000';  // 1.5s / 3s
     const probeSize      = isRecovery ? '500000'  : '1500000';   // 500KB / 1.5MB
 
-    // Detectar cabeceras HTTP según dominio fuente para mayor compatibilidad
+    // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
     try {
@@ -755,6 +843,15 @@ app.post('/api/emit', async (req, res) => {
       }
     } catch (_) {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
+    }
+
+    // Tigo Sports (proceso 2): su CDN Streann valida headers más estrictos
+    // Usar el Origin/Referer de TDMax con headers adicionales de seguridad
+    const isTigo = String(process_id) === '2';
+    if (isTigo) {
+      // Streann CDN para Tigo requiere headers específicos que simulan el player embebido de TDMax
+      refererDomain = 'https://www.tdmax.com/';
+      originDomain = 'https://www.tdmax.com';
     }
 
     // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
