@@ -867,28 +867,24 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // Tigo Sports: obtener SIEMPRE una URL virgen justo antes de arrancar FFmpeg.
-    // Aplica tanto en emisión normal como en recovery, ya que los tokens son de un solo uso.
-    const shouldForceFreshTigoScrape = process_id === '2';
-    if (shouldForceFreshTigoScrape) {
-      sendLog(process_id, 'info', '🆕 Tigo: obteniendo URL virgen inmediatamente antes de iniciar FFmpeg...');
-      const freshTigoResult = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
-
-      if (!freshTigoResult.url) {
-        sendLog(process_id, 'error', `❌ No se pudo obtener URL fresca de Tigo: ${freshTigoResult.error || 'sin detalle'}`);
-        return res.status(502).json({
-          error: freshTigoResult.error || 'No se pudo obtener una URL fresca para Tigo Sports',
-        });
+    // Tigo Sports: usar el proxy HLS local en vez de URL directa.
+    // El proxy refresca tokens cada 40s automáticamente.
+    const isTigoProcess = process_id === '2';
+    if (isTigoProcess) {
+      if (!tigoProxyState.active) {
+        sendLog(process_id, 'info', '🚀 Iniciando Proxy HLS para Tigo...');
+        const proxyStarted = await startTigoProxy();
+        if (!proxyStarted) {
+          return res.status(502).json({ error: 'No se pudo iniciar el proxy HLS para Tigo Sports' });
+        }
+      } else {
+        // Proxy ya activo, solo refrescar token
+        sendLog(process_id, 'info', '🔄 Proxy ya activo, refrescando token...');
+        await refreshTigoToken();
       }
-
-      effectiveSourceM3u8 = freshTigoResult.url;
-      scrapeSessionCache.set(process_id, {
-        cookies: freshTigoResult.cookies || null,
-        accessToken: freshTigoResult.accessToken || null,
-        timestamp: Date.now(),
-      });
-
-      sendLog(process_id, 'success', `✅ Tigo: URL fresca lista para FFmpeg (cookies: ${freshTigoResult.cookies ? 'sí' : 'no'}, token: ${freshTigoResult.accessToken ? 'sí' : 'no'})`);
+      // FFmpeg apuntará al proxy local
+      effectiveSourceM3u8 = `http://127.0.0.1:${PORT}/tigo-proxy/playlist.m3u8`;
+      sendLog(process_id, 'success', `✅ Tigo: FFmpeg apuntará al proxy local`);
     }
 
     // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP
