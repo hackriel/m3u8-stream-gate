@@ -61,14 +61,14 @@ interface ChannelConfig {
 const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "Disney 7", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
-  { name: "Tigo Sports", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
+  { name: "Tigo Copy", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
   { name: "TDmas 1", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "Teletica", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "Canal 6", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Multimedios", scrapeFn: "scrape-channel", channelId: "664e5de58f089fa849a58697", fetchLabel: "🔄 Multi" },
   { name: "Subida", scrapeFn: null, channelId: null, fetchLabel: "" },
-  { name: "Evento", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer Fuente" },
-  { name: "Demo TIGO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer Fuente" },
+  { name: "Tigo 720p", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
+  { name: "Tigo Master", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
 ];
 
@@ -832,14 +832,14 @@ export default function EmisorM3U8Panel() {
     const colors = [
       { bg: "bg-gray-500", text: "text-gray-400", stroke: "#9ca3af", name: "Disney 7" },
       { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "FUTV" },
-      { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Tigo Sports" },
+      { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Tigo Copy" },
       { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "TDmas 1" },
       { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "Teletica" },
       { bg: "bg-orange-500", text: "text-orange-500", stroke: "#f97316", name: "Canal 6" },
       { bg: "bg-red-500", text: "text-red-500", stroke: "#ef4444", name: "Multimedios" },
       { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Subida" },
-      { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "Evento" },
-      { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "Demo TIGO" },
+      { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "Tigo 720p" },
+      { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "Tigo Master" },
       { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
     ];
     return colors[processIndex];
