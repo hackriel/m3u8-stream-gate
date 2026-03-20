@@ -132,7 +132,7 @@ const emissionStatuses = new Map(); // Map<processId, status>
 const autoRecoveryInProgress = new Map(); // Map<processId, boolean>
 const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hacer auto-recovery)
 const detectedErrors = new Map(); // Map<processId, { type, reason }> — último error detectado por stderr
-const tigoRefreshTimers = new Map(); // Map<processId, intervalId> — timer de refresh proactivo para Tigo
+
 
 // FUTV Auto-recovery: obtener nueva URL y reiniciar emisión
 const SUPABASE_FUNCTIONS_URL = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1`;
@@ -371,69 +371,56 @@ const scrapeStreamUrl = async (channelId, channelName) => {
 };
 // ==================== FIN SCRAPING ====================
 
-// ==================== TIGO HLS PROXY ====================
-const tigoProxyState = {
-  active: false, refreshInterval: null, currentMasterUrl: null,
-  variantPath: null, lastRefreshTime: 0, refreshCount: 0,
-  accessToken: null, cookies: null,
-};
-const TIGO_REFRESH_MS = 40000;
+// ==================== TIGO SESSION EXTRACTION ====================
+// Nimble Streamer usa `nimblesessionid` para mantener sesiones HLS vivas.
+// Al hacer el primer fetch del playlist, los segmentos contienen este session ID.
+// Si appendeamos el nimblesessionid a la URL del playlist, Nimble reconoce
+// la sesión existente y no requiere un wmsAuthSign válido para reloads.
 
-const refreshTigoToken = async () => {
+const extractNimbleSession = async (playlistUrl, headers = {}) => {
   try {
-    const ch = CHANNEL_MAP['2'];
-    if (!ch) return;
-    const result = await scrapeStreamUrlLocal(ch.channelId, ch.channelName);
-    if (!result.url) { sendLog('2', 'warn', `⚠️ Proxy: refresh falló`); return; }
-    tigoProxyState.currentMasterUrl = result.url;
-    tigoProxyState.accessToken = result.accessToken || null;
-    tigoProxyState.cookies = result.cookies || null;
-    tigoProxyState.lastRefreshTime = Date.now();
-    tigoProxyState.refreshCount++;
-    scrapeSessionCache.set('2', { cookies: result.cookies || null, accessToken: result.accessToken || null, timestamp: Date.now() });
-    sendLog('2', 'info', `🔄 Proxy: token #${tigoProxyState.refreshCount} refrescado`);
-  } catch (err) { sendLog('2', 'error', `❌ Proxy refresh error: ${err.message}`); }
+    const resp = await fetch(playlistUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        ...headers,
+      },
+    });
+    if (!resp.ok) return { sessionId: null, error: `HTTP ${resp.status}` };
+    
+    const body = await resp.text();
+    
+    // Buscar nimblesessionid en las URLs de segmentos
+    const sessionMatch = body.match(/nimblesessionid=(\d+)/);
+    if (sessionMatch) {
+      return { sessionId: sessionMatch[1], error: null };
+    }
+    
+    // También puede venir como redirect o en headers
+    const locationHeader = resp.headers.get('location');
+    if (locationHeader) {
+      const locMatch = locationHeader.match(/nimblesessionid=(\d+)/);
+      if (locMatch) return { sessionId: locMatch[1], error: null };
+    }
+    
+    return { sessionId: null, error: 'No nimblesessionid found in playlist' };
+  } catch (err) {
+    return { sessionId: null, error: err.message };
+  }
 };
 
-const startTigoProxy = async () => {
-  const ch = CHANNEL_MAP['2'];
-  if (!ch) return false;
-  sendLog('2', 'info', '🔍 Proxy: descubriendo variantes...');
-  const disc = await scrapeStreamUrlLocal(ch.channelId, ch.channelName);
-  if (!disc.url) { sendLog('2', 'error', `❌ Proxy: no URL inicial`); return false; }
-  const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(disc.url, 2500000);
-  if (resolvedUrl && resolvedUrl !== disc.url) {
-    try {
-      const mp = new URL(disc.url); const rp = new URL(resolvedUrl);
-      const dir = mp.pathname.substring(0, mp.pathname.lastIndexOf('/') + 1);
-      tigoProxyState.variantPath = rp.pathname.startsWith(dir) ? rp.pathname.substring(dir.length) : rp.pathname.split('/').pop();
-    } catch (_) { tigoProxyState.variantPath = resolvedUrl.split('/').pop()?.split('?')[0] || null; }
-    sendLog('2', 'success', `🎯 Proxy: variante → ${resolution} @ ${Math.round((bandwidth||0)/1000)}kbps`);
-  } else { tigoProxyState.variantPath = null; }
-  await refreshTigoToken();
-  if (tigoProxyState.refreshInterval) clearInterval(tigoProxyState.refreshInterval);
-  tigoProxyState.refreshInterval = setInterval(refreshTigoToken, TIGO_REFRESH_MS);
-  tigoProxyState.active = true;
-  sendLog('2', 'success', `✅ Proxy Tigo activo (refresh cada ${TIGO_REFRESH_MS/1000}s)`);
-  return true;
-};
-
-const stopTigoProxy = () => {
-  if (tigoProxyState.refreshInterval) { clearInterval(tigoProxyState.refreshInterval); tigoProxyState.refreshInterval = null; }
-  tigoProxyState.active = false; tigoProxyState.currentMasterUrl = null; tigoProxyState.refreshCount = 0;
-  sendLog('2', 'info', '🛑 Proxy Tigo detenido');
-};
-
-const getTigoVariantUrl = () => {
-  if (!tigoProxyState.currentMasterUrl) return null;
-  if (!tigoProxyState.variantPath) return tigoProxyState.currentMasterUrl;
+// Enriquecer una URL con nimblesessionid
+const appendNimbleSession = (url, sessionId) => {
+  if (!sessionId) return url;
   try {
-    const mp = new URL(tigoProxyState.currentMasterUrl);
-    const dir = mp.pathname.substring(0, mp.pathname.lastIndexOf('/') + 1);
-    return `${mp.origin}${dir}${tigoProxyState.variantPath}${mp.search}`;
-  } catch (_) { return tigoProxyState.currentMasterUrl; }
+    const parsed = new URL(url);
+    parsed.searchParams.set('nimblesessionid', sessionId);
+    return parsed.toString();
+  } catch (_) {
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}nimblesessionid=${sessionId}`;
+  }
 };
-// ==================== FIN TIGO HLS PROXY ====================
+// ==================== FIN TIGO SESSION ====================
 
 
 
@@ -869,24 +856,66 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // Tigo Sports: usar el proxy HLS local en vez de URL directa.
-    // El proxy refresca tokens cada 40s automáticamente.
+    // Tigo Sports: obtener URL virgen y extraer nimblesessionid para mantener sesión viva.
     const isTigoProcess = process_id === '2';
     if (isTigoProcess) {
-      if (!tigoProxyState.active) {
-        sendLog(process_id, 'info', '🚀 Iniciando Proxy HLS para Tigo...');
-        const proxyStarted = await startTigoProxy();
-        if (!proxyStarted) {
-          return res.status(502).json({ error: 'No se pudo iniciar el proxy HLS para Tigo Sports' });
+      sendLog(process_id, 'info', '🆕 Tigo: obteniendo URL virgen...');
+      const freshResult = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
+      if (!freshResult.url) {
+        return res.status(502).json({ error: freshResult.error || 'No se pudo obtener URL para Tigo Sports' });
+      }
+      effectiveSourceM3u8 = freshResult.url;
+      scrapeSessionCache.set(process_id, {
+        cookies: freshResult.cookies || null,
+        accessToken: freshResult.accessToken || null,
+        timestamp: Date.now(),
+      });
+      sendLog(process_id, 'success', `✅ Tigo: URL virgen obtenida`);
+      
+      // Resolver variante directa (720p) para evitar multi-variant parsing
+      const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(effectiveSourceM3u8, 2500000);
+      let variantUrl = effectiveSourceM3u8;
+      if (resolvedUrl && resolvedUrl !== effectiveSourceM3u8) {
+        variantUrl = resolvedUrl;
+        sendLog(process_id, 'info', `🎯 Tigo: variante → ${resolution} @ ${Math.round((bandwidth||0)/1000)}kbps`);
+      }
+      
+      // Extraer nimblesessionid del playlist para mantener la sesión viva
+      const sessionHeaders = {};
+      if (freshResult.accessToken) sessionHeaders['Authorization'] = `Bearer ${freshResult.accessToken}`;
+      const { sessionId, error: sessErr } = await extractNimbleSession(variantUrl, sessionHeaders);
+      
+      if (sessionId) {
+        // Obtener un SEGUNDO token fresco (el anterior se usó para descubrir variante + session)
+        sendLog(process_id, 'info', `🔑 Tigo: nimblesessionid=${sessionId} capturado, obteniendo token fresco...`);
+        const freshResult2 = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
+        if (freshResult2.url) {
+          effectiveSourceM3u8 = freshResult2.url;
+          scrapeSessionCache.set(process_id, {
+            cookies: freshResult2.cookies || null,
+            accessToken: freshResult2.accessToken || null,
+            timestamp: Date.now(),
+          });
+          
+          // Construir URL de variante con token fresco + nimblesessionid
+          const { resolvedUrl: freshVariant } = await resolveBestHLSVariant(freshResult2.url, 2500000);
+          const finalVariant = freshVariant || freshResult2.url;
+          effectiveSourceM3u8 = appendNimbleSession(finalVariant, sessionId);
+          sendLog(process_id, 'success', `✅ Tigo: URL con sesión Nimble lista (session=${sessionId})`);
         }
       } else {
-        // Proxy ya activo, solo refrescar token
-        sendLog(process_id, 'info', '🔄 Proxy ya activo, refrescando token...');
-        await refreshTigoToken();
+        sendLog(process_id, 'warn', `⚠️ Tigo: no se encontró nimblesessionid (${sessErr}), usando URL directa`);
+        // Obtener token fresco ya que el anterior se quemó
+        const freshResult2 = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
+        if (freshResult2.url) {
+          effectiveSourceM3u8 = freshResult2.url;
+          scrapeSessionCache.set(process_id, {
+            cookies: freshResult2.cookies || null,
+            accessToken: freshResult2.accessToken || null,
+            timestamp: Date.now(),
+          });
+        }
       }
-      // FFmpeg apuntará al proxy local
-      effectiveSourceM3u8 = `http://127.0.0.1:${PORT}/tigo-proxy/playlist.m3u8`;
-      sendLog(process_id, 'success', `✅ Tigo: FFmpeg apuntará al proxy local`);
     }
 
     // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP
@@ -1989,8 +2018,6 @@ app.post('/api/emit/stop', async (req, res) => {
       emissionStatuses.set(process_id, 'stopping');
       manualStopProcesses.add(process_id); // Marcar como parada manual para evitar auto-recovery
       manualStopProcesses.add(Number(process_id));
-      // Detener proxy Tigo si aplica
-      if (process_id === '2') stopTigoProxy();
       
       // Actualizar base de datos antes de detener (solo si Supabase está disponible)
       if (supabase) {
@@ -2236,63 +2263,6 @@ app.delete('/api/emit/files', (req, res) => {
   }
 });
 
-// ==================== TIGO PROXY ENDPOINT ====================
-// FFmpeg lee de http://127.0.0.1:PORT/tigo-proxy/playlist.m3u8
-// El proxy fetch el playlist real con el token fresco actual y reescribe URLs relativas a absolutas
-app.get('/tigo-proxy/playlist.m3u8', async (req, res) => {
-  if (!tigoProxyState.active || !tigoProxyState.currentMasterUrl) {
-    return res.status(503).send('#EXTM3U\n#EXT-X-ERROR:Proxy not active');
-  }
-  try {
-    const variantUrl = getTigoVariantUrl();
-    if (!variantUrl) return res.status(503).send('#EXTM3U\n#EXT-X-ERROR:No variant URL');
-    
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      'Origin': 'https://www.tdmax.com',
-      'Referer': 'https://www.tdmax.com/',
-    };
-    if (tigoProxyState.accessToken) headers['Authorization'] = `Bearer ${tigoProxyState.accessToken}`;
-    if (tigoProxyState.cookies) headers['Cookie'] = tigoProxyState.cookies;
-    
-    const resp = await fetch(variantUrl, { headers });
-    if (!resp.ok) {
-      // Token might be stale, force refresh
-      sendLog('2', 'warn', `⚠️ Proxy: playlist fetch ${resp.status}, forzando refresh...`);
-      await refreshTigoToken();
-      const retryUrl = getTigoVariantUrl();
-      if (!retryUrl) return res.status(502).send('#EXTM3U\n#EXT-X-ERROR:Refresh failed');
-      const resp2 = await fetch(retryUrl, { headers: { ...headers, Authorization: tigoProxyState.accessToken ? `Bearer ${tigoProxyState.accessToken}` : undefined } });
-      if (!resp2.ok) return res.status(502).send(`#EXTM3U\n#EXT-X-ERROR:${resp2.status}`);
-      let body = await resp2.text();
-      // Reescribir URLs relativas a absolutas
-      const baseUrl = new URL(retryUrl);
-      const baseDir = baseUrl.origin + baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
-      body = body.replace(/^(?!#)(.*\.ts.*)$/gm, (match) => {
-        if (match.startsWith('http')) return match;
-        return baseDir + match;
-      });
-      res.set('Content-Type', 'application/vnd.apple.mpegurl');
-      res.set('Cache-Control', 'no-cache, no-store');
-      return res.send(body);
-    }
-    
-    let body = await resp.text();
-    const baseUrl = new URL(variantUrl);
-    const baseDir = baseUrl.origin + baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
-    body = body.replace(/^(?!#)(.*\.ts.*)$/gm, (match) => {
-      if (match.startsWith('http')) return match;
-      return baseDir + match;
-    });
-    res.set('Content-Type', 'application/vnd.apple.mpegurl');
-    res.set('Cache-Control', 'no-cache, no-store');
-    return res.send(body);
-  } catch (err) {
-    sendLog('2', 'error', `❌ Proxy playlist error: ${err.message}`);
-    return res.status(500).send(`#EXTM3U\n#EXT-X-ERROR:${err.message}`);
-  }
-});
-// ==================== FIN TIGO PROXY ENDPOINT ====================
 
 
 app.get('/api/status', (req, res) => {
