@@ -165,6 +165,10 @@ const recoveryAttempts = new Map(); // Map<processId, number>
 // Cache de resolución por canal para evitar re-sondear en cada recovery
 const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, height }>
 
+// Cache de sesión de scraping: guarda cookies + accessToken para pasarlos a FFmpeg
+// Esto es CRÍTICO para Tigo cuyo CDN valida cookies/token junto con la IP
+const scrapeSessionCache = new Map(); // Map<processId, { cookies, accessToken, timestamp }>
+
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 
