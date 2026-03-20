@@ -757,8 +757,8 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
-    // Proceso 0 (Libre) y 5 (Canal 6): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
-    const isHDReencode = String(process_id) === '0' || String(process_id) === '5';
+    // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
+    const isHDReencode = String(process_id) === '0' || String(process_id) === '5' || String(process_id) === '10';
     
     if (isHDReencode) {
       // Resolver la variante de MAYOR calidad (sin límite de target)
@@ -771,7 +771,8 @@ app.post('/api/emit', async (req, res) => {
         const varList = allVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
         sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
       }
-      const procLabel = String(process_id) === '0' ? 'Libre' : 'Canal 6';
+      const hdLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
+      const procLabel = hdLabels[String(process_id)] || 'HD';
       sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad disponible)`);
       sendLog(process_id, 'info', `🔗 URL variante: ${actualSource.substring(0, 120)}...`);
       
@@ -1246,11 +1247,12 @@ app.post('/api/emit', async (req, res) => {
               sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName} error: ${err.message}`);
             }
           }, 500);
-        } else if (process_id === '0' || process_id === 0 || DIRECT_URL_CHANNELS[String(process_id)]) {
-          // Proceso 0 (Libre) o canales con URL directa (Canal 6): reutilizar la misma URL M3U8 guardada en DB
+        } else if (process_id === '0' || process_id === 0 || process_id === '10' || process_id === 10 || DIRECT_URL_CHANNELS[String(process_id)]) {
+          // Proceso 0 (Disney 7), 10 (Disney 8) o canales con URL directa (Canal 6): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
           const directChannel = DIRECT_URL_CHANNELS[String(process_id)];
-          const procLabel = directChannel ? directChannel.channelName : 'Libre';
+          const manualLabels = { '0': 'Disney 7', '10': 'Disney 8' };
+          const procLabel = directChannel ? directChannel.channelName : (manualLabels[String(process_id)] || 'Manual');
           sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code}) - Reiniciando con misma URL en 500ms...`);
           setTimeout(async () => {
             try {
