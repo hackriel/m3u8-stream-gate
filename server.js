@@ -1044,11 +1044,9 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
-    // Tigo Sports (proceso 2): su CDN Streann valida headers más estrictos
-    // Usar el Origin/Referer de TDMax con headers adicionales de seguridad
-    const isTigo = String(process_id) === '2';
+    // Tigo (procesos 2, 8, 9): su CDN Streann valida headers más estrictos
+    const isTigo = ['2', '8', '9'].includes(String(process_id));
     if (isTigo) {
-      // Streann CDN para Tigo requiere headers específicos que simulan el player embebido de TDMax
       refererDomain = 'https://www.tdmax.com/';
       originDomain = 'https://www.tdmax.com';
     }
