@@ -785,6 +785,7 @@ app.post('/api/emit', async (req, res) => {
   try {
     const { source_m3u8, target_rtmp, process_id: rawProcessId = '0', is_recovery = false } = req.body;
     const process_id = String(rawProcessId);
+    let effectiveSourceM3u8 = source_m3u8;
 
     // Resetear contador SOLO cuando es inicio manual
     if (!is_recovery) {
@@ -794,11 +795,35 @@ app.post('/api/emit', async (req, res) => {
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
 
     // Validaciones
-    if (!source_m3u8 || !target_rtmp) {
+    if (!effectiveSourceM3u8 || !target_rtmp) {
       sendLog(process_id, 'error', 'Faltan parámetros requeridos: source_m3u8 y target_rtmp');
       return res.status(400).json({ 
         error: 'Faltan parámetros requeridos: source_m3u8 y target_rtmp' 
       });
+    }
+
+    // Tigo Sports: obtener SIEMPRE una URL fresca justo antes de arrancar FFmpeg.
+    // Esto evita reutilizar una URL/token ya expuesta en la UI o consumida previamente.
+    const shouldForceFreshTigoScrape = process_id === '2' && !is_recovery;
+    if (shouldForceFreshTigoScrape) {
+      sendLog(process_id, 'info', '🆕 Tigo: obteniendo URL virgen inmediatamente antes de iniciar FFmpeg...');
+      const freshTigoResult = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
+
+      if (!freshTigoResult.url) {
+        sendLog(process_id, 'error', `❌ No se pudo obtener URL fresca de Tigo: ${freshTigoResult.error || 'sin detalle'}`);
+        return res.status(502).json({
+          error: freshTigoResult.error || 'No se pudo obtener una URL fresca para Tigo Sports',
+        });
+      }
+
+      effectiveSourceM3u8 = freshTigoResult.url;
+      scrapeSessionCache.set(process_id, {
+        cookies: freshTigoResult.cookies || null,
+        accessToken: freshTigoResult.accessToken || null,
+        timestamp: Date.now(),
+      });
+
+      sendLog(process_id, 'success', `✅ Tigo: URL fresca lista para FFmpeg (cookies: ${freshTigoResult.cookies ? 'sí' : 'no'}, token: ${freshTigoResult.accessToken ? 'sí' : 'no'})`);
     }
 
     // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP
@@ -853,7 +878,7 @@ app.post('/api/emit', async (req, res) => {
       // Resetear recovery_count y failure state en inicio manual
       const upsertData = {
           id: parseInt(process_id),
-          m3u8: source_m3u8,
+          m3u8: effectiveSourceM3u8,
           rtmp: target_rtmp,
           is_active: true,
           is_emitting: true,
@@ -899,7 +924,7 @@ app.post('/api/emit', async (req, res) => {
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
     try {
-      const sourceUrl = new URL(source_m3u8);
+      const sourceUrl = new URL(effectiveSourceM3u8);
       if (sourceUrl.hostname.includes('teletica.com')) {
         refererDomain = 'https://www.teletica.com/';
         originDomain = 'https://www.teletica.com';
@@ -948,7 +973,7 @@ app.post('/api/emit', async (req, res) => {
     
     if (isHDReencode) {
       // Resolver la variante de MAYOR calidad (sin límite de target)
-      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(source_m3u8, 0);
+      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(effectiveSourceM3u8, 0);
       const actualSource = resolvedUrl;
       const bwKbps = Math.round(bandwidth / 1000);
       
@@ -1027,7 +1052,7 @@ app.post('/api/emit', async (req, res) => {
         '-fflags', '+genpts+discardcorrupt',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
-        '-i', source_m3u8,
+        '-i', effectiveSourceM3u8,
         '-map', '0:v:0?', '-map', '0:a:0?',
         '-c:v', 'libx264',
         '-preset', 'veryfast',
@@ -1063,7 +1088,7 @@ app.post('/api/emit', async (req, res) => {
       status: 'starting',
       startTime: Date.now(),
       target_rtmp: target_rtmp,
-      source_m3u8: source_m3u8
+       source_m3u8: effectiveSourceM3u8
     };
     ffmpegProcesses.set(process_id, processInfo);
 
