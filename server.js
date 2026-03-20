@@ -757,10 +757,10 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
-    // Proceso 0 (Libre): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
-    const isLibre = String(process_id) === '0';
+    // Proceso 0 (Libre) y 5 (Canal 6): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
+    const isHDReencode = String(process_id) === '0' || String(process_id) === '5';
     
-    if (isLibre) {
+    if (isHDReencode) {
       // Resolver la variante de MAYOR calidad (sin límite de target)
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(source_m3u8, 0);
       const actualSource = resolvedUrl;
