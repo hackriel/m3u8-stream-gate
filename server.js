@@ -858,13 +858,16 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // Tigo Sports: obtener URL virgen y extraer nimblesessionid para mantener sesión viva.
-    const isTigoProcess = process_id === '2';
+    // Todos los procesos Tigo (2=Copy, 8=720p, 9=Master): obtener URL virgen + nimblesessionid
+    const isTigoProcess = ['2', '8', '9'].includes(process_id);
+    const tigoChannelId = '664237788f085ac1f2a15f81';
+    const tigoChannelName = CHANNEL_MAP[process_id]?.channelName || 'Tigo';
+    
     if (isTigoProcess) {
-      sendLog(process_id, 'info', '🆕 Tigo: obteniendo URL virgen...');
-      const freshResult = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
+      sendLog(process_id, 'info', `🆕 ${tigoChannelName}: obteniendo URL virgen...`);
+      const freshResult = await scrapeStreamUrlLocal(tigoChannelId, tigoChannelName);
       if (!freshResult.url) {
-        return res.status(502).json({ error: freshResult.error || 'No se pudo obtener URL para Tigo Sports' });
+        return res.status(502).json({ error: freshResult.error || 'No se pudo obtener URL para Tigo' });
       }
       effectiveSourceM3u8 = freshResult.url;
       scrapeSessionCache.set(process_id, {
@@ -872,50 +875,61 @@ app.post('/api/emit', async (req, res) => {
         accessToken: freshResult.accessToken || null,
         timestamp: Date.now(),
       });
-      sendLog(process_id, 'success', `✅ Tigo: URL virgen obtenida`);
+      sendLog(process_id, 'success', `✅ ${tigoChannelName}: URL virgen obtenida`);
       
-      // Resolver variante directa (720p) para evitar multi-variant parsing
-      const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(effectiveSourceM3u8, 2500000);
-      let variantUrl = effectiveSourceM3u8;
-      if (resolvedUrl && resolvedUrl !== effectiveSourceM3u8) {
-        variantUrl = resolvedUrl;
-        sendLog(process_id, 'info', `🎯 Tigo: variante → ${resolution} @ ${Math.round((bandwidth||0)/1000)}kbps`);
-      }
-      
-      // Extraer nimblesessionid del playlist para mantener la sesión viva
-      const sessionHeaders = {};
-      if (freshResult.accessToken) sessionHeaders['Authorization'] = `Bearer ${freshResult.accessToken}`;
-      const { sessionId, error: sessErr } = await extractNimbleSession(variantUrl, sessionHeaders);
-      
-      if (sessionId) {
-        // Obtener un SEGUNDO token fresco (el anterior se usó para descubrir variante + session)
-        sendLog(process_id, 'info', `🔑 Tigo: nimblesessionid=${sessionId} capturado, obteniendo token fresco...`);
-        const freshResult2 = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
-        if (freshResult2.url) {
-          effectiveSourceM3u8 = freshResult2.url;
-          scrapeSessionCache.set(process_id, {
-            cookies: freshResult2.cookies || null,
-            accessToken: freshResult2.accessToken || null,
-            timestamp: Date.now(),
-          });
-          
-          // Construir URL de variante con token fresco + nimblesessionid
-          const { resolvedUrl: freshVariant } = await resolveBestHLSVariant(freshResult2.url, 2500000);
-          const finalVariant = freshVariant || freshResult2.url;
-          effectiveSourceM3u8 = appendNimbleSession(finalVariant, sessionId);
-          sendLog(process_id, 'success', `✅ Tigo: URL con sesión Nimble lista (session=${sessionId})`);
+      // Proceso 9 (Tigo Master): usar master playlist directa, sin resolver variante
+      if (process_id !== '9') {
+        // Procesos 2 y 8: resolver variante directa (720p)
+        const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(effectiveSourceM3u8, 2500000);
+        let variantUrl = effectiveSourceM3u8;
+        if (resolvedUrl && resolvedUrl !== effectiveSourceM3u8) {
+          variantUrl = resolvedUrl;
+          sendLog(process_id, 'info', `🎯 ${tigoChannelName}: variante → ${resolution} @ ${Math.round((bandwidth||0)/1000)}kbps`);
+        }
+        
+        // Extraer nimblesessionid del playlist para mantener la sesión viva
+        const sessionHeaders = {};
+        if (freshResult.accessToken) sessionHeaders['Authorization'] = `Bearer ${freshResult.accessToken}`;
+        const { sessionId, error: sessErr } = await extractNimbleSession(variantUrl, sessionHeaders);
+        
+        if (sessionId) {
+          sendLog(process_id, 'info', `🔑 ${tigoChannelName}: nimblesessionid=${sessionId}, obteniendo token fresco...`);
+          const freshResult2 = await scrapeStreamUrlLocal(tigoChannelId, tigoChannelName);
+          if (freshResult2.url) {
+            effectiveSourceM3u8 = freshResult2.url;
+            scrapeSessionCache.set(process_id, {
+              cookies: freshResult2.cookies || null,
+              accessToken: freshResult2.accessToken || null,
+              timestamp: Date.now(),
+            });
+            const { resolvedUrl: freshVariant } = await resolveBestHLSVariant(freshResult2.url, 2500000);
+            const finalVariant = freshVariant || freshResult2.url;
+            effectiveSourceM3u8 = appendNimbleSession(finalVariant, sessionId);
+            sendLog(process_id, 'success', `✅ ${tigoChannelName}: URL con sesión Nimble (session=${sessionId})`);
+          }
+        } else {
+          sendLog(process_id, 'warn', `⚠️ ${tigoChannelName}: no nimblesessionid (${sessErr}), obteniendo token fresco...`);
+          const freshResult2 = await scrapeStreamUrlLocal(tigoChannelId, tigoChannelName);
+          if (freshResult2.url) {
+            effectiveSourceM3u8 = freshResult2.url;
+            scrapeSessionCache.set(process_id, { cookies: freshResult2.cookies || null, accessToken: freshResult2.accessToken || null, timestamp: Date.now() });
+          }
         }
       } else {
-        sendLog(process_id, 'warn', `⚠️ Tigo: no se encontró nimblesessionid (${sessErr}), usando URL directa`);
-        // Obtener token fresco ya que el anterior se quemó
-        const freshResult2 = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
-        if (freshResult2.url) {
-          effectiveSourceM3u8 = freshResult2.url;
-          scrapeSessionCache.set(process_id, {
-            cookies: freshResult2.cookies || null,
-            accessToken: freshResult2.accessToken || null,
-            timestamp: Date.now(),
-          });
+        // Proceso 9: usar master directo, solo appendear nimblesessionid si existe
+        const sessionHeaders = {};
+        if (freshResult.accessToken) sessionHeaders['Authorization'] = `Bearer ${freshResult.accessToken}`;
+        const { sessionId } = await extractNimbleSession(effectiveSourceM3u8, sessionHeaders);
+        if (sessionId) {
+          // Obtener token fresco (el anterior se quemó con el fetch)
+          const freshResult2 = await scrapeStreamUrlLocal(tigoChannelId, tigoChannelName);
+          if (freshResult2.url) {
+            effectiveSourceM3u8 = appendNimbleSession(freshResult2.url, sessionId);
+            scrapeSessionCache.set(process_id, { cookies: freshResult2.cookies || null, accessToken: freshResult2.accessToken || null, timestamp: Date.now() });
+            sendLog(process_id, 'success', `✅ ${tigoChannelName}: Master con sesión Nimble (session=${sessionId})`);
+          }
+        } else {
+          sendLog(process_id, 'info', `📡 ${tigoChannelName}: usando master directo sin session ID`);
         }
       }
     }
