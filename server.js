@@ -1204,13 +1204,18 @@ app.post('/api/emit', async (req, res) => {
           }
         }
         
-        // Extraer estadísticas básicas del progreso
+        // Extraer estadísticas básicas del progreso (throttled a cada 10s)
         const frameMatch = output.match(/frame=\s*(\d+)/);
         const fpsMatch = output.match(/fps=\s*([\d.]+)/);
         const bitrateMatch = output.match(/bitrate=\s*([\d.]+)kbits\/s/);
         
         if (frameMatch && fpsMatch) {
-          sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}, bitrate=${bitrateMatch ? bitrateMatch[1] + 'kbps' : 'N/A'}`);
+          const now = Date.now();
+          const lastLog = lastProgressLog.get(process_id) || 0;
+          if (now - lastLog >= PROGRESS_LOG_INTERVAL) {
+            lastProgressLog.set(process_id, now);
+            sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}, bitrate=${bitrateMatch ? bitrateMatch[1] + 'kbps' : 'N/A'}`);
+          }
         }
       } else if (
         output.includes('not enough frames to estimate rate') ||
