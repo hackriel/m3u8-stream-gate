@@ -175,6 +175,8 @@ const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 
 // Watchdog: última vez que cada proceso produjo frames (timestamp ms)
 const lastFrameTime = new Map(); // Map<processId, timestampMs>
+const lastProgressLog = new Map(); // Map<processId, timestampMs> — throttle de logs de progreso
+const PROGRESS_LOG_INTERVAL = 10000; // Solo loguear progreso cada 10 segundos
 const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames = proceso colgado
 const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
 
@@ -1202,13 +1204,18 @@ app.post('/api/emit', async (req, res) => {
           }
         }
         
-        // Extraer estadísticas básicas del progreso
+        // Extraer estadísticas básicas del progreso (throttled a cada 10s)
         const frameMatch = output.match(/frame=\s*(\d+)/);
         const fpsMatch = output.match(/fps=\s*([\d.]+)/);
         const bitrateMatch = output.match(/bitrate=\s*([\d.]+)kbits\/s/);
         
         if (frameMatch && fpsMatch) {
-          sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}, bitrate=${bitrateMatch ? bitrateMatch[1] + 'kbps' : 'N/A'}`);
+          const now = Date.now();
+          const lastLog = lastProgressLog.get(process_id) || 0;
+          if (now - lastLog >= PROGRESS_LOG_INTERVAL) {
+            lastProgressLog.set(process_id, now);
+            sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}, bitrate=${bitrateMatch ? bitrateMatch[1] + 'kbps' : 'N/A'}`);
+          }
         }
       } else if (
         output.includes('not enough frames to estimate rate') ||
@@ -1846,7 +1853,12 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         const frameMatch = output.match(/frame=\s*(\d+)/);
         const fpsMatch = output.match(/fps=\s*([\d.]+)/);
         if (frameMatch && fpsMatch) {
-          sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}`);
+          const now = Date.now();
+          const lastLog = lastProgressLog.get(process_id) || 0;
+          if (now - lastLog >= PROGRESS_LOG_INTERVAL) {
+            lastProgressLog.set(process_id, now);
+            sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}`);
+          }
         }
       } else if (output.includes('error') || output.includes('Error') || output.includes('failed') || output.includes('Failed')) {
         const isNoise =
