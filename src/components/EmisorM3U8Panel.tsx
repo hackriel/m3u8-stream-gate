@@ -15,10 +15,11 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 10;
+const NUM_PROCESSES = 11;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const EVENTO_INDEX = 8; // "Evento" process - dynamic channel ID from TDMax URL
 const DEMO_TIGO_INDEX = 9; // "Demo TIGO" process - dynamic channel ID from TDMax URL
+const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 
 // Tipo para un proceso de emisión
 interface EmissionProcess {
@@ -58,7 +59,7 @@ interface ChannelConfig {
 }
 
 const CHANNEL_CONFIGS: ChannelConfig[] = [
-  { name: "Libre", scrapeFn: null, channelId: null, fetchLabel: "" },
+  { name: "Disney 7", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
   { name: "Tigo Sports", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
   { name: "TDmas 1", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
@@ -68,6 +69,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "Subida", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Evento", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer Fuente" },
   { name: "Demo TIGO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer Fuente" },
+  { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -824,7 +826,7 @@ export default function EmisorM3U8Panel() {
   // Colores únicos para cada proceso
   const getProcessColor = (processIndex: number) => {
     const colors = [
-      { bg: "bg-gray-500", text: "text-gray-400", stroke: "#9ca3af", name: "Libre" },
+      { bg: "bg-gray-500", text: "text-gray-400", stroke: "#9ca3af", name: "Disney 7" },
       { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "FUTV" },
       { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Tigo Sports" },
       { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "TDmas 1" },
@@ -834,6 +836,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Subida" },
       { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "Evento" },
       { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "Demo TIGO" },
+      { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
     ];
     return colors[processIndex];
   };
