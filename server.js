@@ -141,10 +141,12 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPA
 // Mapa de canales scrapeados (definido una sola vez, usado en recovery y drop-signal)
 const CHANNEL_MAP = {
   '1': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV' },
-  '2': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Sports' },
+  '2': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Copy' },
   '3': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
   '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
+  '8': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo 720p' },
+  '9': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Master' },
 };
 
 // Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL
