@@ -1135,11 +1135,10 @@ app.post('/api/emit', async (req, res) => {
         '-flvflags', 'no_duration_filesize',
         target_rtmp,
       ];
-    } else if (isTigo) {
-      // Tigo Sports (proceso 2): stream copy directo sin re-codificar.
-      // Esto reduce latencia de procesamiento, evitando que FFmpeg se atrase
-      // y necesite recargar el playlist cuando el token ya expiró.
-      sendLog(process_id, 'info', `📡 Tigo: Stream copy directo (sin re-codificar)${isRecovery ? ' [recovery]' : ''}...`);
+    } else if (process_id === '2' || process_id === '9') {
+      // Tigo Copy (2) y Tigo Master (9): stream copy directo sin re-codificar.
+      const label = process_id === '2' ? 'Tigo Copy' : 'Tigo Master';
+      sendLog(process_id, 'info', `📡 ${label}: Stream copy directo${isRecovery ? ' [recovery]' : ''}...`);
       
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -1163,6 +1162,52 @@ app.post('/api/emit', async (req, res) => {
         '-map', '0:v:0?', '-map', '0:a:0?',
         '-c:v', 'copy',
         '-c:a', 'copy',
+        '-max_muxing_queue_size', '1024',
+        '-reset_timestamps', '1',
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        target_rtmp,
+      ];
+    } else if (process_id === '8') {
+      // Tigo 720p: re-codificación como los demás canales
+      sendLog(process_id, 'info', `🎬 Tigo 720p: Re-codificando a 720p @ 2500kbps${isRecovery ? ' [recovery]' : ''}...`);
+      
+      ffmpegArgs = [
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
+        ...extraFfmpegInputArgs,
+        '-timeout', '30000000',
+        '-rw_timeout', '30000000',
+        '-reconnect', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '2',
+        '-reconnect_on_network_error', '1',
+        '-reconnect_on_http_error', '5xx',
+        '-multiple_requests', '1',
+        '-http_persistent', '1',
+        '-live_start_index', '-3',
+        '-fflags', '+genpts+discardcorrupt',
+        '-analyzeduration', analyzeDuration,
+        '-probesize', probeSize,
+        '-i', inputSourceUrl,
+        '-map', '0:v:0?', '-map', '0:a:0?',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-profile:v', 'high',
+        '-b:v', '2500k',
+        '-minrate', '2200k',
+        '-maxrate', '2800k',
+        '-bufsize', '5000k',
+        '-bf', '2',
+        '-vf', 'scale=-2:720',
+        '-r', '30',
+        '-g', '60',
+        '-keyint_min', '60',
+        '-sc_threshold', '0',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-reset_timestamps', '1',
         '-f', 'flv',
