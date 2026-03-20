@@ -132,6 +132,7 @@ const emissionStatuses = new Map(); // Map<processId, status>
 const autoRecoveryInProgress = new Map(); // Map<processId, boolean>
 const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hacer auto-recovery)
 const detectedErrors = new Map(); // Map<processId, { type, reason }> — último error detectado por stderr
+const tigoRefreshTimers = new Map(); // Map<processId, intervalId> — timer de refresh proactivo para Tigo
 
 // FUTV Auto-recovery: obtener nueva URL y reiniciar emisión
 const SUPABASE_FUNCTIONS_URL = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1`;
