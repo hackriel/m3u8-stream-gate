@@ -175,6 +175,8 @@ const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 
 // Watchdog: última vez que cada proceso produjo frames (timestamp ms)
 const lastFrameTime = new Map(); // Map<processId, timestampMs>
+const lastProgressLog = new Map(); // Map<processId, timestampMs> — throttle de logs de progreso
+const PROGRESS_LOG_INTERVAL = 10000; // Solo loguear progreso cada 10 segundos
 const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames = proceso colgado
 const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
 
