@@ -1246,61 +1246,70 @@ app.post('/api/emit', async (req, res) => {
               sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName} error: ${err.message}`);
             }
           }, 500);
-        } else if (process_id === '0' || process_id === 0) {
-          // Proceso 0 (Libre): reutilizar la misma URL M3U8 guardada en DB
-          sendLog(process_id, 'warn', `🔄 Libre caído (código ${code}) - Reiniciando con misma URL en 500ms...`);
+        } else if (process_id === '0' || process_id === 0 || DIRECT_URL_CHANNELS[String(process_id)]) {
+          // Proceso 0 (Libre) o canales con URL directa (Canal 6): reutilizar la misma URL M3U8 guardada en DB
+          const procId = parseInt(String(process_id), 10);
+          const directChannel = DIRECT_URL_CHANNELS[String(process_id)];
+          const procLabel = directChannel ? directChannel.channelName : 'Libre';
+          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code}) - Reiniciando con misma URL en 500ms...`);
           setTimeout(async () => {
             try {
               if (!supabase) {
-                sendLog(0, 'error', '❌ AUTO-RECOVERY Libre: Supabase no disponible');
+                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: Base de datos no disponible`);
                 return;
               }
               const { data: procData } = await supabase
                 .from('emission_processes')
                 .select('m3u8, rtmp')
-                .eq('id', 0)
+                .eq('id', procId)
                 .single();
               
-              if (procData && procData.m3u8 && procData.rtmp) {
-                sendLog(0, 'info', `🔄 AUTO-RECOVERY Libre: Reiniciando con URL existente...`);
-                autoRecoveryInProgress.set('0', true);
+              // Para canales directos, usar la URL fija si no hay guardada en DB
+              let sourceUrl = procData?.m3u8;
+              if (!sourceUrl && directChannel) {
+                sourceUrl = directChannel.url;
+              }
+              const targetRtmp = procData?.rtmp;
+              
+              if (sourceUrl && targetRtmp) {
+                sendLog(procId, 'info', `🔄 AUTO-RECOVERY ${procLabel}: Reiniciando con URL existente...`);
+                autoRecoveryInProgress.set(String(process_id), true);
                 
                 await supabase
                   .from('emission_processes')
                   .update({ emit_status: 'starting', is_emitting: true, is_active: true })
-                  .eq('id', 0);
+                  .eq('id', procId);
                 
                 const emitResp = await fetch(`http://localhost:${PORT}/api/emit`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    source_m3u8: procData.m3u8,
-                    target_rtmp: procData.rtmp,
-                    process_id: '0',
+                    source_m3u8: sourceUrl,
+                    target_rtmp: targetRtmp,
+                    process_id: String(process_id),
                     is_recovery: true
                   })
                 });
                 
                 if (emitResp.ok) {
-                  sendLog(0, 'success', '✅ AUTO-RECOVERY Libre completado: Emisión reiniciada');
-                  // Incrementar contador de recovery
+                  sendLog(procId, 'success', `✅ AUTO-RECOVERY ${procLabel} completado: Emisión reiniciada`);
                   if (supabase) {
-                    const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: 0 });
+                    const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: procId });
                     if (rpcErr) {
-                      const { data: row } = await supabase.from('emission_processes').select('recovery_count').eq('id', 0).single();
-                      await supabase.from('emission_processes').update({ recovery_count: (row?.recovery_count || 0) + 1 }).eq('id', 0);
+                      const { data: row } = await supabase.from('emission_processes').select('recovery_count').eq('id', procId).single();
+                      await supabase.from('emission_processes').update({ recovery_count: (row?.recovery_count || 0) + 1 }).eq('id', procId);
                     }
                   }
                 } else {
-                  sendLog(0, 'error', `❌ AUTO-RECOVERY Libre falló: ${emitResp.status}`);
+                  sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} falló: ${emitResp.status}`);
                 }
-                autoRecoveryInProgress.set('0', false);
+                autoRecoveryInProgress.set(String(process_id), false);
               } else {
-                sendLog(0, 'error', '❌ AUTO-RECOVERY Libre: No hay M3U8 o RTMP guardados');
+                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: No hay M3U8 o RTMP guardados`);
               }
             } catch (err) {
-              sendLog(0, 'error', `❌ AUTO-RECOVERY Libre error: ${err.message}`);
-              autoRecoveryInProgress.set('0', false);
+              sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
+              autoRecoveryInProgress.set(String(process_id), false);
             }
           }, 500);
         }
