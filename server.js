@@ -1007,19 +1007,17 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
+    // Para Tigo (proceso 2), el proxy maneja la auth y los segmentos tienen sus propios tokens
     const cachedSession = scrapeSessionCache.get(process_id);
     let extraFfmpegInputArgs = [];
-    if (cachedSession) {
+    if (cachedSession && !isTigo) {
       const sessionAge = Date.now() - cachedSession.timestamp;
-      if (sessionAge < 300000) { // Solo usar si tiene menos de 5 minutos
+      if (sessionAge < 300000) {
         if (cachedSession.cookies) {
-          // FFmpeg -cookies espera formato: "key=value; path=/; domain=.example.com\n"
-          // Pero para simplificar, pasamos las cookies crudas
           extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
           sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
         }
         if (cachedSession.accessToken) {
-          // Agregar Authorization header para CDNs que lo validen (como Tigo/Streann)
           extraFfmpegInputArgs.push('-headers', `Authorization: Bearer ${cachedSession.accessToken}\r\n`);
           sendLog(process_id, 'info', `🔑 Inyectando accessToken a FFmpeg`);
         }
