@@ -1249,8 +1249,8 @@ export default function EmisorM3U8Panel() {
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="mb-6 px-1 overflow-x-auto scrollbar-hide">
-            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border inline-flex flex-nowrap gap-1 min-w-max md:flex-wrap md:min-w-0 md:w-auto md:mx-auto">
+          <div className="mb-6 px-1 overflow-x-auto scrollbar-hide md:flex md:justify-center">
+            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border inline-flex flex-nowrap gap-1 min-w-max md:flex-wrap md:min-w-0">
               {Array.from({ length: NUM_PROCESSES }, (_, i) => {
                 const color = getProcessColor(i);
                 const process = processes[i];
