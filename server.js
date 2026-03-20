@@ -143,13 +143,19 @@ const CHANNEL_MAP = {
   '2': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Sports' },
   '3': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
   '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
-  '5': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
+};
+
+// Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL
+const DIRECT_URL_CHANNELS = {
+  '5': { 
+    channelName: 'Canal 6', 
+    url: 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8'
+  },
 };
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
-  '5': 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8', // Canal 6 oficial
   '6': 'https://mdstrm.com/live-stream-playlist/5a7b1e63a8da282c34d65445.m3u8', // Multimedios oficial
 };
 
