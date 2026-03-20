@@ -423,6 +423,15 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       
       if (result.url) {
         newUrl = result.url;
+        // Cachear sesión para FFmpeg (cookies + token)
+        if (result.cookies || result.accessToken) {
+          scrapeSessionCache.set(String(process_id), {
+            cookies: result.cookies || null,
+            accessToken: result.accessToken || null,
+            timestamp: Date.now(),
+          });
+          sendLog(process_id, 'info', `🔐 Sesión de recovery cacheada (cookies: ${result.cookies ? 'sí' : 'no'})`);
+        }
         sendLog(process_id, 'success', `✅ URL obtenida para ${channelName}`);
       } else if (fallbackUrl) {
         sendLog(process_id, 'warn', `⚠️ Scraping falló (${result.error || 'sin URL'}), usando URL oficial de respaldo para ${channelName}`);
