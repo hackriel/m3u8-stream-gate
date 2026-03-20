@@ -168,6 +168,11 @@ const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, heig
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 
+// Refresh proactivo de URLs con firma corta (ej: Tigo Sports)
+const sourceRefreshTimers = new Map(); // Map<processId, Timeout>
+const TIGO_PROCESS_ID = '2';
+const TIGO_REFRESH_INTERVAL_MS = 45000; // refrescar antes de que expire el token (~1 min)
+
 // Watchdog: última vez que cada proceso produjo frames (timestamp ms)
 const lastFrameTime = new Map(); // Map<processId, timestampMs>
 const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames = proceso colgado
@@ -344,6 +349,72 @@ const scrapeStreamUrl = async (channelId, channelName) => {
   return await scrapeStreamUrlRemote(channelId, channelName);
 };
 // ==================== FIN SCRAPING ====================
+
+const clearSourceRefreshTimer = (processId) => {
+  const existingTimer = sourceRefreshTimers.get(String(processId));
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    sourceRefreshTimers.delete(String(processId));
+  }
+};
+
+const scheduleTigoSourceRefresh = (processId, targetRtmp) => {
+  const normalizedProcessId = String(processId);
+  if (normalizedProcessId !== TIGO_PROCESS_ID || !targetRtmp) return;
+
+  clearSourceRefreshTimer(normalizedProcessId);
+
+  const timer = setTimeout(async () => {
+    try {
+      const currentStatus = emissionStatuses.get(normalizedProcessId);
+      const currentProc = ffmpegProcesses.get(normalizedProcessId);
+      if (currentStatus !== 'running' || !currentProc?.process || currentProc.process.killed) {
+        return;
+      }
+
+      sendLog(normalizedProcessId, 'info', '🔄 Tigo Sports: renovando URL antes de expiración del token...');
+      const result = await scrapeStreamUrl(CHANNEL_MAP[TIGO_PROCESS_ID].channelId, CHANNEL_MAP[TIGO_PROCESS_ID].channelName);
+
+      if (!result.url) {
+        sendLog(normalizedProcessId, 'warn', `⚠️ Tigo Sports: no se pudo renovar la URL (${result.error || 'sin detalle'})`);
+        scheduleTigoSourceRefresh(normalizedProcessId, targetRtmp);
+        return;
+      }
+
+      if (supabase) {
+        await supabase
+          .from('emission_processes')
+          .update({ m3u8: result.url, emit_status: 'starting', is_emitting: true, is_active: true })
+          .eq('id', parseInt(normalizedProcessId));
+      }
+
+      const emitResp = await fetch(`http://localhost:${PORT}/api/emit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_m3u8: result.url,
+          target_rtmp: targetRtmp,
+          process_id: normalizedProcessId,
+          is_recovery: true,
+        }),
+      });
+
+      if (!emitResp.ok) {
+        const errText = await emitResp.text().catch(() => '');
+        sendLog(normalizedProcessId, 'warn', `⚠️ Tigo Sports: falló refresh proactivo (${emitResp.status}) ${errText.substring(0, 120)}`);
+        scheduleTigoSourceRefresh(normalizedProcessId, targetRtmp);
+        return;
+      }
+
+      sendLog(normalizedProcessId, 'success', '✅ Tigo Sports: URL renovada antes del vencimiento');
+    } catch (error) {
+      sendLog(normalizedProcessId, 'warn', `⚠️ Tigo Sports: error en refresh proactivo (${error.message})`);
+      scheduleTigoSourceRefresh(normalizedProcessId, targetRtmp);
+    }
+  }, TIGO_REFRESH_INTERVAL_MS);
+
+  sourceRefreshTimers.set(normalizedProcessId, timer);
+}
 
 
 
@@ -754,6 +825,7 @@ app.post('/api/emit', async (req, res) => {
 
     // Si ya hay un proceso corriendo para este ID, detenerlo primero
     const existingProcess = ffmpegProcesses.get(process_id);
+    clearSourceRefreshTimer(process_id);
     manualStopProcesses.delete(process_id); // Limpiar flag de parada manual al iniciar nueva emisión
     if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
       sendLog(process_id, 'warn', `Deteniendo proceso ffmpeg existente para reinicio`);
@@ -1009,6 +1081,11 @@ app.post('/api/emit', async (req, res) => {
         if (currentStatus === 'starting') {
           emissionStatuses.set(process_id, 'running');
           sendLog(process_id, 'success', `Emisión iniciada exitosamente`);
+
+          if (String(process_id) === TIGO_PROCESS_ID) {
+            scheduleTigoSourceRefresh(process_id, target_rtmp);
+            sendLog(process_id, 'info', '⏱️ Tigo Sports: refresh proactivo programado antes de vencer el token');
+          }
           
           // Actualizar base de datos a estado 'running'
           if (supabase) {
@@ -1188,9 +1265,10 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
+      clearSourceRefreshTimer(process_id);
       resolutionCache.delete(process_id); // Limpiar caché de resolución
       lastFrameTime.delete(process_id); // Limpiar watchdog
-      
+
       // AUTO-RECOVERY: Para canales con scraping (usa CHANNEL_MAP global)
 
       if (isManualStop) {
