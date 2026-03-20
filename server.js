@@ -369,6 +369,70 @@ const scrapeStreamUrl = async (channelId, channelName) => {
 };
 // ==================== FIN SCRAPING ====================
 
+// ==================== TIGO HLS PROXY ====================
+const tigoProxyState = {
+  active: false, refreshInterval: null, currentMasterUrl: null,
+  variantPath: null, lastRefreshTime: 0, refreshCount: 0,
+  accessToken: null, cookies: null,
+};
+const TIGO_REFRESH_MS = 40000;
+
+const refreshTigoToken = async () => {
+  try {
+    const ch = CHANNEL_MAP['2'];
+    if (!ch) return;
+    const result = await scrapeStreamUrlLocal(ch.channelId, ch.channelName);
+    if (!result.url) { sendLog('2', 'warn', `⚠️ Proxy: refresh falló`); return; }
+    tigoProxyState.currentMasterUrl = result.url;
+    tigoProxyState.accessToken = result.accessToken || null;
+    tigoProxyState.cookies = result.cookies || null;
+    tigoProxyState.lastRefreshTime = Date.now();
+    tigoProxyState.refreshCount++;
+    scrapeSessionCache.set('2', { cookies: result.cookies || null, accessToken: result.accessToken || null, timestamp: Date.now() });
+    sendLog('2', 'info', `🔄 Proxy: token #${tigoProxyState.refreshCount} refrescado`);
+  } catch (err) { sendLog('2', 'error', `❌ Proxy refresh error: ${err.message}`); }
+};
+
+const startTigoProxy = async () => {
+  const ch = CHANNEL_MAP['2'];
+  if (!ch) return false;
+  sendLog('2', 'info', '🔍 Proxy: descubriendo variantes...');
+  const disc = await scrapeStreamUrlLocal(ch.channelId, ch.channelName);
+  if (!disc.url) { sendLog('2', 'error', `❌ Proxy: no URL inicial`); return false; }
+  const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(disc.url, 2500000);
+  if (resolvedUrl && resolvedUrl !== disc.url) {
+    try {
+      const mp = new URL(disc.url); const rp = new URL(resolvedUrl);
+      const dir = mp.pathname.substring(0, mp.pathname.lastIndexOf('/') + 1);
+      tigoProxyState.variantPath = rp.pathname.startsWith(dir) ? rp.pathname.substring(dir.length) : rp.pathname.split('/').pop();
+    } catch (_) { tigoProxyState.variantPath = resolvedUrl.split('/').pop()?.split('?')[0] || null; }
+    sendLog('2', 'success', `🎯 Proxy: variante → ${resolution} @ ${Math.round((bandwidth||0)/1000)}kbps`);
+  } else { tigoProxyState.variantPath = null; }
+  await refreshTigoToken();
+  if (tigoProxyState.refreshInterval) clearInterval(tigoProxyState.refreshInterval);
+  tigoProxyState.refreshInterval = setInterval(refreshTigoToken, TIGO_REFRESH_MS);
+  tigoProxyState.active = true;
+  sendLog('2', 'success', `✅ Proxy Tigo activo (refresh cada ${TIGO_REFRESH_MS/1000}s)`);
+  return true;
+};
+
+const stopTigoProxy = () => {
+  if (tigoProxyState.refreshInterval) { clearInterval(tigoProxyState.refreshInterval); tigoProxyState.refreshInterval = null; }
+  tigoProxyState.active = false; tigoProxyState.currentMasterUrl = null; tigoProxyState.refreshCount = 0;
+  sendLog('2', 'info', '🛑 Proxy Tigo detenido');
+};
+
+const getTigoVariantUrl = () => {
+  if (!tigoProxyState.currentMasterUrl) return null;
+  if (!tigoProxyState.variantPath) return tigoProxyState.currentMasterUrl;
+  try {
+    const mp = new URL(tigoProxyState.currentMasterUrl);
+    const dir = mp.pathname.substring(0, mp.pathname.lastIndexOf('/') + 1);
+    return `${mp.origin}${dir}${tigoProxyState.variantPath}${mp.search}`;
+  } catch (_) { return tigoProxyState.currentMasterUrl; }
+};
+// ==================== FIN TIGO HLS PROXY ====================
+
 
 
 
@@ -803,28 +867,24 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // Tigo Sports: obtener SIEMPRE una URL virgen justo antes de arrancar FFmpeg.
-    // Aplica tanto en emisión normal como en recovery, ya que los tokens son de un solo uso.
-    const shouldForceFreshTigoScrape = process_id === '2';
-    if (shouldForceFreshTigoScrape) {
-      sendLog(process_id, 'info', '🆕 Tigo: obteniendo URL virgen inmediatamente antes de iniciar FFmpeg...');
-      const freshTigoResult = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
-
-      if (!freshTigoResult.url) {
-        sendLog(process_id, 'error', `❌ No se pudo obtener URL fresca de Tigo: ${freshTigoResult.error || 'sin detalle'}`);
-        return res.status(502).json({
-          error: freshTigoResult.error || 'No se pudo obtener una URL fresca para Tigo Sports',
-        });
+    // Tigo Sports: usar el proxy HLS local en vez de URL directa.
+    // El proxy refresca tokens cada 40s automáticamente.
+    const isTigoProcess = process_id === '2';
+    if (isTigoProcess) {
+      if (!tigoProxyState.active) {
+        sendLog(process_id, 'info', '🚀 Iniciando Proxy HLS para Tigo...');
+        const proxyStarted = await startTigoProxy();
+        if (!proxyStarted) {
+          return res.status(502).json({ error: 'No se pudo iniciar el proxy HLS para Tigo Sports' });
+        }
+      } else {
+        // Proxy ya activo, solo refrescar token
+        sendLog(process_id, 'info', '🔄 Proxy ya activo, refrescando token...');
+        await refreshTigoToken();
       }
-
-      effectiveSourceM3u8 = freshTigoResult.url;
-      scrapeSessionCache.set(process_id, {
-        cookies: freshTigoResult.cookies || null,
-        accessToken: freshTigoResult.accessToken || null,
-        timestamp: Date.now(),
-      });
-
-      sendLog(process_id, 'success', `✅ Tigo: URL fresca lista para FFmpeg (cookies: ${freshTigoResult.cookies ? 'sí' : 'no'}, token: ${freshTigoResult.accessToken ? 'sí' : 'no'})`);
+      // FFmpeg apuntará al proxy local
+      effectiveSourceM3u8 = `http://127.0.0.1:${PORT}/tigo-proxy/playlist.m3u8`;
+      sendLog(process_id, 'success', `✅ Tigo: FFmpeg apuntará al proxy local`);
     }
 
     // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP
@@ -947,19 +1007,17 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
+    // Para Tigo (proceso 2), el proxy maneja la auth y los segmentos tienen sus propios tokens
     const cachedSession = scrapeSessionCache.get(process_id);
     let extraFfmpegInputArgs = [];
-    if (cachedSession) {
+    if (cachedSession && !isTigo) {
       const sessionAge = Date.now() - cachedSession.timestamp;
-      if (sessionAge < 300000) { // Solo usar si tiene menos de 5 minutos
+      if (sessionAge < 300000) {
         if (cachedSession.cookies) {
-          // FFmpeg -cookies espera formato: "key=value; path=/; domain=.example.com\n"
-          // Pero para simplificar, pasamos las cookies crudas
           extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
           sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
         }
         if (cachedSession.accessToken) {
-          // Agregar Authorization header para CDNs que lo validen (como Tigo/Streann)
           extraFfmpegInputArgs.push('-headers', `Authorization: Bearer ${cachedSession.accessToken}\r\n`);
           sendLog(process_id, 'info', `🔑 Inyectando accessToken a FFmpeg`);
         }
@@ -969,84 +1027,8 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
-    // Tigo: entrar a una sola variante HLS en vez del master playlist.
-    // IMPORTANTE: No podemos hacer fetch del master para descubrir variantes porque eso
-    // "quema" el token de un solo uso. En su lugar, descubrimos el path relativo de la variante
-    // con un primer token sacrificado, y luego hacemos un SEGUNDO scrape fresco para que
-    // FFmpeg reciba un token virgen con la URL de variante ya construida.
+    // Para Tigo, FFmpeg ya apunta al proxy local, no necesita resolución de variante
     let inputSourceUrl = effectiveSourceM3u8;
-    if (isTigo) {
-      // Paso 1: Sacrificar el token actual para descubrir el path de la variante
-      sendLog(process_id, 'info', '🔍 Tigo: descubriendo variantes (token de exploración)...');
-      const { resolvedUrl: exploredUrl, bandwidth, resolution } = await resolveBestHLSVariant(effectiveSourceM3u8, 2500000);
-      
-      if (exploredUrl && exploredUrl !== effectiveSourceM3u8) {
-        // Extraer el path relativo de la variante (ej: "chunklist_b2138000.m3u8")
-        let variantPath = null;
-        try {
-          const exploredParsed = new URL(exploredUrl);
-          const masterParsed = new URL(effectiveSourceM3u8);
-          // El path de la variante es la parte que difiere del master
-          const masterDir = masterParsed.pathname.substring(0, masterParsed.pathname.lastIndexOf('/') + 1);
-          if (exploredParsed.pathname.startsWith(masterDir)) {
-            variantPath = exploredParsed.pathname.substring(masterDir.length);
-          } else {
-            variantPath = exploredParsed.pathname.split('/').pop();
-          }
-        } catch (_) {
-          variantPath = exploredUrl.split('/').pop()?.split('?')[0] || null;
-        }
-        
-        sendLog(process_id, 'info', `🎯 Tigo: variante descubierta → ${resolution} @ ${Math.round((bandwidth || 0) / 1000)}kbps (path: ${variantPath})`);
-        
-        // Paso 2: Segundo scrape fresco para obtener token virgen
-        sendLog(process_id, 'info', '🆕 Tigo: obteniendo SEGUNDO token virgen para FFmpeg...');
-        const freshResult = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
-        
-        if (freshResult.url) {
-          effectiveSourceM3u8 = freshResult.url;
-          // Actualizar sesión con el token fresco
-          scrapeSessionCache.set(process_id, {
-            cookies: freshResult.cookies || null,
-            accessToken: freshResult.accessToken || null,
-            timestamp: Date.now(),
-          });
-          
-          // Construir la URL de variante con el nuevo token/base
-          if (variantPath) {
-            try {
-              const freshMasterParsed = new URL(freshResult.url);
-              const freshMasterDir = freshMasterParsed.pathname.substring(0, freshMasterParsed.pathname.lastIndexOf('/') + 1);
-              inputSourceUrl = `${freshMasterParsed.origin}${freshMasterDir}${variantPath}${freshMasterParsed.search}`;
-              sendLog(process_id, 'success', `✅ Tigo: URL de variante con token virgen lista → ${resolution}`);
-            } catch (_) {
-              inputSourceUrl = freshResult.url;
-              sendLog(process_id, 'warn', '⚠️ Tigo: no se pudo construir variante, usando master fresco');
-            }
-          } else {
-            inputSourceUrl = freshResult.url;
-          }
-          
-          // Re-inyectar headers con nuevo token
-          extraFfmpegInputArgs = [];
-          const freshSession = scrapeSessionCache.get(process_id);
-          if (freshSession) {
-            if (freshSession.cookies) {
-              extraFfmpegInputArgs.push('-cookies', freshSession.cookies + '\n');
-            }
-            if (freshSession.accessToken) {
-              extraFfmpegInputArgs.push('-headers', `Authorization: Bearer ${freshSession.accessToken}\r\n`);
-              sendLog(process_id, 'info', `🔑 Inyectando accessToken fresco a FFmpeg`);
-            }
-          }
-        } else {
-          sendLog(process_id, 'warn', `⚠️ Tigo: segundo scrape falló, usando URL original`);
-          inputSourceUrl = effectiveSourceM3u8;
-        }
-      } else {
-        sendLog(process_id, 'warn', '⚠️ Tigo: no se pudo resolver variante directa, usando master playlist');
-      }
-    }
 
     // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
     const isHDReencode = String(process_id) === '0' || String(process_id) === '5' || String(process_id) === '10';
@@ -1995,6 +1977,8 @@ app.post('/api/emit/stop', async (req, res) => {
       emissionStatuses.set(process_id, 'stopping');
       manualStopProcesses.add(process_id); // Marcar como parada manual para evitar auto-recovery
       manualStopProcesses.add(Number(process_id));
+      // Detener proxy Tigo si aplica
+      if (process_id === '2') stopTigoProxy();
       
       // Actualizar base de datos antes de detener (solo si Supabase está disponible)
       if (supabase) {
@@ -2240,7 +2224,65 @@ app.delete('/api/emit/files', (req, res) => {
   }
 });
 
-// Endpoint para verificar estado
+// ==================== TIGO PROXY ENDPOINT ====================
+// FFmpeg lee de http://127.0.0.1:PORT/tigo-proxy/playlist.m3u8
+// El proxy fetch el playlist real con el token fresco actual y reescribe URLs relativas a absolutas
+app.get('/tigo-proxy/playlist.m3u8', async (req, res) => {
+  if (!tigoProxyState.active || !tigoProxyState.currentMasterUrl) {
+    return res.status(503).send('#EXTM3U\n#EXT-X-ERROR:Proxy not active');
+  }
+  try {
+    const variantUrl = getTigoVariantUrl();
+    if (!variantUrl) return res.status(503).send('#EXTM3U\n#EXT-X-ERROR:No variant URL');
+    
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'Origin': 'https://www.tdmax.com',
+      'Referer': 'https://www.tdmax.com/',
+    };
+    if (tigoProxyState.accessToken) headers['Authorization'] = `Bearer ${tigoProxyState.accessToken}`;
+    if (tigoProxyState.cookies) headers['Cookie'] = tigoProxyState.cookies;
+    
+    const resp = await fetch(variantUrl, { headers });
+    if (!resp.ok) {
+      // Token might be stale, force refresh
+      sendLog('2', 'warn', `⚠️ Proxy: playlist fetch ${resp.status}, forzando refresh...`);
+      await refreshTigoToken();
+      const retryUrl = getTigoVariantUrl();
+      if (!retryUrl) return res.status(502).send('#EXTM3U\n#EXT-X-ERROR:Refresh failed');
+      const resp2 = await fetch(retryUrl, { headers: { ...headers, Authorization: tigoProxyState.accessToken ? `Bearer ${tigoProxyState.accessToken}` : undefined } });
+      if (!resp2.ok) return res.status(502).send(`#EXTM3U\n#EXT-X-ERROR:${resp2.status}`);
+      let body = await resp2.text();
+      // Reescribir URLs relativas a absolutas
+      const baseUrl = new URL(retryUrl);
+      const baseDir = baseUrl.origin + baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+      body = body.replace(/^(?!#)(.*\.ts.*)$/gm, (match) => {
+        if (match.startsWith('http')) return match;
+        return baseDir + match;
+      });
+      res.set('Content-Type', 'application/vnd.apple.mpegurl');
+      res.set('Cache-Control', 'no-cache, no-store');
+      return res.send(body);
+    }
+    
+    let body = await resp.text();
+    const baseUrl = new URL(variantUrl);
+    const baseDir = baseUrl.origin + baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+    body = body.replace(/^(?!#)(.*\.ts.*)$/gm, (match) => {
+      if (match.startsWith('http')) return match;
+      return baseDir + match;
+    });
+    res.set('Content-Type', 'application/vnd.apple.mpegurl');
+    res.set('Cache-Control', 'no-cache, no-store');
+    return res.send(body);
+  } catch (err) {
+    sendLog('2', 'error', `❌ Proxy playlist error: ${err.message}`);
+    return res.status(500).send(`#EXTM3U\n#EXT-X-ERROR:${err.message}`);
+  }
+});
+// ==================== FIN TIGO PROXY ENDPOINT ====================
+
+
 app.get('/api/status', (req, res) => {
   const { process_id } = req.query;
   
