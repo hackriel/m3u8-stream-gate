@@ -741,7 +741,7 @@ app.post('/api/emit', async (req, res) => {
     const analyzeDuration = isRecovery ? '1500000' : '3000000';  // 1.5s / 3s
     const probeSize      = isRecovery ? '500000'  : '1500000';   // 500KB / 1.5MB
 
-    // Detectar cabeceras HTTP según dominio fuente para mayor compatibilidad
+    // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
     try {
@@ -755,6 +755,15 @@ app.post('/api/emit', async (req, res) => {
       }
     } catch (_) {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
+    }
+
+    // Tigo Sports (proceso 2): su CDN Streann valida headers más estrictos
+    // Usar el Origin/Referer de TDMax con headers adicionales de seguridad
+    const isTigo = String(process_id) === '2';
+    if (isTigo) {
+      // Streann CDN para Tigo requiere headers específicos que simulan el player embebido de TDMax
+      refererDomain = 'https://www.tdmax.com/';
+      originDomain = 'https://www.tdmax.com';
     }
 
     // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante y re-codificar a 720p HD @ 2800kbps
