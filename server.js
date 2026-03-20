@@ -369,6 +369,70 @@ const scrapeStreamUrl = async (channelId, channelName) => {
 };
 // ==================== FIN SCRAPING ====================
 
+// ==================== TIGO HLS PROXY ====================
+const tigoProxyState = {
+  active: false, refreshInterval: null, currentMasterUrl: null,
+  variantPath: null, lastRefreshTime: 0, refreshCount: 0,
+  accessToken: null, cookies: null,
+};
+const TIGO_REFRESH_MS = 40000;
+
+const refreshTigoToken = async () => {
+  try {
+    const ch = CHANNEL_MAP['2'];
+    if (!ch) return;
+    const result = await scrapeStreamUrlLocal(ch.channelId, ch.channelName);
+    if (!result.url) { sendLog('2', 'warn', `⚠️ Proxy: refresh falló`); return; }
+    tigoProxyState.currentMasterUrl = result.url;
+    tigoProxyState.accessToken = result.accessToken || null;
+    tigoProxyState.cookies = result.cookies || null;
+    tigoProxyState.lastRefreshTime = Date.now();
+    tigoProxyState.refreshCount++;
+    scrapeSessionCache.set('2', { cookies: result.cookies || null, accessToken: result.accessToken || null, timestamp: Date.now() });
+    sendLog('2', 'info', `🔄 Proxy: token #${tigoProxyState.refreshCount} refrescado`);
+  } catch (err) { sendLog('2', 'error', `❌ Proxy refresh error: ${err.message}`); }
+};
+
+const startTigoProxy = async () => {
+  const ch = CHANNEL_MAP['2'];
+  if (!ch) return false;
+  sendLog('2', 'info', '🔍 Proxy: descubriendo variantes...');
+  const disc = await scrapeStreamUrlLocal(ch.channelId, ch.channelName);
+  if (!disc.url) { sendLog('2', 'error', `❌ Proxy: no URL inicial`); return false; }
+  const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(disc.url, 2500000);
+  if (resolvedUrl && resolvedUrl !== disc.url) {
+    try {
+      const mp = new URL(disc.url); const rp = new URL(resolvedUrl);
+      const dir = mp.pathname.substring(0, mp.pathname.lastIndexOf('/') + 1);
+      tigoProxyState.variantPath = rp.pathname.startsWith(dir) ? rp.pathname.substring(dir.length) : rp.pathname.split('/').pop();
+    } catch (_) { tigoProxyState.variantPath = resolvedUrl.split('/').pop()?.split('?')[0] || null; }
+    sendLog('2', 'success', `🎯 Proxy: variante → ${resolution} @ ${Math.round((bandwidth||0)/1000)}kbps`);
+  } else { tigoProxyState.variantPath = null; }
+  await refreshTigoToken();
+  if (tigoProxyState.refreshInterval) clearInterval(tigoProxyState.refreshInterval);
+  tigoProxyState.refreshInterval = setInterval(refreshTigoToken, TIGO_REFRESH_MS);
+  tigoProxyState.active = true;
+  sendLog('2', 'success', `✅ Proxy Tigo activo (refresh cada ${TIGO_REFRESH_MS/1000}s)`);
+  return true;
+};
+
+const stopTigoProxy = () => {
+  if (tigoProxyState.refreshInterval) { clearInterval(tigoProxyState.refreshInterval); tigoProxyState.refreshInterval = null; }
+  tigoProxyState.active = false; tigoProxyState.currentMasterUrl = null; tigoProxyState.refreshCount = 0;
+  sendLog('2', 'info', '🛑 Proxy Tigo detenido');
+};
+
+const getTigoVariantUrl = () => {
+  if (!tigoProxyState.currentMasterUrl) return null;
+  if (!tigoProxyState.variantPath) return tigoProxyState.currentMasterUrl;
+  try {
+    const mp = new URL(tigoProxyState.currentMasterUrl);
+    const dir = mp.pathname.substring(0, mp.pathname.lastIndexOf('/') + 1);
+    return `${mp.origin}${dir}${tigoProxyState.variantPath}${mp.search}`;
+  } catch (_) { return tigoProxyState.currentMasterUrl; }
+};
+// ==================== FIN TIGO HLS PROXY ====================
+
 
 
 
