@@ -856,24 +856,66 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // Tigo Sports: usar el proxy HLS local en vez de URL directa.
-    // El proxy refresca tokens cada 40s automáticamente.
+    // Tigo Sports: obtener URL virgen y extraer nimblesessionid para mantener sesión viva.
     const isTigoProcess = process_id === '2';
     if (isTigoProcess) {
-      if (!tigoProxyState.active) {
-        sendLog(process_id, 'info', '🚀 Iniciando Proxy HLS para Tigo...');
-        const proxyStarted = await startTigoProxy();
-        if (!proxyStarted) {
-          return res.status(502).json({ error: 'No se pudo iniciar el proxy HLS para Tigo Sports' });
+      sendLog(process_id, 'info', '🆕 Tigo: obteniendo URL virgen...');
+      const freshResult = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
+      if (!freshResult.url) {
+        return res.status(502).json({ error: freshResult.error || 'No se pudo obtener URL para Tigo Sports' });
+      }
+      effectiveSourceM3u8 = freshResult.url;
+      scrapeSessionCache.set(process_id, {
+        cookies: freshResult.cookies || null,
+        accessToken: freshResult.accessToken || null,
+        timestamp: Date.now(),
+      });
+      sendLog(process_id, 'success', `✅ Tigo: URL virgen obtenida`);
+      
+      // Resolver variante directa (720p) para evitar multi-variant parsing
+      const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(effectiveSourceM3u8, 2500000);
+      let variantUrl = effectiveSourceM3u8;
+      if (resolvedUrl && resolvedUrl !== effectiveSourceM3u8) {
+        variantUrl = resolvedUrl;
+        sendLog(process_id, 'info', `🎯 Tigo: variante → ${resolution} @ ${Math.round((bandwidth||0)/1000)}kbps`);
+      }
+      
+      // Extraer nimblesessionid del playlist para mantener la sesión viva
+      const sessionHeaders = {};
+      if (freshResult.accessToken) sessionHeaders['Authorization'] = `Bearer ${freshResult.accessToken}`;
+      const { sessionId, error: sessErr } = await extractNimbleSession(variantUrl, sessionHeaders);
+      
+      if (sessionId) {
+        // Obtener un SEGUNDO token fresco (el anterior se usó para descubrir variante + session)
+        sendLog(process_id, 'info', `🔑 Tigo: nimblesessionid=${sessionId} capturado, obteniendo token fresco...`);
+        const freshResult2 = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
+        if (freshResult2.url) {
+          effectiveSourceM3u8 = freshResult2.url;
+          scrapeSessionCache.set(process_id, {
+            cookies: freshResult2.cookies || null,
+            accessToken: freshResult2.accessToken || null,
+            timestamp: Date.now(),
+          });
+          
+          // Construir URL de variante con token fresco + nimblesessionid
+          const { resolvedUrl: freshVariant } = await resolveBestHLSVariant(freshResult2.url, 2500000);
+          const finalVariant = freshVariant || freshResult2.url;
+          effectiveSourceM3u8 = appendNimbleSession(finalVariant, sessionId);
+          sendLog(process_id, 'success', `✅ Tigo: URL con sesión Nimble lista (session=${sessionId})`);
         }
       } else {
-        // Proxy ya activo, solo refrescar token
-        sendLog(process_id, 'info', '🔄 Proxy ya activo, refrescando token...');
-        await refreshTigoToken();
+        sendLog(process_id, 'warn', `⚠️ Tigo: no se encontró nimblesessionid (${sessErr}), usando URL directa`);
+        // Obtener token fresco ya que el anterior se quemó
+        const freshResult2 = await scrapeStreamUrlLocal(CHANNEL_MAP['2'].channelId, CHANNEL_MAP['2'].channelName);
+        if (freshResult2.url) {
+          effectiveSourceM3u8 = freshResult2.url;
+          scrapeSessionCache.set(process_id, {
+            cookies: freshResult2.cookies || null,
+            accessToken: freshResult2.accessToken || null,
+            timestamp: Date.now(),
+          });
+        }
       }
-      // FFmpeg apuntará al proxy local
-      effectiveSourceM3u8 = `http://127.0.0.1:${PORT}/tigo-proxy/playlist.m3u8`;
-      sendLog(process_id, 'success', `✅ Tigo: FFmpeg apuntará al proxy local`);
     }
 
     // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP
