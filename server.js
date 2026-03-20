@@ -1792,10 +1792,11 @@ app.post('/api/emit/drop-signal', async (req, res) => {
     }
     
     const channelInfo = CHANNEL_MAP[process_id];
+    const directInfo = DIRECT_URL_CHANNELS[process_id];
     
     // Para procesos sin scraping (Libre=0, Subida=7, etc.), solo matamos FFmpeg
     // y dejamos que la auto-recuperación lo levante con la misma URL
-    const processName = channelInfo ? channelInfo.channelName : `Proceso ${process_id}`;
+    const processName = channelInfo ? channelInfo.channelName : (directInfo ? directInfo.channelName : `Proceso ${process_id}`);
     
     sendLog(process_id, 'warn', `📡 BOTAR SEÑAL: Forzando caída de ${processName}...`);
     
