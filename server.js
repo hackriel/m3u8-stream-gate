@@ -737,6 +737,40 @@ const detectSourceInfo = async (source) => {
   });
 };
 
+// Endpoint para scraping LOCAL desde el VPS (para que el token se genere con la IP del VPS)
+// Esto es CRÍTICO para canales como Tigo cuyo CDN valida IP del token vs IP del consumidor
+app.post('/api/local-scrape', async (req, res) => {
+  try {
+    const { channel_id, process_id } = req.body;
+    
+    if (!channel_id) {
+      return res.status(400).json({ success: false, error: 'Falta channel_id' });
+    }
+    
+    const channelName = CHANNEL_MAP[process_id]?.channelName || `Canal ${channel_id.substring(0, 8)}`;
+    const result = await scrapeStreamUrlLocal(channel_id, channelName);
+    
+    if (!result.url) {
+      return res.json({ success: false, error: result.error || 'No se obtuvo URL' });
+    }
+    
+    // Guardar sesión en cache para que /api/emit la use con FFmpeg
+    if (process_id !== undefined) {
+      scrapeSessionCache.set(String(process_id), {
+        cookies: result.cookies || null,
+        accessToken: result.accessToken || null,
+        timestamp: Date.now(),
+      });
+      sendLog(String(process_id), 'info', `🔐 Sesión de scraping guardada en cache (cookies: ${result.cookies ? 'sí' : 'no'}, token: ${result.accessToken ? 'sí' : 'no'})`);
+    }
+    
+    return res.json({ success: true, url: result.url, channel: channelName });
+  } catch (error) {
+    console.error('Error en /api/local-scrape:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Endpoint para iniciar emisión
 app.post('/api/emit', async (req, res) => {
   try {
