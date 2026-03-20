@@ -1249,8 +1249,8 @@ export default function EmisorM3U8Panel() {
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="mb-6 px-1">
-            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border grid grid-cols-4 sm:grid-cols-6 md:flex md:flex-wrap gap-1 w-full md:w-auto md:mx-auto">
+          <div className="mb-6 px-1 overflow-x-auto scrollbar-hide">
+            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border inline-flex flex-nowrap gap-1 min-w-max md:flex-wrap md:min-w-0 md:w-auto md:mx-auto">
               {Array.from({ length: NUM_PROCESSES }, (_, i) => {
                 const color = getProcessColor(i);
                 const process = processes[i];
@@ -1258,7 +1258,7 @@ export default function EmisorM3U8Panel() {
                   <TabsTrigger 
                     key={i} 
                     value={i.toString()}
-                    className={`px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all duration-200 relative ${
+                    className={`px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl transition-all duration-200 relative flex-shrink-0 ${
                       process.isEmitiendo 
                         ? 'bg-green-500/20 border-2 border-green-500 text-green-400 shadow-lg shadow-green-500/50 hover:bg-green-500/30' 
                         : activeTab === i.toString() 
