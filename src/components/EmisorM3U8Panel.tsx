@@ -297,6 +297,7 @@ export default function EmisorM3U8Panel() {
   };
 
   // Función genérica para obtener URL de un canal automáticamente
+  // Usa scraping LOCAL del VPS para que el token se genere con la IP correcta
   const fetchChannelUrl = useCallback(async (processIndex: number) => {
     const config = CHANNEL_CONFIGS[processIndex];
     if (!config.scrapeFn) return;
@@ -320,12 +321,15 @@ export default function EmisorM3U8Panel() {
     
     setFetchingChannel(processIndex);
     try {
-      const { data, error } = await supabase.functions.invoke(config.scrapeFn, {
+      // Usar scraping LOCAL del VPS (no Edge Function) para que el token
+      // se genere con la misma IP que luego usa FFmpeg → evita 403
+      const resp = await fetch('/api/local-scrape', {
         method: 'POST',
-        body: { channel_id: channelId },
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_id: channelId, process_id: processIndex }),
       });
+      const data = await resp.json();
 
-      if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Error desconocido');
 
       const streamUrl = data.url;
