@@ -155,8 +155,6 @@ export default function EmisorM3U8Panel() {
             }
           });
           setProcesses(loadedProcesses);
-          if (initialEventoUrl) setEventoUrl(initialEventoUrl);
-          if (initialDemoTigoUrl) setDemoTigoUrl(initialDemoTigoUrl);
           
           // Crear filas faltantes en la base de datos
           for (let i = 0; i < NUM_PROCESSES; i++) {
