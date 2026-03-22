@@ -141,12 +141,9 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPA
 // Mapa de canales scrapeados (definido una sola vez, usado en recovery y drop-signal)
 const CHANNEL_MAP = {
   '1': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV' },
-  '2': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Copy' },
   '3': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
   '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
-  '8': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo 720p' },
-  '9': { channelId: '664237788f085ac1f2a15f81', channelName: 'Tigo Master' },
 };
 
 // Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL
@@ -858,8 +855,8 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // Todos los procesos Tigo (2=Copy, 8=720p, 9=Master): obtener URL virgen + nimblesessionid
-    const isTigoProcess = ['2', '8', '9'].includes(process_id);
+    // (Tigo processes removed - IDs 2, 8, 9 no longer active)
+    const isTigoProcess = false;
     const tigoChannelId = '664237788f085ac1f2a15f81';
     const tigoChannelName = CHANNEL_MAP[process_id]?.channelName || 'Tigo';
     
@@ -1126,85 +1123,6 @@ app.post('/api/emit', async (req, res) => {
         '-g', '60',
         '-r', '30',
         '-vf', 'scale=-2:720',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ar', '44100',
-        '-max_muxing_queue_size', '1024',
-        '-reset_timestamps', '1',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        target_rtmp,
-      ];
-    } else if (process_id === '2' || process_id === '9') {
-      // Tigo Copy (2) y Tigo Master (9): stream copy directo sin re-codificar.
-      const label = process_id === '2' ? 'Tigo Copy' : 'Tigo Master';
-      sendLog(process_id, 'info', `📡 ${label}: Stream copy directo${isRecovery ? ' [recovery]' : ''}...`);
-      
-      ffmpegArgs = [
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-        ...extraFfmpegInputArgs,
-        '-timeout', '30000000',
-        '-rw_timeout', '30000000',
-        '-reconnect', '1',
-        '-reconnect_at_eof', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '2',
-        '-reconnect_on_network_error', '1',
-        '-reconnect_on_http_error', '5xx',
-        '-multiple_requests', '1',
-        '-http_persistent', '1',
-        '-live_start_index', '-3',
-        '-fflags', '+genpts+discardcorrupt',
-        '-analyzeduration', analyzeDuration,
-        '-probesize', probeSize,
-        '-i', inputSourceUrl,
-        '-map', '0:v:0?', '-map', '0:a:0?',
-        '-c:v', 'copy',
-        '-c:a', 'copy',
-        '-max_muxing_queue_size', '1024',
-        '-reset_timestamps', '1',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        target_rtmp,
-      ];
-    } else if (process_id === '8') {
-      // Tigo 720p: re-codificación como los demás canales
-      sendLog(process_id, 'info', `🎬 Tigo 720p: Re-codificando a 720p @ 2500kbps${isRecovery ? ' [recovery]' : ''}...`);
-      
-      ffmpegArgs = [
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-        ...extraFfmpegInputArgs,
-        '-timeout', '30000000',
-        '-rw_timeout', '30000000',
-        '-reconnect', '1',
-        '-reconnect_at_eof', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '2',
-        '-reconnect_on_network_error', '1',
-        '-reconnect_on_http_error', '5xx',
-        '-multiple_requests', '1',
-        '-http_persistent', '1',
-        '-live_start_index', '-3',
-        '-fflags', '+genpts+discardcorrupt',
-        '-analyzeduration', analyzeDuration,
-        '-probesize', probeSize,
-        '-i', inputSourceUrl,
-        '-map', '0:v:0?', '-map', '0:a:0?',
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-profile:v', 'high',
-        '-b:v', '2500k',
-        '-minrate', '2200k',
-        '-maxrate', '2800k',
-        '-bufsize', '5000k',
-        '-bf', '2',
-        '-vf', 'scale=-2:720',
-        '-r', '30',
-        '-g', '60',
-        '-keyint_min', '60',
-        '-sc_threshold', '0',
         '-c:a', 'aac',
         '-b:a', '128k',
         '-ar', '44100',
@@ -1514,7 +1432,7 @@ app.post('/api/emit', async (req, res) => {
         // MEJORA #2: Retry con misma URL antes de recovery completo
         // Para canales scrapeados (1-6, 8, 9), intentar primero con la misma URL
         // ya que muchas caídas son micro-cortes del CDN donde la URL sigue válida
-        const shouldRetryFirst = CHANNEL_MAP[process_id] || String(process_id) === '8' || String(process_id) === '9';
+        const shouldRetryFirst = !!CHANNEL_MAP[process_id];
         const lastQuickRetryAt = quickRetryState.get(process_id) || 0;
         const quickRetryRecentlyFailed = lastQuickRetryAt > 0 && (Date.now() - lastQuickRetryAt) < 30000;
 
@@ -1582,16 +1500,6 @@ app.post('/api/emit', async (req, res) => {
                   if (CHANNEL_MAP[process_id]) {
                     const { channelId, channelName } = CHANNEL_MAP[process_id];
                     await autoRecoverChannel(process_id, channelId, channelName);
-                  } else if (String(process_id) === '8' || String(process_id) === '9') {
-                    // Evento/Demo TIGO: recovery dinámico
-                    const processKey = String(process_id);
-                    const procId = parseInt(processKey, 10);
-                    const procName = processKey === '8' ? 'Evento' : 'Demo TIGO';
-                    const { data: srcData } = await supabase.from('emission_processes').select('source_url').eq('id', procId).single();
-                    if (srcData?.source_url) {
-                      const idMatch = srcData.source_url.match(/id=([a-f0-9]+)/i);
-                      if (idMatch) await autoRecoverChannel(processKey, idMatch[1], procName);
-                    }
                   }
                 }
               } else {
@@ -1619,35 +1527,6 @@ app.post('/api/emit', async (req, res) => {
           }
           setTimeout(() => {
             autoRecoverChannel(process_id, channelId, channelName);
-          }, 500);
-        } else if (String(process_id) === '8' || String(process_id) === '9') {
-          // Proceso 8 (Evento) y 9 (Demo TIGO): extraer channelId del source_url guardado en DB
-          const processKey = String(process_id);
-          const procId = parseInt(processKey, 10);
-          const procName = processKey === '8' ? 'Evento' : 'Demo TIGO';
-          sendLog(processKey, 'warn', `🔄 ${procName} caído (código ${code}) - Iniciando auto-recovery dinámico...`);
-          setTimeout(async () => {
-            try {
-              const { data: procData } = await supabase
-                .from('emission_processes')
-                .select('source_url')
-                .eq('id', procId)
-                .single();
-              
-              if (procData && procData.source_url) {
-                const idMatch = procData.source_url.match(/id=([a-f0-9]+)/i);
-                if (idMatch) {
-                  sendLog(processKey, 'info', `🔄 AUTO-RECOVERY ${procName}: channelId extraído = ${idMatch[1]}`);
-                  await autoRecoverChannel(processKey, idMatch[1], procName);
-                } else {
-                  sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName}: No se pudo extraer channelId del source_url`);
-                }
-              } else {
-                sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName}: No hay source_url guardado`);
-              }
-            } catch (err) {
-              sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName} error: ${err.message}`);
-            }
           }, 500);
         } else if (process_id === '0' || process_id === 0 || process_id === '10' || process_id === 10 || DIRECT_URL_CHANNELS[String(process_id)]) {
           // Proceso 0 (Disney 7), 10 (Disney 8) o canales con URL directa (Canal 6): reutilizar la misma URL M3U8 guardada en DB

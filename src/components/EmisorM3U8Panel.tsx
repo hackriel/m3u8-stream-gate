@@ -17,9 +17,12 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 
 const NUM_PROCESSES = 11;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
-const EVENTO_INDEX = 8; // "Evento" process - dynamic channel ID from TDMax URL
-const DEMO_TIGO_INDEX = 9; // "Demo TIGO" process - dynamic channel ID from TDMax URL
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
+
+// Procesos ocultos (Tigo fue descartado por restricciones del CDN)
+const HIDDEN_PROCESSES = new Set([2, 8, 9]);
+// Índices visibles para renderizar tabs
+const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
 // Tipo para un proceso de emisión
 interface EmissionProcess {
@@ -61,14 +64,14 @@ interface ChannelConfig {
 const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "Disney 7", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
-  { name: "Tigo Copy", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 2: Tigo (descartado)
   { name: "TDmas 1", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "Teletica", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "Canal 6", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Multimedios", scrapeFn: "scrape-channel", channelId: "664e5de58f089fa849a58697", fetchLabel: "🔄 Multi" },
   { name: "Subida", scrapeFn: null, channelId: null, fetchLabel: "" },
-  { name: "Tigo 720p", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
-  { name: "Tigo Master", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 8: Tigo (descartado)
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
 ];
 
@@ -113,8 +116,6 @@ export default function EmisorM3U8Panel() {
         if (error) throw error;
         
         if (data && data.length > 0) {
-          let initialEventoUrl = '';
-          let initialDemoTigoUrl = '';
           const loadedProcesses: EmissionProcess[] = Array.from({ length: NUM_PROCESSES }, (_, index) => {
             const row = data.find(d => d.id === index);
             if (row) {
@@ -126,14 +127,7 @@ export default function EmisorM3U8Panel() {
                 elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
               }
 
-              // Restore eventoUrl for Evento process
-              if (index === EVENTO_INDEX && (row as any).source_url) {
-                initialEventoUrl = (row as any).source_url;
-              }
-              // Restore demoTigoUrl for Demo TIGO process
-              if (index === DEMO_TIGO_INDEX && (row as any).source_url) {
-                initialDemoTigoUrl = (row as any).source_url;
-              }
+              // (Tigo/Evento tabs removed - indices 2, 8, 9 are hidden)
               // Solo cargar failure state si el proceso está activo
               const loadFailure = isRunning || row.is_emitting;
               return {
@@ -159,8 +153,6 @@ export default function EmisorM3U8Panel() {
             }
           });
           setProcesses(loadedProcesses);
-          if (initialEventoUrl) setEventoUrl(initialEventoUrl);
-          if (initialDemoTigoUrl) setDemoTigoUrl(initialDemoTigoUrl);
           
           // Crear filas faltantes en la base de datos
           for (let i = 0; i < NUM_PROCESSES; i++) {
@@ -280,21 +272,7 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
-  const [eventoUrl, setEventoUrl] = useState<string>('');
-  const [demoTigoUrl, setDemoTigoUrl] = useState<string>('');
   const { metricsHistory, latestMetrics } = useServerMetrics();
-
-  // Extraer channel ID de una URL de TDMax
-  const extractChannelId = (url: string): string | null => {
-    try {
-      const urlObj = new URL(url);
-      return urlObj.searchParams.get('id');
-    } catch {
-      // Intentar extraer con regex si no es URL válida
-      const match = url.match(/id=([a-f0-9]+)/i);
-      return match ? match[1] : null;
-    }
-  };
 
   // Función genérica para obtener URL de un canal automáticamente
   // Usa scraping LOCAL del VPS para que el token se genere con la IP correcta
@@ -302,21 +280,7 @@ export default function EmisorM3U8Panel() {
     const config = CHANNEL_CONFIGS[processIndex];
     if (!config.scrapeFn) return;
     
-    // Para Evento o Demo TIGO, extraer channelId de la URL pegada
-    let channelId = config.channelId;
-    if (processIndex === EVENTO_INDEX) {
-      channelId = extractChannelId(eventoUrl);
-      if (!channelId) {
-        toast.error('Pega una URL válida de TDMax con el parámetro id');
-        return;
-      }
-    } else if (processIndex === DEMO_TIGO_INDEX) {
-      channelId = extractChannelId(demoTigoUrl);
-      if (!channelId) {
-        toast.error('Pega una URL válida de TDMax con el parámetro id');
-        return;
-      }
-    }
+    const channelId = config.channelId;
     if (!channelId) return;
     
     setFetchingChannel(processIndex);
@@ -344,7 +308,7 @@ export default function EmisorM3U8Panel() {
     } finally {
       setFetchingChannel(null);
     }
-  }, [eventoUrl, demoTigoUrl]);
+  }, []);
 
 
 
@@ -832,14 +796,14 @@ export default function EmisorM3U8Panel() {
     const colors = [
       { bg: "bg-gray-500", text: "text-gray-400", stroke: "#9ca3af", name: "Disney 7" },
       { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "FUTV" },
-      { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Tigo Copy" },
+      { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "(oculto)" },
       { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "TDmas 1" },
       { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "Teletica" },
       { bg: "bg-orange-500", text: "text-orange-500", stroke: "#f97316", name: "Canal 6" },
       { bg: "bg-red-500", text: "text-red-500", stroke: "#ef4444", name: "Multimedios" },
       { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Subida" },
-      { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "Tigo 720p" },
-      { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "Tigo Master" },
+      { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "(oculto)" },
+      { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "(oculto)" },
       { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
     ];
     return colors[processIndex];
@@ -896,68 +860,6 @@ export default function EmisorM3U8Panel() {
                     )}
                   </div>
                 )}
-              </>
-            ) : processIndex === EVENTO_INDEX || processIndex === DEMO_TIGO_INDEX ? (
-              // Proceso Evento / Demo TIGO: URL de TDMax + extracción automática
-              <>
-                <label className="block text-sm mb-2 text-muted-foreground">URL del {processIndex === EVENTO_INDEX ? 'Evento' : 'Demo TIGO'} (TDMax)</label>
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="url"
-                    placeholder="https://www.tdmax.com/player?id=...&type=channel"
-                    value={processIndex === EVENTO_INDEX ? eventoUrl : demoTigoUrl}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (processIndex === EVENTO_INDEX) {
-                        setEventoUrl(val);
-                        supabase.from('emission_processes').update({ source_url: val } as any).eq('id', EVENTO_INDEX).then(({ error }) => {
-                          if (error) console.error('Error guardando source_url:', error);
-                        });
-                      } else {
-                        setDemoTigoUrl(val);
-                        supabase.from('emission_processes').update({ source_url: val } as any).eq('id', DEMO_TIGO_INDEX).then(({ error }) => {
-                          if (error) console.error('Error guardando source_url:', error);
-                        });
-                      }
-                    }}
-                    className="flex-1 bg-card border border-border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-                  />
-                  <button
-                    onClick={() => fetchChannelUrl(processIndex)}
-                    disabled={fetchingChannel !== null || !(processIndex === EVENTO_INDEX ? eventoUrl : demoTigoUrl)}
-                    className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
-                    title="Extraer fuente M3U8 del evento"
-                  >
-                    {fetchingChannel === processIndex ? (
-                      <span className="flex items-center gap-2">
-                        <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-accent-foreground" />
-                        Extrayendo...
-                      </span>
-                    ) : (
-                      "🔄 Extraer Fuente"
-                    )}
-                  </button>
-                </div>
-                {(() => {
-                  const currentUrl = processIndex === EVENTO_INDEX ? eventoUrl : demoTigoUrl;
-                  const channelId = currentUrl ? extractChannelId(currentUrl) : null;
-                  return currentUrl && channelId ? (
-                    <div className="mb-3 p-2 rounded-lg bg-card/50 border border-border">
-                      <p className="text-xs text-muted-foreground">
-                        Channel ID detectado: <span className="font-mono text-primary">{channelId}</span>
-                      </p>
-                    </div>
-                  ) : null;
-                })()}
-                <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 extraída</label>
-                <input
-                  type="url"
-                  placeholder="Se llenará automáticamente al extraer..."
-                  value={process.m3u8}
-                  onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-                  readOnly
-                />
               </>
             ) : (
               // Procesos M3U8 normales
@@ -1248,14 +1150,14 @@ export default function EmisorM3U8Panel() {
             📡 Sistema de Emisión M3U8 a RTMP
           </h1>
           <p className="text-muted-foreground">
-            Gestiona hasta {NUM_PROCESSES} procesos de streaming simultáneos
+            Gestiona hasta {VISIBLE_PROCESSES.length} procesos de streaming simultáneos
           </p>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="mb-6 px-1 overflow-x-auto scrollbar-hide md:flex md:justify-center">
             <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border inline-flex flex-nowrap gap-1 min-w-max md:flex-wrap md:min-w-0">
-              {Array.from({ length: NUM_PROCESSES }, (_, i) => {
+              {VISIBLE_PROCESSES.map((i) => {
                 const color = getProcessColor(i);
                 const process = processes[i];
                 return (
@@ -1282,7 +1184,7 @@ export default function EmisorM3U8Panel() {
             </TabsList>
           </div>
 
-          {Array.from({ length: NUM_PROCESSES }, (_, i) => (
+          {VISIBLE_PROCESSES.map((i) => (
             <TabsContent key={i} value={i.toString()}>
               {renderProcessTab(i)}
             </TabsContent>
