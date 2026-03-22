@@ -116,8 +116,6 @@ export default function EmisorM3U8Panel() {
         if (error) throw error;
         
         if (data && data.length > 0) {
-          let initialEventoUrl = '';
-          let initialDemoTigoUrl = '';
           const loadedProcesses: EmissionProcess[] = Array.from({ length: NUM_PROCESSES }, (_, index) => {
             const row = data.find(d => d.id === index);
             if (row) {
