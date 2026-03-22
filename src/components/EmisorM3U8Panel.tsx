@@ -17,9 +17,12 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 
 const NUM_PROCESSES = 11;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
-const EVENTO_INDEX = 8; // "Evento" process - dynamic channel ID from TDMax URL
-const DEMO_TIGO_INDEX = 9; // "Demo TIGO" process - dynamic channel ID from TDMax URL
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
+
+// Procesos ocultos (Tigo fue descartado por restricciones del CDN)
+const HIDDEN_PROCESSES = new Set([2, 8, 9]);
+// Índices visibles para renderizar tabs
+const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
 // Tipo para un proceso de emisión
 interface EmissionProcess {
@@ -61,14 +64,14 @@ interface ChannelConfig {
 const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "Disney 7", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
-  { name: "Tigo Copy", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 2: Tigo (descartado)
   { name: "TDmas 1", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "Teletica", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "Canal 6", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Multimedios", scrapeFn: "scrape-channel", channelId: "664e5de58f089fa849a58697", fetchLabel: "🔄 Multi" },
   { name: "Subida", scrapeFn: null, channelId: null, fetchLabel: "" },
-  { name: "Tigo 720p", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
-  { name: "Tigo Master", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 8: Tigo (descartado)
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
 ];
 
@@ -832,14 +835,14 @@ export default function EmisorM3U8Panel() {
     const colors = [
       { bg: "bg-gray-500", text: "text-gray-400", stroke: "#9ca3af", name: "Disney 7" },
       { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "FUTV" },
-      { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "Tigo Copy" },
+      { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "(oculto)" },
       { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "TDmas 1" },
       { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "Teletica" },
       { bg: "bg-orange-500", text: "text-orange-500", stroke: "#f97316", name: "Canal 6" },
       { bg: "bg-red-500", text: "text-red-500", stroke: "#ef4444", name: "Multimedios" },
       { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Subida" },
-      { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "Tigo 720p" },
-      { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "Tigo Master" },
+      { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "(oculto)" },
+      { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "(oculto)" },
       { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
     ];
     return colors[processIndex];
@@ -1248,14 +1251,14 @@ export default function EmisorM3U8Panel() {
             📡 Sistema de Emisión M3U8 a RTMP
           </h1>
           <p className="text-muted-foreground">
-            Gestiona hasta {NUM_PROCESSES} procesos de streaming simultáneos
+            Gestiona hasta {VISIBLE_PROCESSES.length} procesos de streaming simultáneos
           </p>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="mb-6 px-1 overflow-x-auto scrollbar-hide md:flex md:justify-center">
             <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border inline-flex flex-nowrap gap-1 min-w-max md:flex-wrap md:min-w-0">
-              {Array.from({ length: NUM_PROCESSES }, (_, i) => {
+              {VISIBLE_PROCESSES.map((i) => {
                 const color = getProcessColor(i);
                 const process = processes[i];
                 return (
@@ -1282,7 +1285,7 @@ export default function EmisorM3U8Panel() {
             </TabsList>
           </div>
 
-          {Array.from({ length: NUM_PROCESSES }, (_, i) => (
+          {VISIBLE_PROCESSES.map((i) => (
             <TabsContent key={i} value={i.toString()}>
               {renderProcessTab(i)}
             </TabsContent>
