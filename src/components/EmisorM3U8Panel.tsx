@@ -298,6 +298,7 @@ export default function EmisorM3U8Panel() {
     const config = CHANNEL_CONFIGS[processIndex];
     if (!config.scrapeFn) return;
     
+    const channelId = config.channelId;
     if (!channelId) return;
     
     setFetchingChannel(processIndex);
