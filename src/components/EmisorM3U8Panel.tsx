@@ -276,21 +276,7 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
-  const [eventoUrl, setEventoUrl] = useState<string>('');
-  const [demoTigoUrl, setDemoTigoUrl] = useState<string>('');
   const { metricsHistory, latestMetrics } = useServerMetrics();
-
-  // Extraer channel ID de una URL de TDMax
-  const extractChannelId = (url: string): string | null => {
-    try {
-      const urlObj = new URL(url);
-      return urlObj.searchParams.get('id');
-    } catch {
-      // Intentar extraer con regex si no es URL válida
-      const match = url.match(/id=([a-f0-9]+)/i);
-      return match ? match[1] : null;
-    }
-  };
 
   // Función genérica para obtener URL de un canal automáticamente
   // Usa scraping LOCAL del VPS para que el token se genere con la IP correcta
