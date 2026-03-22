@@ -129,14 +129,7 @@ export default function EmisorM3U8Panel() {
                 elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
               }
 
-              // Restore eventoUrl for Evento process
-              if (index === EVENTO_INDEX && (row as any).source_url) {
-                initialEventoUrl = (row as any).source_url;
-              }
-              // Restore demoTigoUrl for Demo TIGO process
-              if (index === DEMO_TIGO_INDEX && (row as any).source_url) {
-                initialDemoTigoUrl = (row as any).source_url;
-              }
+              // (Tigo/Evento tabs removed - indices 2, 8, 9 are hidden)
               // Solo cargar failure state si el proceso está activo
               const loadFailure = isRunning || row.is_emitting;
               return {
@@ -305,21 +298,6 @@ export default function EmisorM3U8Panel() {
     const config = CHANNEL_CONFIGS[processIndex];
     if (!config.scrapeFn) return;
     
-    // Para Evento o Demo TIGO, extraer channelId de la URL pegada
-    let channelId = config.channelId;
-    if (processIndex === EVENTO_INDEX) {
-      channelId = extractChannelId(eventoUrl);
-      if (!channelId) {
-        toast.error('Pega una URL válida de TDMax con el parámetro id');
-        return;
-      }
-    } else if (processIndex === DEMO_TIGO_INDEX) {
-      channelId = extractChannelId(demoTigoUrl);
-      if (!channelId) {
-        toast.error('Pega una URL válida de TDMax con el parámetro id');
-        return;
-      }
-    }
     if (!channelId) return;
     
     setFetchingChannel(processIndex);
@@ -347,7 +325,7 @@ export default function EmisorM3U8Panel() {
     } finally {
       setFetchingChannel(null);
     }
-  }, [eventoUrl, demoTigoUrl]);
+  }, []);
 
 
 
@@ -899,68 +877,6 @@ export default function EmisorM3U8Panel() {
                     )}
                   </div>
                 )}
-              </>
-            ) : processIndex === EVENTO_INDEX || processIndex === DEMO_TIGO_INDEX ? (
-              // Proceso Evento / Demo TIGO: URL de TDMax + extracción automática
-              <>
-                <label className="block text-sm mb-2 text-muted-foreground">URL del {processIndex === EVENTO_INDEX ? 'Evento' : 'Demo TIGO'} (TDMax)</label>
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="url"
-                    placeholder="https://www.tdmax.com/player?id=...&type=channel"
-                    value={processIndex === EVENTO_INDEX ? eventoUrl : demoTigoUrl}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (processIndex === EVENTO_INDEX) {
-                        setEventoUrl(val);
-                        supabase.from('emission_processes').update({ source_url: val } as any).eq('id', EVENTO_INDEX).then(({ error }) => {
-                          if (error) console.error('Error guardando source_url:', error);
-                        });
-                      } else {
-                        setDemoTigoUrl(val);
-                        supabase.from('emission_processes').update({ source_url: val } as any).eq('id', DEMO_TIGO_INDEX).then(({ error }) => {
-                          if (error) console.error('Error guardando source_url:', error);
-                        });
-                      }
-                    }}
-                    className="flex-1 bg-card border border-border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-                  />
-                  <button
-                    onClick={() => fetchChannelUrl(processIndex)}
-                    disabled={fetchingChannel !== null || !(processIndex === EVENTO_INDEX ? eventoUrl : demoTigoUrl)}
-                    className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
-                    title="Extraer fuente M3U8 del evento"
-                  >
-                    {fetchingChannel === processIndex ? (
-                      <span className="flex items-center gap-2">
-                        <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-accent-foreground" />
-                        Extrayendo...
-                      </span>
-                    ) : (
-                      "🔄 Extraer Fuente"
-                    )}
-                  </button>
-                </div>
-                {(() => {
-                  const currentUrl = processIndex === EVENTO_INDEX ? eventoUrl : demoTigoUrl;
-                  const channelId = currentUrl ? extractChannelId(currentUrl) : null;
-                  return currentUrl && channelId ? (
-                    <div className="mb-3 p-2 rounded-lg bg-card/50 border border-border">
-                      <p className="text-xs text-muted-foreground">
-                        Channel ID detectado: <span className="font-mono text-primary">{channelId}</span>
-                      </p>
-                    </div>
-                  ) : null;
-                })()}
-                <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 extraída</label>
-                <input
-                  type="url"
-                  placeholder="Se llenará automáticamente al extraer..."
-                  value={process.m3u8}
-                  onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-                  readOnly
-                />
               </>
             ) : (
               // Procesos M3U8 normales
