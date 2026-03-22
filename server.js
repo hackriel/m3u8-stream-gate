@@ -1500,16 +1500,6 @@ app.post('/api/emit', async (req, res) => {
                   if (CHANNEL_MAP[process_id]) {
                     const { channelId, channelName } = CHANNEL_MAP[process_id];
                     await autoRecoverChannel(process_id, channelId, channelName);
-                  } else if (String(process_id) === '8' || String(process_id) === '9') {
-                    // Evento/Demo TIGO: recovery dinámico
-                    const processKey = String(process_id);
-                    const procId = parseInt(processKey, 10);
-                    const procName = processKey === '8' ? 'Evento' : 'Demo TIGO';
-                    const { data: srcData } = await supabase.from('emission_processes').select('source_url').eq('id', procId).single();
-                    if (srcData?.source_url) {
-                      const idMatch = srcData.source_url.match(/id=([a-f0-9]+)/i);
-                      if (idMatch) await autoRecoverChannel(processKey, idMatch[1], procName);
-                    }
                   }
                 }
               } else {
@@ -1537,35 +1527,6 @@ app.post('/api/emit', async (req, res) => {
           }
           setTimeout(() => {
             autoRecoverChannel(process_id, channelId, channelName);
-          }, 500);
-        } else if (String(process_id) === '8' || String(process_id) === '9') {
-          // Proceso 8 (Evento) y 9 (Demo TIGO): extraer channelId del source_url guardado en DB
-          const processKey = String(process_id);
-          const procId = parseInt(processKey, 10);
-          const procName = processKey === '8' ? 'Evento' : 'Demo TIGO';
-          sendLog(processKey, 'warn', `🔄 ${procName} caído (código ${code}) - Iniciando auto-recovery dinámico...`);
-          setTimeout(async () => {
-            try {
-              const { data: procData } = await supabase
-                .from('emission_processes')
-                .select('source_url')
-                .eq('id', procId)
-                .single();
-              
-              if (procData && procData.source_url) {
-                const idMatch = procData.source_url.match(/id=([a-f0-9]+)/i);
-                if (idMatch) {
-                  sendLog(processKey, 'info', `🔄 AUTO-RECOVERY ${procName}: channelId extraído = ${idMatch[1]}`);
-                  await autoRecoverChannel(processKey, idMatch[1], procName);
-                } else {
-                  sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName}: No se pudo extraer channelId del source_url`);
-                }
-              } else {
-                sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName}: No hay source_url guardado`);
-              }
-            } catch (err) {
-              sendLog(processKey, 'error', `❌ AUTO-RECOVERY ${procName} error: ${err.message}`);
-            }
           }, 500);
         } else if (process_id === '0' || process_id === 0 || process_id === '10' || process_id === 10 || DIRECT_URL_CHANNELS[String(process_id)]) {
           // Proceso 0 (Disney 7), 10 (Disney 8) o canales con URL directa (Canal 6): reutilizar la misma URL M3U8 guardada en DB
