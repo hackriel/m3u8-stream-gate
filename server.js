@@ -1072,11 +1072,10 @@ app.post('/api/emit', async (req, res) => {
     // Para Tigo, FFmpeg ya apunta al proxy local, no necesita resolución de variante
     let inputSourceUrl = effectiveSourceM3u8;
 
-    // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante
+    // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante + HD @ 2800kbps
     const isHDProcess = String(process_id) === '0' || String(process_id) === '5' || String(process_id) === '10';
     
     if (isHDProcess) {
-      // Resolver la variante de MAYOR calidad (sin límite de target)
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(effectiveSourceM3u8, 0);
       const actualSource = resolvedUrl;
       const bwKbps = Math.round(bandwidth / 1000);
@@ -1088,43 +1087,98 @@ app.post('/api/emit', async (req, res) => {
       const hdLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
       const procLabel = hdLabels[String(process_id)] || 'HD';
       sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad)`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: Re-codificando a 720p HD @ 2800kbps (rango 2500-3000k)${isRecovery ? ' [recovery]' : ''}`);
       
-      inputSourceUrl = actualSource;
-    }
-    
-    // TODOS los procesos: Stream Copy directo (0% CPU de encoding)
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8' };
-    const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-    sendLog(process_id, 'info', `📡 ${procName}: Stream copy directo (sin re-encoding)${isRecovery ? ' [recovery]' : ''}...`);
-    
-    ffmpegArgs = [
-      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-      ...extraFfmpegInputArgs,
-      '-timeout', '30000000',
-      '-rw_timeout', '30000000',
-      '-reconnect', '1',
-      '-reconnect_at_eof', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '2',
-      '-reconnect_on_network_error', '1',
-      '-reconnect_on_http_error', '5xx',
-      '-multiple_requests', '1',
-      '-http_persistent', '1',
-      '-live_start_index', '-3',
-      '-fflags', '+genpts+discardcorrupt',
-      '-analyzeduration', analyzeDuration,
-      '-probesize', probeSize,
-      '-i', inputSourceUrl,
-      '-map', '0:v:0?', '-map', '0:a:0?',
-      '-c:v', 'copy',
-      '-c:a', 'copy',
-      '-max_muxing_queue_size', '1024',
-      '-reset_timestamps', '1',
-      '-f', 'flv',
-      '-flvflags', 'no_duration_filesize',
-      target_rtmp,
-    ];
+      ffmpegArgs = [
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
+        ...extraFfmpegInputArgs,
+        '-timeout', '30000000',
+        '-rw_timeout', '30000000',
+        '-reconnect', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '2',
+        '-reconnect_on_network_error', '1',
+        '-reconnect_on_http_error', '5xx',
+        '-multiple_requests', '1',
+        '-http_persistent', '1',
+        '-live_start_index', '-3',
+        '-fflags', '+genpts+discardcorrupt',
+        '-analyzeduration', analyzeDuration,
+        '-probesize', probeSize,
+        '-i', actualSource,
+        '-map', '0:v:0?', '-map', '0:a:0?',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-profile:v', 'high',
+        '-threads', '2',
+        '-b:v', '2800k',
+        '-minrate', '2500k',
+        '-maxrate', '3000k',
+        '-bufsize', '5600k',
+        '-bf', '2',
+        '-g', '60',
+        '-r', '30',
+        '-vf', 'scale=-2:720',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ar', '44100',
+        '-max_muxing_queue_size', '1024',
+        '-reset_timestamps', '1',
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        target_rtmp,
+      ];
+    } else {
+      // Demás procesos: 720p @ 2500kbps
+      const channelLabels = { '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '6': 'Multimedios', '7': 'Subida' };
+      const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
+      sendLog(process_id, 'info', `🎬 ${procName}: Re-codificando a 720p @ 2500kbps${isRecovery ? ' [recovery]' : ''}...`);
+      
+      ffmpegArgs = [
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
+        ...extraFfmpegInputArgs,
+        '-timeout', '30000000',
+        '-rw_timeout', '30000000',
+        '-reconnect', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '2',
+        '-reconnect_on_network_error', '1',
+        '-reconnect_on_http_error', '5xx',
+        '-multiple_requests', '1',
+        '-http_persistent', '1',
+        '-live_start_index', '-3',
+        '-fflags', '+genpts+discardcorrupt',
+        '-analyzeduration', analyzeDuration,
+        '-probesize', probeSize,
+        '-i', inputSourceUrl,
+        '-map', '0:v:0?', '-map', '0:a:0?',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-profile:v', 'high',
+        '-threads', '2',
+        '-b:v', '2500k',
+        '-minrate', '2200k',
+        '-maxrate', '2800k',
+        '-bufsize', '5000k',
+        '-bf', '2',
+        '-vf', 'scale=-2:720',
+        '-r', '30',
+        '-g', '60',
+        '-keyint_min', '60',
+        '-sc_threshold', '0',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ar', '44100',
+        '-max_muxing_queue_size', '1024',
+        '-reset_timestamps', '1',
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        target_rtmp,
+      ];
     }
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
