@@ -1113,9 +1113,9 @@ app.post('/api/emit', async (req, res) => {
          '-preset', 'faster',
          '-profile:v', 'high',
          '-threads', '2',
-         '-crf', '20',
-         '-maxrate', '2800k',
-         '-bufsize', '5600k',
+         '-crf', '19',
+          '-maxrate', '2800k',
+          '-bufsize', '5600k',
         '-g', '60',
         '-r', '30',
         '-vf', 'scale=-2:720',
@@ -1158,9 +1158,9 @@ app.post('/api/emit', async (req, res) => {
          '-preset', 'faster',
          '-profile:v', 'high',
          '-threads', '2',
-         '-crf', '21',
-         '-maxrate', '2500k',
-         '-bufsize', '5000k',
+         '-crf', '19',
+          '-maxrate', '2500k',
+          '-bufsize', '5000k',
         '-vf', 'scale=-2:720',
         '-r', '30',
         '-g', '60',
@@ -1785,7 +1785,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode 720p @ 2500kbps (2000-3000k)`);
       videoParams = [
         '-c:v', 'libx264', '-preset', 'faster', '-profile:v', 'high',
-        '-crf', '21', '-maxrate', '2500k', '-bufsize', '5000k',
+        '-crf', '19', '-maxrate', '2500k', '-bufsize', '5000k',
         '-vf', 'scale=-2:720',
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
