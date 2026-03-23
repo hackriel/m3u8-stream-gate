@@ -1087,7 +1087,7 @@ app.post('/api/emit', async (req, res) => {
       const hdLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
       const procLabel = hdLabels[String(process_id)] || 'HD';
       sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad)`);
-      sendLog(process_id, 'info', `🎬 ${procLabel}: Re-codificando a 720p HD @ 2800kbps (rango 2500-3000k)${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF20 + VBV 720p HD (max 2800kbps, preset faster)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -1132,7 +1132,7 @@ app.post('/api/emit', async (req, res) => {
       // Demás procesos: 720p @ 2500kbps
       const channelLabels = { '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '6': 'Multimedios', '7': 'Subida' };
       const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-      sendLog(process_id, 'info', `🎬 ${procName}: Re-codificando a 720p @ 2500kbps${isRecovery ? ' [recovery]' : ''}...`);
+      sendLog(process_id, 'info', `🎬 ${procName}: CRF21 + VBV 720p (max 2500kbps, preset faster)${isRecovery ? ' [recovery]' : ''}...`);
       
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
