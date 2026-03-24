@@ -1280,6 +1280,9 @@ app.post('/api/emit', async (req, res) => {
           /\[aac @/.test(output) ||
           /\[h264 @/.test(output) ||
           output.includes("Skip ('#EXT-X-") ||
+          output.includes('keepalive request failed') ||
+          output.includes('Error in the pull function') ||
+          output.includes('retrying with new connection') ||
           (isStoppingNow && output.includes('Immediate exit requested')) ||
           (isStoppingNow && output.includes('Output file #0 does not contain any stream')) ||
           (isStoppingNow && output.includes('received signal 15'));
