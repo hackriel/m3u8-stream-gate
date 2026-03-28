@@ -622,6 +622,10 @@ const detectAndCategorizeError = (output, processId) => {
   }
 
   // Detectar errores de fuente M3U8
+  // Para procesos manuales (0, 5, 10) con reconnect 4xx habilitado,
+  // los 404 transitorios son manejados internamente por FFmpeg — no tratar como fatal
+  const isManualProcess = MANUAL_URL_PROCESSES.has(String(processId));
+  
   if (output.includes('Invalid data found') || 
       output.includes('Server returned 404') ||
       output.includes('Server returned 403') ||
@@ -634,6 +638,14 @@ const detectAndCategorizeError = (output, processId) => {
     // Filtrar errores de "End of file" durante los primeros 10 segundos (son normales al arrancar HLS multi-variante)
     if (isEOF && elapsed < 10) {
       return true; // Ignorar silenciosamente, no es un error real
+    }
+
+    // Para procesos manuales: 404 y EOF transitorios son manejados por FFmpeg con -reconnect_on_http_error 4xx,5xx
+    // Solo loguear como advertencia, NO marcar como error fatal
+    if (isManualProcess && (output.includes('Server returned 404') || (isEOF && elapsed > 10))) {
+      const reason = output.includes('404') ? '404 transitorio (FFmpeg reintentará internamente)' : 'EOF transitorio (FFmpeg reintentará internamente)';
+      sendLog(processId, 'warn', `⚠️ CDN: ${reason}`);
+      return true; // No marcar como error fatal
     }
 
     const reason = output.includes('404') ? 'URL Fuente M3U8 no encontrada (404)' :
