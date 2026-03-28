@@ -1607,7 +1607,7 @@ app.post('/api/emit', async (req, res) => {
               sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
               autoRecoveryInProgress.set(String(process_id), false);
             }
-          }, 3000); // 3 segundos de espera para liberar socket RTMP
+          }, 500); // 500ms - recovery ultra-rápido para no perder el slot RTMP
         }
       }
     });
