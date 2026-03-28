@@ -1108,9 +1108,9 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect', '1',
         '-reconnect_at_eof', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '2',
+        '-reconnect_delay_max', '5',
         '-reconnect_on_network_error', '1',
-        '-reconnect_on_http_error', '5xx',
+        '-reconnect_on_http_error', '4xx,5xx',
         '-multiple_requests', '1',
         '-http_persistent', '1',
         '-live_start_index', '-3',
@@ -1137,7 +1137,6 @@ app.post('/api/emit', async (req, res) => {
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
         '-rtmp_live', 'live',
-        '-rtmp_buffer', '1000',
         target_rtmp,
       ];
     } else {
