@@ -1550,7 +1550,7 @@ app.post('/api/emit', async (req, res) => {
           // Determinar causa del fallo para log más informativo
           const failureType = detectedErrors.get(process_id);
           const failureInfo = failureType ? ` (${failureType.reason || failureType.type})` : '';
-          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Reiniciando con misma URL en 3s (esperando liberación de socket RTMP)...`);
+          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Reiniciando con misma URL en 500ms...`);
           
           setTimeout(async () => {
             try {
