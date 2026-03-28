@@ -653,14 +653,16 @@ const detectAndCategorizeError = (output, processId) => {
     return true;
   }
   
-  // Detectar errores de destino RTMP
+  // Detectar errores de destino RTMP (incluyendo Broken pipe)
   if (output.includes('Connection to tcp://') && output.includes('failed') ||
       output.includes('RTMP handshake failed') ||
       output.includes('rtmp://') && output.includes('failed') ||
       output.includes('Server rejected') ||
       output.includes('Connection reset by peer') ||
+      output.includes('Broken pipe') ||
       output.includes('Unable to publish')) {
-    const reason = output.includes('Connection to tcp://') && output.includes('failed') ? 'Destino RTMP no responde o URL incorrecta' :
+    const reason = output.includes('Broken pipe') ? 'Servidor RTMP cerró la conexión (Broken pipe)' :
+                   output.includes('Connection to tcp://') && output.includes('failed') ? 'Destino RTMP no responde o URL incorrecta' :
                    output.includes('RTMP handshake failed') ? 'Fallo en handshake RTMP (verificar URL)' :
                    output.includes('Server rejected') ? 'Servidor RTMP rechazó la conexión' :
                    output.includes('Connection reset') ? 'Conexión RTMP resetteada por el servidor' :
@@ -1816,6 +1818,9 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         ...videoParams,
         ...audioParams,
         '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        '-rtmp_live', 'live',
+        '-rtmp_buffer', '1000',
         target_rtmp
       ];
     } else {
@@ -1825,6 +1830,9 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         ...videoParams,
         ...audioParams,
         '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        '-rtmp_live', 'live',
+        '-rtmp_buffer', '1000',
         target_rtmp
       ];
     }
