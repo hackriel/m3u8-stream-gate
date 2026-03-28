@@ -59,6 +59,19 @@ else
   ok "FFmpeg instalado"
 fi
 
+# ── Paso 3b: Optimizar TCP keepalive para RTMP ──
+echo "🔧 [3b/8] Configurando TCP keepalive para estabilidad RTMP..."
+sysctl -w net.ipv4.tcp_keepalive_time=60 > /dev/null 2>&1
+sysctl -w net.ipv4.tcp_keepalive_intvl=10 > /dev/null 2>&1
+sysctl -w net.ipv4.tcp_keepalive_probes=6 > /dev/null 2>&1
+# Persistir en reboot
+grep -q 'tcp_keepalive_time' /etc/sysctl.conf 2>/dev/null || {
+  echo "net.ipv4.tcp_keepalive_time = 60" >> /etc/sysctl.conf
+  echo "net.ipv4.tcp_keepalive_intvl = 10" >> /etc/sysctl.conf
+  echo "net.ipv4.tcp_keepalive_probes = 6" >> /etc/sysctl.conf
+}
+ok "TCP keepalive optimizado (60s/10s/6 probes)"
+
 # ── Paso 4: Instalar dependencias ──
 echo "📥 [4/8] Instalando dependencias del proyecto..."
 [ -f "package.json" ] || fail "No se encontró package.json. Ejecuta este script desde el directorio del proyecto."

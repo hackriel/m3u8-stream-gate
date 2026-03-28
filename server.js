@@ -1176,6 +1176,8 @@ app.post('/api/emit', async (req, res) => {
         '-reset_timestamps', '1',
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
+        '-rtmp_live', 'live',
+        '-rtmp_buffer', '1000',
         target_rtmp,
       ];
     }
