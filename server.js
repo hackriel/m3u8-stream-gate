@@ -839,7 +839,14 @@ app.post('/api/emit', async (req, res) => {
   try {
     const { source_m3u8, target_rtmp, process_id: rawProcessId = '0', is_recovery = false } = req.body;
     const process_id = String(rawProcessId);
+    const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
+
+    // Validación de ID: debe ser un número entre 0 y 10
+    if (isNaN(numericId) || numericId < 0 || numericId > 10) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-10)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 10` });
+    }
 
     // Resetear contador SOLO cuando es inicio manual
     if (!is_recovery) {
