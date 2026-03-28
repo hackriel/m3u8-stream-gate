@@ -1531,13 +1531,17 @@ app.post('/api/emit', async (req, res) => {
           setTimeout(() => {
             autoRecoverChannel(process_id, channelId, channelName);
           }, 500);
-        } else if (process_id === '0' || process_id === 0 || process_id === '10' || process_id === 10 || DIRECT_URL_CHANNELS[String(process_id)]) {
-          // Proceso 0 (Disney 7), 10 (Disney 8) o canales con URL directa (Canal 6): reutilizar la misma URL M3U8 guardada en DB
+        } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
+          // Procesos manuales (Disney 7, Canal 6, Disney 8): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
-          const directChannel = DIRECT_URL_CHANNELS[String(process_id)];
-          const manualLabels = { '0': 'Disney 7', '10': 'Disney 8' };
-          const procLabel = directChannel ? directChannel.channelName : (manualLabels[String(process_id)] || 'Manual');
-          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code}) - Reiniciando con misma URL en 500ms...`);
+          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
+          const procLabel = manualLabels[String(process_id)] || 'Manual';
+          
+          // Determinar causa del fallo para log más informativo
+          const failureType = detectedErrors.get(process_id);
+          const failureInfo = failureType ? ` (${failureType.reason || failureType.type})` : '';
+          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Reiniciando con misma URL en 3s (esperando liberación de socket RTMP)...`);
+          
           setTimeout(async () => {
             try {
               if (!supabase) {
@@ -1550,11 +1554,7 @@ app.post('/api/emit', async (req, res) => {
                 .eq('id', procId)
                 .single();
               
-              // Para canales directos, usar la URL fija si no hay guardada en DB
-              let sourceUrl = procData?.m3u8;
-              if (!sourceUrl && directChannel) {
-                sourceUrl = directChannel.url;
-              }
+              const sourceUrl = procData?.m3u8;
               const targetRtmp = procData?.rtmp;
               
               if (sourceUrl && targetRtmp) {
@@ -1597,7 +1597,7 @@ app.post('/api/emit', async (req, res) => {
               sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
               autoRecoveryInProgress.set(String(process_id), false);
             }
-          }, 500);
+          }, 3000); // 3 segundos de espera para liberar socket RTMP
         }
       }
     });
