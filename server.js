@@ -1088,7 +1088,7 @@ app.post('/api/emit', async (req, res) => {
       const hdLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
       const procLabel = hdLabels[String(process_id)] || 'HD';
       sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad)`);
-      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF19 + VBV 720p HD (max 2800kbps, preset faster)${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF19 + VBV 720p HD (max 2500kbps, preset faster)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -1115,8 +1115,8 @@ app.post('/api/emit', async (req, res) => {
          '-profile:v', 'high',
          '-threads', '2',
          '-crf', '19',
-          '-maxrate', '2800k',
-          '-bufsize', '5600k',
+          '-maxrate', '2500k',
+          '-bufsize', '5000k',
         '-g', '60',
         '-r', '30',
         '-vf', 'scale=-2:720',
@@ -1127,6 +1127,8 @@ app.post('/api/emit', async (req, res) => {
         '-reset_timestamps', '1',
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
+        '-rtmp_live', 'live',
+        '-rtmp_buffer', '1000',
         target_rtmp,
       ];
     } else {
