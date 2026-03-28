@@ -146,13 +146,14 @@ const CHANNEL_MAP = {
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
 };
 
-// Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL
+// Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL guardada en DB
+// Canal 6 ahora funciona igual que Disney 7/8: el usuario pega la URL manualmente
 const DIRECT_URL_CHANNELS = {
-  '5': { 
-    channelName: 'Canal 6', 
-    url: 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8'
-  },
+  // '5' ya no tiene URL fija — se trata como Disney (manual)
 };
+
+// Procesos manuales (Disney 7, Canal 6, Disney 8): recovery reutiliza la URL guardada en DB
+const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
@@ -652,14 +653,16 @@ const detectAndCategorizeError = (output, processId) => {
     return true;
   }
   
-  // Detectar errores de destino RTMP
+  // Detectar errores de destino RTMP (incluyendo Broken pipe)
   if (output.includes('Connection to tcp://') && output.includes('failed') ||
       output.includes('RTMP handshake failed') ||
       output.includes('rtmp://') && output.includes('failed') ||
       output.includes('Server rejected') ||
       output.includes('Connection reset by peer') ||
+      output.includes('Broken pipe') ||
       output.includes('Unable to publish')) {
-    const reason = output.includes('Connection to tcp://') && output.includes('failed') ? 'Destino RTMP no responde o URL incorrecta' :
+    const reason = output.includes('Broken pipe') ? 'Servidor RTMP cerró la conexión (Broken pipe)' :
+                   output.includes('Connection to tcp://') && output.includes('failed') ? 'Destino RTMP no responde o URL incorrecta' :
                    output.includes('RTMP handshake failed') ? 'Fallo en handshake RTMP (verificar URL)' :
                    output.includes('Server rejected') ? 'Servidor RTMP rechazó la conexión' :
                    output.includes('Connection reset') ? 'Conexión RTMP resetteada por el servidor' :
@@ -838,7 +841,14 @@ app.post('/api/emit', async (req, res) => {
   try {
     const { source_m3u8, target_rtmp, process_id: rawProcessId = '0', is_recovery = false } = req.body;
     const process_id = String(rawProcessId);
+    const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
+
+    // Validación de ID: debe ser un número entre 0 y 10
+    if (isNaN(numericId) || numericId < 0 || numericId > 10) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-10)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 10` });
+    }
 
     // Resetear contador SOLO cuando es inicio manual
     if (!is_recovery) {
@@ -1087,7 +1097,7 @@ app.post('/api/emit', async (req, res) => {
       const hdLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
       const procLabel = hdLabels[String(process_id)] || 'HD';
       sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad)`);
-      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF19 + VBV 720p HD (max 2800kbps, preset faster)${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF19 + VBV 720p HD (max 2500kbps, preset faster)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -1114,8 +1124,8 @@ app.post('/api/emit', async (req, res) => {
          '-profile:v', 'high',
          '-threads', '2',
          '-crf', '19',
-          '-maxrate', '2800k',
-          '-bufsize', '5600k',
+          '-maxrate', '2500k',
+          '-bufsize', '5000k',
         '-g', '60',
         '-r', '30',
         '-vf', 'scale=-2:720',
@@ -1126,6 +1136,8 @@ app.post('/api/emit', async (req, res) => {
         '-reset_timestamps', '1',
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
+        '-rtmp_live', 'live',
+        '-rtmp_buffer', '1000',
         target_rtmp,
       ];
     } else {
@@ -1173,6 +1185,8 @@ app.post('/api/emit', async (req, res) => {
         '-reset_timestamps', '1',
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
+        '-rtmp_live', 'live',
+        '-rtmp_buffer', '1000',
         target_rtmp,
       ];
     }
@@ -1528,13 +1542,17 @@ app.post('/api/emit', async (req, res) => {
           setTimeout(() => {
             autoRecoverChannel(process_id, channelId, channelName);
           }, 500);
-        } else if (process_id === '0' || process_id === 0 || process_id === '10' || process_id === 10 || DIRECT_URL_CHANNELS[String(process_id)]) {
-          // Proceso 0 (Disney 7), 10 (Disney 8) o canales con URL directa (Canal 6): reutilizar la misma URL M3U8 guardada en DB
+        } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
+          // Procesos manuales (Disney 7, Canal 6, Disney 8): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
-          const directChannel = DIRECT_URL_CHANNELS[String(process_id)];
-          const manualLabels = { '0': 'Disney 7', '10': 'Disney 8' };
-          const procLabel = directChannel ? directChannel.channelName : (manualLabels[String(process_id)] || 'Manual');
-          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code}) - Reiniciando con misma URL en 500ms...`);
+          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
+          const procLabel = manualLabels[String(process_id)] || 'Manual';
+          
+          // Determinar causa del fallo para log más informativo
+          const failureType = detectedErrors.get(process_id);
+          const failureInfo = failureType ? ` (${failureType.reason || failureType.type})` : '';
+          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Reiniciando con misma URL en 3s (esperando liberación de socket RTMP)...`);
+          
           setTimeout(async () => {
             try {
               if (!supabase) {
@@ -1547,11 +1565,7 @@ app.post('/api/emit', async (req, res) => {
                 .eq('id', procId)
                 .single();
               
-              // Para canales directos, usar la URL fija si no hay guardada en DB
-              let sourceUrl = procData?.m3u8;
-              if (!sourceUrl && directChannel) {
-                sourceUrl = directChannel.url;
-              }
+              const sourceUrl = procData?.m3u8;
               const targetRtmp = procData?.rtmp;
               
               if (sourceUrl && targetRtmp) {
@@ -1594,7 +1608,7 @@ app.post('/api/emit', async (req, res) => {
               sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
               autoRecoveryInProgress.set(String(process_id), false);
             }
-          }, 500);
+          }, 3000); // 3 segundos de espera para liberar socket RTMP
         }
       }
     });
@@ -1804,6 +1818,9 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         ...videoParams,
         ...audioParams,
         '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        '-rtmp_live', 'live',
+        '-rtmp_buffer', '1000',
         target_rtmp
       ];
     } else {
@@ -1813,6 +1830,9 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         ...videoParams,
         ...audioParams,
         '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        '-rtmp_live', 'live',
+        '-rtmp_buffer', '1000',
         target_rtmp
       ];
     }
