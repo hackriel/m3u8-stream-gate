@@ -640,12 +640,16 @@ const detectAndCategorizeError = (output, processId) => {
       return true; // Ignorar silenciosamente, no es un error real
     }
 
-    // Para procesos manuales: 404 y EOF transitorios son manejados por FFmpeg con -reconnect_on_http_error 4xx,5xx
-    // Solo loguear como advertencia, NO marcar como error fatal
+    // Para procesos manuales: 404 y EOF transitorios suelen venir del CDN.
+    // Los tratamos como advertencia operativa, pero sí dejamos la causa registrada
+    // por si FFmpeg termina cerrando el proceso después de agotar sus reintentos internos.
     if (isManualProcess && (output.includes('Server returned 404') || (isEOF && elapsed > 10))) {
-      const reason = output.includes('404') ? '404 transitorio (FFmpeg reintentará internamente)' : 'EOF transitorio (FFmpeg reintentará internamente)';
+      const reason = output.includes('404')
+        ? '404 transitorio del CDN (FFmpeg reintentará internamente)'
+        : 'EOF transitorio del CDN (FFmpeg reintentará internamente)';
       sendLog(processId, 'warn', `⚠️ CDN: ${reason}`);
-      return true; // No marcar como error fatal
+      detectedErrors.set(processId, { type: 'source', reason });
+      return true; // No marcar como error fatal inmediato
     }
 
     const reason = output.includes('404') ? 'URL Fuente M3U8 no encontrada (404)' :
@@ -1048,16 +1052,29 @@ app.post('/api/emit', async (req, res) => {
     const probeSize      = isRecovery ? '500000'  : '1500000';   // 500KB / 1.5MB
 
     // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
+    const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id));
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
+    let isUnivisionLikeSource = false;
     try {
       const sourceUrl = new URL(effectiveSourceM3u8);
-      if (sourceUrl.hostname.includes('teletica.com')) {
+      const hostname = sourceUrl.hostname.toLowerCase();
+
+      if (hostname.includes('teletica.com')) {
         refererDomain = 'https://www.teletica.com/';
         originDomain = 'https://www.teletica.com';
-      } else if (sourceUrl.hostname.includes('cloudfront.net') || sourceUrl.hostname.includes('repretel.com')) {
+      } else if (hostname.includes('cloudfront.net') || hostname.includes('repretel.com')) {
         refererDomain = 'https://www.repretel.com/';
         originDomain = 'https://www.repretel.com';
+      } else if (
+        hostname.includes('univisionnow.com') ||
+        hostname.includes('univision.com') ||
+        hostname.includes('tudn.com') ||
+        hostname.includes('vix.com')
+      ) {
+        isUnivisionLikeSource = true;
+        refererDomain = 'https://www.tudn.com/';
+        originDomain = 'https://www.tudn.com';
       }
     } catch (_) {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
@@ -1068,6 +1085,15 @@ app.post('/api/emit', async (req, res) => {
     if (isTigo) {
       refererDomain = 'https://www.tdmax.com/';
       originDomain = 'https://www.tdmax.com';
+    }
+
+    const hardenedLiveInputArgs = [];
+    if (isManualProcess || isUnivisionLikeSource) {
+      hardenedLiveInputArgs.push(
+        '-http_seekable', '0',
+        '-max_reload', '1000',
+        '-m3u8_hold_counters', '1000'
+      );
     }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
@@ -1098,7 +1124,8 @@ app.post('/api/emit', async (req, res) => {
     const isHDProcess = String(process_id) === '0' || String(process_id) === '5' || String(process_id) === '10';
     
     if (isHDProcess) {
-      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(effectiveSourceM3u8, 0);
+      const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
+      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(effectiveSourceM3u8, preferredBandwidth);
       const actualSource = resolvedUrl;
       const bwKbps = Math.round(bandwidth / 1000);
       
@@ -1108,13 +1135,15 @@ app.post('/api/emit', async (req, res) => {
       }
       const hdLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
       const procLabel = hdLabels[String(process_id)] || 'HD';
-      sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (mejor calidad)`);
+      const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
+      sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
       sendLog(process_id, 'info', `🎬 ${procLabel}: CRF19 + VBV 720p HD (max 2500kbps, preset faster)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
         ...extraFfmpegInputArgs,
+        ...hardenedLiveInputArgs,
         '-timeout', '30000000',
         '-rw_timeout', '30000000',
         '-reconnect', '1',
@@ -1161,6 +1190,7 @@ app.post('/api/emit', async (req, res) => {
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
         ...extraFfmpegInputArgs,
+        ...hardenedLiveInputArgs,
         '-timeout', '30000000',
         '-rw_timeout', '30000000',
         '-reconnect', '1',
@@ -1308,6 +1338,7 @@ app.post('/api/emit', async (req, res) => {
           output.includes('keepalive request failed') ||
           output.includes('Error in the pull function') ||
           output.includes('retrying with new connection') ||
+          (isStoppingNow && output.includes('Error when loading first segment')) ||
           (isStoppingNow && output.includes('Immediate exit requested')) ||
           (isStoppingNow && output.includes('Output file #0 does not contain any stream')) ||
           (isStoppingNow && output.includes('received signal 15'));
