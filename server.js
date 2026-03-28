@@ -2198,9 +2198,10 @@ app.delete('/api/emit/:process_id', async (req, res) => {
     sendLog(process_id, 'info', `Solicitada eliminación del proceso ${process_id}`);
     
     // Primero detener el proceso si está corriendo
-    const processData = ffmpegProcesses.get(process_id);
+    const processData = ffmpegProcesses.get(process_id) ?? ffmpegProcesses.get(Number(process_id));
     if (processData && processData.process && !processData.process.killed) {
       manualStopProcesses.add(process_id); // Marcar como manual para evitar auto-recovery
+      manualStopProcesses.add(Number(process_id));
       const procRef = processData.process;
       procRef.kill('SIGKILL');
       ffmpegProcesses.delete(process_id);
