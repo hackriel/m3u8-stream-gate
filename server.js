@@ -146,13 +146,14 @@ const CHANNEL_MAP = {
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
 };
 
-// Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL
+// Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL guardada en DB
+// Canal 6 ahora funciona igual que Disney 7/8: el usuario pega la URL manualmente
 const DIRECT_URL_CHANNELS = {
-  '5': { 
-    channelName: 'Canal 6', 
-    url: 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8'
-  },
+  // '5' ya no tiene URL fija — se trata como Disney (manual)
 };
+
+// Procesos manuales (Disney 7, Canal 6, Disney 8): recovery reutiliza la URL guardada en DB
+const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
