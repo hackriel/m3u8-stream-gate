@@ -2468,14 +2468,21 @@ process.on('SIGTERM', () => {
 
 // ====== NIGHT REST SCHEDULER ======
 // Checks every minute if any process with night_rest=true needs to stop (1AM) or start (5AM)
+// Uses Costa Rica time (UTC-6) for scheduling
 const nightRestStoppedProcesses = new Set(); // Track which processes were stopped by night rest
+
+function getCostaRicaHour() {
+  const now = new Date();
+  // Costa Rica is UTC-6 (no daylight saving)
+  const utcHours = now.getUTCHours();
+  const crHour = (utcHours - 6 + 24) % 24;
+  return { hour: crHour, minute: now.getUTCMinutes() };
+}
 
 setInterval(async () => {
   if (!supabase) return;
   
-  const now = new Date();
-  const hour = now.getHours();
-  const minute = now.getMinutes();
+  const { hour, minute } = getCostaRicaHour();
   
   // Only act at exact hour transitions (minute 0) to avoid repeated actions
   if (minute !== 0) return;
