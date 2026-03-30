@@ -178,18 +178,52 @@ const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 const lastFrameTime = new Map(); // Map<processId, timestampMs>
 const lastProgressLog = new Map(); // Map<processId, timestampMs> — throttle de logs de progreso
 const PROGRESS_LOG_INTERVAL = 5000; // Loguear progreso cada 5 segundos
-const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames = proceso colgado
+const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames en running = proceso colgado
+const WATCHDOG_START_TIMEOUT = 25000; // 25 segundos en starting sin primer frame = arranque colgado
 const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
 
-// Watchdog interval: detecta procesos FFmpeg colgados que no producen frames
+// Watchdog interval: detecta procesos FFmpeg colgados, tanto en arranque como en ejecución
 setInterval(() => {
   for (const [processId, processData] of ffmpegProcesses.entries()) {
     if (!processData.process || processData.process.killed) continue;
     
     const lastFrame = lastFrameTime.get(processId);
     const status = emissionStatuses.get(processId);
+    const runtimeMs = Date.now() - (processData.startTime || Date.now());
+
+    // Caso 1: proceso pegado arrancando y nunca produjo el primer frame
+    if (status === 'starting' && !lastFrame && runtimeMs > WATCHDOG_START_TIMEOUT) {
+      const stalledSecs = Math.floor(runtimeMs / 1000);
+      sendLog(processId, 'error', `🐕 WATCHDOG: Arranque colgado — ${stalledSecs}s sin primer frame. Forzando cierre para recovery...`);
+
+      detectedErrors.set(processId, {
+        type: 'source',
+        reason: `Arranque colgado: ${stalledSecs}s sin primer frame (fuente/token/handshake bloqueado)`
+      });
+
+      if (supabase) {
+        supabase
+          .from('emission_processes')
+          .update({
+            failure_reason: 'stall',
+            failure_details: `Watchdog de arranque: ${stalledSecs}s sin primer frame`,
+            emit_status: 'error',
+          })
+          .eq('id', parseInt(processId))
+          .then(() => {})
+          .catch(err => console.error('Watchdog start DB error:', err));
+      }
+
+      try {
+        processData.process.kill('SIGKILL');
+      } catch (e) {
+        console.error(`Watchdog start: error matando proceso ${processId}:`, e);
+      }
+
+      continue;
+    }
     
-    // Solo verificar procesos que ya estaban en 'running' (no los que están arrancando)
+    // Caso 2: proceso ya estaba corriendo y dejó de producir frames
     if (status !== 'running') continue;
     if (!lastFrame) continue;
     
@@ -198,13 +232,11 @@ setInterval(() => {
       const stalledSecs = Math.floor(stalledMs / 1000);
       sendLog(processId, 'error', `🐕 WATCHDOG: Proceso colgado — ${stalledSecs}s sin producir frames. Forzando cierre para recovery...`);
       
-      // Guardar error detectado para diagnóstico
       detectedErrors.set(processId, { 
         type: 'source', 
         reason: `Proceso colgado: ${stalledSecs}s sin frames (CDN/fuente dejó de responder)` 
       });
       
-      // Actualizar DB con failure info
       if (supabase) {
         supabase
           .from('emission_processes')
@@ -218,14 +250,12 @@ setInterval(() => {
           .catch(err => console.error('Watchdog DB error:', err));
       }
       
-      // Force kill → el handler 'close' disparará el recovery automáticamente
       try {
         processData.process.kill('SIGKILL');
       } catch (e) {
         console.error(`Watchdog: error matando proceso ${processId}:`, e);
       }
       
-      // Limpiar para no re-triggear
       lastFrameTime.delete(processId);
     }
   }
@@ -1146,7 +1176,7 @@ app.post('/api/emit', async (req, res) => {
       const procLabel = hdLabels[String(process_id)] || 'HD';
       const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
       sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
-      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF18 + VBV 720p HD (max 2500kbps, preset medium, aq3)${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF18 + VBV 720p HD (max 2500kbps, preset medium)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
         ...hardenedLiveInputArgs,
@@ -1159,7 +1189,6 @@ app.post('/api/emit', async (req, res) => {
          '-profile:v', 'high',
          '-threads', '4',
          '-crf', '18',
-         '-aq-mode', '3',
           '-maxrate', '2500k',
           '-bufsize', '7500k',
         '-g', '60',
@@ -1179,7 +1208,7 @@ app.post('/api/emit', async (req, res) => {
       // Demás procesos: 720p @ 2500kbps
       const channelLabels = { '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '6': 'Multimedios', '7': 'Subida' };
       const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-      sendLog(process_id, 'info', `🎬 ${procName}: CRF18 + VBV 720p (max 2500kbps, preset medium, aq3)${isRecovery ? ' [recovery]' : ''}...`);
+      sendLog(process_id, 'info', `🎬 ${procName}: CRF18 + VBV 720p (max 2500kbps, preset medium)${isRecovery ? ' [recovery]' : ''}...`);
       
       ffmpegArgs = [
         ...inputArgs,
@@ -1192,7 +1221,6 @@ app.post('/api/emit', async (req, res) => {
          '-profile:v', 'high',
          '-threads', '4',
          '-crf', '18',
-         '-aq-mode', '3',
           '-maxrate', '2500k',
           '-bufsize', '7500k',
         '-vf', 'scale=-2:720',
@@ -1825,7 +1853,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode 720p @ 2500kbps (2000-3000k)`);
       videoParams = [
         '-c:v', 'libx264', '-preset', 'medium', '-profile:v', 'high',
-        '-threads', '4', '-crf', '18', '-aq-mode', '3',
+        '-threads', '4', '-crf', '18',
         '-maxrate', '2500k', '-bufsize', '7500k',
         '-vf', 'scale=-2:720',
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
