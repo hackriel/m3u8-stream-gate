@@ -178,18 +178,52 @@ const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 const lastFrameTime = new Map(); // Map<processId, timestampMs>
 const lastProgressLog = new Map(); // Map<processId, timestampMs> — throttle de logs de progreso
 const PROGRESS_LOG_INTERVAL = 5000; // Loguear progreso cada 5 segundos
-const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames = proceso colgado
+const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames en running = proceso colgado
+const WATCHDOG_START_TIMEOUT = 25000; // 25 segundos en starting sin primer frame = arranque colgado
 const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
 
-// Watchdog interval: detecta procesos FFmpeg colgados que no producen frames
+// Watchdog interval: detecta procesos FFmpeg colgados, tanto en arranque como en ejecución
 setInterval(() => {
   for (const [processId, processData] of ffmpegProcesses.entries()) {
     if (!processData.process || processData.process.killed) continue;
     
     const lastFrame = lastFrameTime.get(processId);
     const status = emissionStatuses.get(processId);
+    const runtimeMs = Date.now() - (processData.startTime || Date.now());
+
+    // Caso 1: proceso pegado arrancando y nunca produjo el primer frame
+    if (status === 'starting' && !lastFrame && runtimeMs > WATCHDOG_START_TIMEOUT) {
+      const stalledSecs = Math.floor(runtimeMs / 1000);
+      sendLog(processId, 'error', `🐕 WATCHDOG: Arranque colgado — ${stalledSecs}s sin primer frame. Forzando cierre para recovery...`);
+
+      detectedErrors.set(processId, {
+        type: 'source',
+        reason: `Arranque colgado: ${stalledSecs}s sin primer frame (fuente/token/handshake bloqueado)`
+      });
+
+      if (supabase) {
+        supabase
+          .from('emission_processes')
+          .update({
+            failure_reason: 'stall',
+            failure_details: `Watchdog de arranque: ${stalledSecs}s sin primer frame`,
+            emit_status: 'error',
+          })
+          .eq('id', parseInt(processId))
+          .then(() => {})
+          .catch(err => console.error('Watchdog start DB error:', err));
+      }
+
+      try {
+        processData.process.kill('SIGKILL');
+      } catch (e) {
+        console.error(`Watchdog start: error matando proceso ${processId}:`, e);
+      }
+
+      continue;
+    }
     
-    // Solo verificar procesos que ya estaban en 'running' (no los que están arrancando)
+    // Caso 2: proceso ya estaba corriendo y dejó de producir frames
     if (status !== 'running') continue;
     if (!lastFrame) continue;
     
@@ -198,13 +232,11 @@ setInterval(() => {
       const stalledSecs = Math.floor(stalledMs / 1000);
       sendLog(processId, 'error', `🐕 WATCHDOG: Proceso colgado — ${stalledSecs}s sin producir frames. Forzando cierre para recovery...`);
       
-      // Guardar error detectado para diagnóstico
       detectedErrors.set(processId, { 
         type: 'source', 
         reason: `Proceso colgado: ${stalledSecs}s sin frames (CDN/fuente dejó de responder)` 
       });
       
-      // Actualizar DB con failure info
       if (supabase) {
         supabase
           .from('emission_processes')
@@ -218,14 +250,12 @@ setInterval(() => {
           .catch(err => console.error('Watchdog DB error:', err));
       }
       
-      // Force kill → el handler 'close' disparará el recovery automáticamente
       try {
         processData.process.kill('SIGKILL');
       } catch (e) {
         console.error(`Watchdog: error matando proceso ${processId}:`, e);
       }
       
-      // Limpiar para no re-triggear
       lastFrameTime.delete(processId);
     }
   }
