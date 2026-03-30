@@ -1,0 +1,1 @@
+ALTER TABLE public.emission_processes ADD COLUMN night_rest boolean NOT NULL DEFAULT false;

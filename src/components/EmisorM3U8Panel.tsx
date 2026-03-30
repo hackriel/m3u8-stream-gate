@@ -42,6 +42,7 @@ interface EmissionProcess {
   processLogsFromDB?: string;
   recoveryCount: number;
   lastSignalDuration: number;
+  nightRest: boolean;
 }
 
 // Tipo para una entrada de log
@@ -89,6 +90,7 @@ const defaultProcess = (): EmissionProcess => ({
   logs: [],
   recoveryCount: 0,
   lastSignalDuration: 0,
+  nightRest: false,
 });
 
 export default function EmisorM3U8Panel() {
@@ -147,6 +149,7 @@ export default function EmisorM3U8Panel() {
                 processLogsFromDB: row.process_logs || '',
                 recoveryCount: (isRunning || row.is_emitting) ? ((row as any).recovery_count || 0) : 0,
                 lastSignalDuration: (row as any).last_signal_duration || 0,
+                nightRest: (row as any).night_rest || false,
               };
             } else {
               return defaultProcess();
@@ -238,6 +241,7 @@ export default function EmisorM3U8Panel() {
                   processLogsFromDB: row.process_logs || '',
                   recoveryCount: row.recovery_count || 0,
                   lastSignalDuration: (row as any).last_signal_duration || 0,
+                  nightRest: (row as any).night_rest || false,
                 };
               }
               return newProcesses;
@@ -935,6 +939,33 @@ export default function EmisorM3U8Panel() {
                 🗑️ Borrar
               </button>
             </div>
+
+            {/* Night Rest Toggle */}
+            {processIndex !== FILE_UPLOAD_INDEX && (
+              <div className="flex items-center gap-3 mt-4 p-3 rounded-xl bg-card/50 border border-border">
+                <Switch
+                  checked={process.nightRest}
+                  onCheckedChange={async (checked) => {
+                    updateProcess(processIndex, { nightRest: checked });
+                    try {
+                      await fetch('/api/night-rest', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ process_id: processIndex, enabled: checked }),
+                      });
+                      toast.success(`${checked ? '🌙' : '☀️'} Descanso nocturno ${checked ? 'activado' : 'desactivado'} para ${channelConfig.name}`);
+                    } catch (e) {
+                      toast.error('Error al cambiar descanso nocturno');
+                      updateProcess(processIndex, { nightRest: !checked });
+                    }
+                  }}
+                />
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-foreground">🌙 Descanso nocturno</span>
+                  <span className="text-xs text-muted-foreground">Apaga a la 1AM, enciende a las 5AM</span>
+                </div>
+              </div>
+            )}
 
             {process.emitStatus !== "idle" && process.emitStatus !== 'error' && (
               <div className={`mt-4 p-3 rounded-xl border ${
