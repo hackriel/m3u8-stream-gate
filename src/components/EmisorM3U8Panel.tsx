@@ -948,11 +948,11 @@ export default function EmisorM3U8Panel() {
                   onCheckedChange={async (checked) => {
                     updateProcess(processIndex, { nightRest: checked });
                     try {
-                      await fetch('/api/night-rest', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ process_id: processIndex, enabled: checked }),
-                      });
+                      const { error } = await supabase
+                        .from('emission_processes')
+                        .update({ night_rest: checked } as any)
+                        .eq('id', processIndex);
+                      if (error) throw error;
                       toast.success(`${checked ? '🌙' : '☀️'} Descanso nocturno ${checked ? 'activado' : 'desactivado'} para ${channelConfig.name}`);
                     } catch (e) {
                       toast.error('Error al cambiar descanso nocturno');
