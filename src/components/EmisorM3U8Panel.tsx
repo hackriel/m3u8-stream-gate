@@ -149,6 +149,7 @@ export default function EmisorM3U8Panel() {
                 processLogsFromDB: row.process_logs || '',
                 recoveryCount: (isRunning || row.is_emitting) ? ((row as any).recovery_count || 0) : 0,
                 lastSignalDuration: (row as any).last_signal_duration || 0,
+                nightRest: (row as any).night_rest || false,
               };
             } else {
               return defaultProcess();
@@ -240,6 +241,7 @@ export default function EmisorM3U8Panel() {
                   processLogsFromDB: row.process_logs || '',
                   recoveryCount: row.recovery_count || 0,
                   lastSignalDuration: (row as any).last_signal_duration || 0,
+                  nightRest: (row as any).night_rest || false,
                 };
               }
               return newProcesses;
