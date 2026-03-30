@@ -1142,36 +1142,22 @@ app.post('/api/emit', async (req, res) => {
       const procLabel = hdLabels[String(process_id)] || 'HD';
       const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
       sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
-      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF19 + VBV 720p HD (max 2500kbps, preset faster)${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF18 + VBV 720p HD (max 2500kbps, preset medium, aq3)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-        ...extraFfmpegInputArgs,
         ...hardenedLiveInputArgs,
-        '-timeout', '30000000',
-        '-rw_timeout', '30000000',
-        '-reconnect', '1',
-        '-reconnect_at_eof', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
-        '-reconnect_on_network_error', '1',
-        '-reconnect_on_http_error', '4xx,5xx',
-        '-multiple_requests', '1',
-        '-http_persistent', '1',
-        '-live_start_index', '-3',
-        '-fflags', '+genpts+discardcorrupt',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
         '-i', actualSource,
         '-map', '0:v:0?', '-map', '0:a:0?',
          '-c:v', 'libx264',
-         '-preset', 'faster',
+         '-preset', 'medium',
          '-profile:v', 'high',
-         '-threads', '2',
-         '-crf', '19',
+         '-threads', '4',
+         '-crf', '18',
+         '-aq-mode', '3',
           '-maxrate', '2500k',
-          '-bufsize', '5000k',
+          '-bufsize', '7500k',
         '-g', '60',
         '-r', '30',
         '-vf', 'scale=-2:720',
@@ -1189,36 +1175,22 @@ app.post('/api/emit', async (req, res) => {
       // Demás procesos: 720p @ 2500kbps
       const channelLabels = { '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '6': 'Multimedios', '7': 'Subida' };
       const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-      sendLog(process_id, 'info', `🎬 ${procName}: CRF19 + VBV 720p (max 2500kbps, preset faster)${isRecovery ? ' [recovery]' : ''}...`);
+      sendLog(process_id, 'info', `🎬 ${procName}: CRF18 + VBV 720p (max 2500kbps, preset medium, aq3)${isRecovery ? ' [recovery]' : ''}...`);
       
       ffmpegArgs = [
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\nAccept: */*\r\nAccept-Language: es-419,es;q=0.9\r\nSec-Fetch-Dest: empty\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n`,
-        ...extraFfmpegInputArgs,
-        ...hardenedLiveInputArgs,
-        '-timeout', '30000000',
-        '-rw_timeout', '30000000',
-        '-reconnect', '1',
-        '-reconnect_at_eof', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '2',
-        '-reconnect_on_network_error', '1',
-        '-reconnect_on_http_error', '5xx',
-        '-multiple_requests', '1',
-        '-http_persistent', '1',
-        '-live_start_index', '-3',
-        '-fflags', '+genpts+discardcorrupt',
+        ...inputArgs,
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
         '-i', inputSourceUrl,
         '-map', '0:v:0?', '-map', '0:a:0?',
          '-c:v', 'libx264',
-         '-preset', 'faster',
+         '-preset', 'medium',
          '-profile:v', 'high',
-         '-threads', '2',
-         '-crf', '19',
+         '-threads', '4',
+         '-crf', '18',
+         '-aq-mode', '3',
           '-maxrate', '2500k',
-          '-bufsize', '5000k',
+          '-bufsize', '7500k',
         '-vf', 'scale=-2:720',
         '-r', '30',
         '-g', '60',
@@ -1848,8 +1820,9 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       // >5000kbps o no detectado: re-encodear a 720p @ 2500kbps
       sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode 720p @ 2500kbps (2000-3000k)`);
       videoParams = [
-        '-c:v', 'libx264', '-preset', 'faster', '-profile:v', 'high',
-        '-crf', '19', '-maxrate', '2500k', '-bufsize', '5000k',
+        '-c:v', 'libx264', '-preset', 'medium', '-profile:v', 'high',
+        '-threads', '4', '-crf', '18', '-aq-mode', '3',
+        '-maxrate', '2500k', '-bufsize', '7500k',
         '-vf', 'scale=-2:720',
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
