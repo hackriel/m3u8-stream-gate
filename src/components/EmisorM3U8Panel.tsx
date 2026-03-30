@@ -42,6 +42,7 @@ interface EmissionProcess {
   processLogsFromDB?: string;
   recoveryCount: number;
   lastSignalDuration: number;
+  nightRest: boolean;
 }
 
 // Tipo para una entrada de log

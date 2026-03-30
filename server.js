@@ -2466,6 +2466,144 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+// ====== NIGHT REST SCHEDULER ======
+// Checks every minute if any process with night_rest=true needs to stop (1AM) or start (5AM)
+const nightRestStoppedProcesses = new Set(); // Track which processes were stopped by night rest
+
+setInterval(async () => {
+  if (!supabase) return;
+  
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  
+  // Only act at exact hour transitions (minute 0) to avoid repeated actions
+  if (minute !== 0) return;
+  
+  try {
+    const { data: rows, error } = await supabase
+      .from('emission_processes')
+      .select('id, night_rest, is_emitting, emit_status, m3u8, rtmp, source_url')
+      .eq('night_rest', true);
+    
+    if (error || !rows) return;
+    
+    for (const row of rows) {
+      const pid = String(row.id);
+      
+      // 1 AM: Stop processes that are emitting
+      if (hour === 1 && row.is_emitting) {
+        sendLog(pid, 'info', `🌙 Descanso nocturno: Apagando ${CHANNEL_CONFIGS_SERVER[pid] || `Proceso ${pid}`} hasta las 5AM...`);
+        nightRestStoppedProcesses.add(pid);
+        manualStopProcesses.add(pid);
+        manualStopProcesses.add(Number(pid));
+        
+        // Kill the FFmpeg process
+        const processData = ffmpegProcesses.get(pid) || ffmpegProcesses.get(Number(pid));
+        if (processData && processData.process && !processData.process.killed) {
+          processData.process.kill('SIGTERM');
+        }
+        
+        // Update DB
+        await supabase.from('emission_processes').update({
+          is_emitting: false,
+          is_active: false,
+          emit_status: 'idle',
+          emit_msg: '🌙 Descanso nocturno (se enciende a las 5AM)',
+        }).eq('id', row.id);
+        
+        sendLog(pid, 'success', `🌙 Proceso apagado por descanso nocturno`);
+      }
+      
+      // 5 AM: Start processes that were stopped by night rest
+      if (hour === 5 && !row.is_emitting && nightRestStoppedProcesses.has(pid)) {
+        nightRestStoppedProcesses.delete(pid);
+        manualStopProcesses.delete(pid);
+        manualStopProcesses.delete(Number(pid));
+        
+        sendLog(pid, 'info', `☀️ Descanso nocturno terminado: Encendiendo ${CHANNEL_CONFIGS_SERVER[pid] || `Proceso ${pid}`}...`);
+        
+        // TDMax channels need a fresh URL via scraping
+        if (CHANNEL_MAP[pid]) {
+          const { channelId, channelName } = CHANNEL_MAP[pid];
+          sendLog(pid, 'info', `🔄 ${channelName}: Obteniendo URL fresca para arranque matutino...`);
+          await autoRecoverChannel(pid, channelId, channelName);
+        } else if (MANUAL_URL_PROCESSES.has(pid)) {
+          // Disney/Canal 6: restart with existing URL from DB
+          const sourceUrl = row.source_url || row.m3u8;
+          const targetRtmp = row.rtmp;
+          
+          if (sourceUrl && targetRtmp) {
+            sendLog(pid, 'info', `🔄 Reiniciando con URL existente...`);
+            await supabase.from('emission_processes').update({
+              emit_status: 'starting',
+              is_emitting: true,
+              is_active: true,
+            }).eq('id', row.id);
+            
+            try {
+              await fetch(`http://localhost:${PORT}/api/emit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  source_m3u8: sourceUrl,
+                  target_rtmp: targetRtmp,
+                  process_id: pid,
+                  is_recovery: true,
+                }),
+              });
+            } catch (err) {
+              sendLog(pid, 'error', `❌ Error al arrancar: ${err.message}`);
+            }
+          } else {
+            sendLog(pid, 'warn', `⚠️ No hay URL guardada para arrancar automáticamente`);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Night rest scheduler error:', err);
+  }
+}, 60000); // Check every minute
+
+// Server-side channel name map for logs
+const CHANNEL_CONFIGS_SERVER = {
+  '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
+  '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
+};
+
+// Endpoint para toggle night_rest
+app.post('/api/night-rest', async (req, res) => {
+  try {
+    const { process_id, enabled } = req.body;
+    if (process_id === undefined || enabled === undefined) {
+      return res.status(400).json({ error: 'Faltan parámetros: process_id, enabled' });
+    }
+    
+    if (!supabase) {
+      return res.status(500).json({ error: 'Base de datos no disponible' });
+    }
+    
+    const { error } = await supabase
+      .from('emission_processes')
+      .update({ night_rest: enabled })
+      .eq('id', Number(process_id));
+    
+    if (error) throw error;
+    
+    const label = CHANNEL_CONFIGS_SERVER[String(process_id)] || `Proceso ${process_id}`;
+    sendLog(String(process_id), 'info', `${enabled ? '🌙' : '☀️'} Descanso nocturno ${enabled ? 'activado' : 'desactivado'} para ${label}`);
+    
+    if (!enabled) {
+      nightRestStoppedProcesses.delete(String(process_id));
+    }
+    
+    res.json({ success: true, night_rest: enabled });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Iniciar el servidor HTTP (que incluye WebSocket)
 server.listen(PORT, () => {
   console.log(`🚀 Servidor HTTP+WebSocket iniciado en puerto ${PORT}`);
