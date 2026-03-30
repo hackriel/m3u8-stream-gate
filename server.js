@@ -131,6 +131,7 @@ const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTim
 const emissionStatuses = new Map(); // Map<processId, status>
 const autoRecoveryInProgress = new Map(); // Map<processId, boolean>
 const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hacer auto-recovery)
+const nightRestStoppedProcesses = new Set(); // Procesos apagados por descanso nocturno
 const detectedErrors = new Map(); // Map<processId, { type, reason }> — último error detectado por stderr
 
 
@@ -2472,8 +2473,7 @@ process.on('SIGTERM', () => {
 // ====== NIGHT REST SCHEDULER ======
 // Checks every minute if any process with night_rest=true needs to stop (1AM) or start (5AM)
 // Uses Costa Rica time (UTC-6) for scheduling
-const nightRestStoppedProcesses = new Set(); // Track which processes were stopped by night rest
-
+// nightRestStoppedProcesses is declared at top with other global Sets
 function getCostaRicaHour() {
   const now = new Date();
   // Costa Rica is UTC-6 (no daylight saving)
