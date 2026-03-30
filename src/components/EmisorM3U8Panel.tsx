@@ -940,6 +940,33 @@ export default function EmisorM3U8Panel() {
               </button>
             </div>
 
+            {/* Night Rest Toggle */}
+            {processIndex !== FILE_UPLOAD_INDEX && (
+              <div className="flex items-center gap-3 mt-4 p-3 rounded-xl bg-card/50 border border-border">
+                <Switch
+                  checked={process.nightRest}
+                  onCheckedChange={async (checked) => {
+                    updateProcess(processIndex, { nightRest: checked });
+                    try {
+                      await fetch('/api/night-rest', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ process_id: processIndex, enabled: checked }),
+                      });
+                      toast.success(`${checked ? '🌙' : '☀️'} Descanso nocturno ${checked ? 'activado' : 'desactivado'} para ${channelConfig.name}`);
+                    } catch (e) {
+                      toast.error('Error al cambiar descanso nocturno');
+                      updateProcess(processIndex, { nightRest: !checked });
+                    }
+                  }}
+                />
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-foreground">🌙 Descanso nocturno</span>
+                  <span className="text-xs text-muted-foreground">Apaga a la 1AM, enciende a las 5AM</span>
+                </div>
+              </div>
+            )}
+
             {process.emitStatus !== "idle" && process.emitStatus !== 'error' && (
               <div className={`mt-4 p-3 rounded-xl border ${
                 process.emitStatus === 'running' 
