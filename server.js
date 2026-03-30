@@ -866,9 +866,12 @@ app.post('/api/emit', async (req, res) => {
       return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 10` });
     }
 
-    // Resetear contador SOLO cuando es inicio manual
+    // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
     if (!is_recovery) {
       recoveryAttempts.set(process_id, 0);
+      manualStopProcesses.delete(process_id);
+      manualStopProcesses.delete(numericId);
+      nightRestStoppedProcesses.delete(process_id);
     }
     
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
