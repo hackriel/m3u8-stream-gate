@@ -90,6 +90,7 @@ const defaultProcess = (): EmissionProcess => ({
   logs: [],
   recoveryCount: 0,
   lastSignalDuration: 0,
+  nightRest: false,
 });
 
 export default function EmisorM3U8Panel() {
