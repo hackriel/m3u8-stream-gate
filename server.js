@@ -1156,6 +1156,12 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
+    const inputArgs = [
+      ...extraFfmpegInputArgs,
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\n`,
+    ];
+
     // Para Tigo, FFmpeg ya apunta al proxy local, no necesita resolución de variante
     let inputSourceUrl = effectiveSourceM3u8;
 
