@@ -182,7 +182,7 @@ const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames en running = pro
 const WATCHDOG_START_TIMEOUT = 25000; // 25 segundos en starting sin primer frame = arranque colgado
 const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
 const HLS_INPUT_RESILIENCE_ARGS = [
-  '-rw_timeout', '30000000',
+  '-rw_timeout', '10000000', // 10 segundos - tope máximo si la conexión se cuelga sin respuesta
   '-reconnect', '1',
   '-reconnect_streamed', '1',
   '-reconnect_at_eof', '1',
