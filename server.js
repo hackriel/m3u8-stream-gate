@@ -2352,7 +2352,7 @@ app.get('/api/status', (req, res) => {
   } else {
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i <= 10; i++) {
       const id = i.toString();
       const processData = ffmpegProcesses.get(id);
       allStatuses[id] = {
