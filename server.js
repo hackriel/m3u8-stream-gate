@@ -1124,7 +1124,7 @@ app.post('/api/emit', async (req, res) => {
       const procLabel = hdLabels[String(process_id)] || 'HD';
       const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
       sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
-      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF18 + VBV 720p HD (max 2500kbps, preset medium)${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: CBR 2500k + VBV 720p HD (preset medium)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
         ...inputArgs,
@@ -1138,9 +1138,9 @@ app.post('/api/emit', async (req, res) => {
          '-preset', 'medium',
          '-profile:v', 'high',
          '-threads', '4',
-         '-crf', '18',
-          '-maxrate', '2500k',
-          '-bufsize', '7500k',
+         '-b:v', '2500k',
+         '-maxrate', '2500k',
+         '-bufsize', '5000k',
         '-g', '60',
         '-keyint_min', '60',
         '-sc_threshold', '0',
@@ -1160,7 +1160,7 @@ app.post('/api/emit', async (req, res) => {
       // Demás procesos: 720p @ 2500kbps
       const channelLabels = { '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '6': 'Multimedios', '7': 'Subida' };
       const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-      sendLog(process_id, 'info', `🎬 ${procName}: CRF18 + VBV 720p (max 2500kbps, preset medium)${isRecovery ? ' [recovery]' : ''}...`);
+      sendLog(process_id, 'info', `🎬 ${procName}: CBR 2500k + VBV 720p (preset medium)${isRecovery ? ' [recovery]' : ''}...`);
       
       ffmpegArgs = [
         ...inputArgs,
@@ -1173,9 +1173,9 @@ app.post('/api/emit', async (req, res) => {
          '-preset', 'medium',
          '-profile:v', 'high',
          '-threads', '4',
-         '-crf', '18',
-          '-maxrate', '2500k',
-          '-bufsize', '7500k',
+         '-b:v', '2500k',
+         '-maxrate', '2500k',
+         '-bufsize', '5000k',
         '-vf', 'scale=-2:720',
         '-r', '30',
         '-g', '60',
