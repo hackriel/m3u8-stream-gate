@@ -1238,6 +1238,7 @@ app.post('/api/emit', async (req, res) => {
       
       ffmpegArgs = [
         ...inputArgs,
+        '-fflags', '+genpts',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
         '-i', inputSourceUrl,
@@ -1255,7 +1256,7 @@ app.post('/api/emit', async (req, res) => {
         '-keyint_min', '60',
         '-sc_threshold', '0',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '192k',
         '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-reset_timestamps', '1',
