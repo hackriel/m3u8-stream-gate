@@ -1160,7 +1160,7 @@ app.post('/api/emit', async (req, res) => {
       // Demás procesos: 720p @ 2500kbps
       const channelLabels = { '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '6': 'Multimedios', '7': 'Subida' };
       const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-      sendLog(process_id, 'info', `🎬 ${procName}: CRF18 + VBV 720p (max 2500kbps, preset medium)${isRecovery ? ' [recovery]' : ''}...`);
+      sendLog(process_id, 'info', `🎬 ${procName}: CBR 2500k + VBV 720p (preset medium)${isRecovery ? ' [recovery]' : ''}...`);
       
       ffmpegArgs = [
         ...inputArgs,
