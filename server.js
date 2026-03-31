@@ -1201,7 +1201,9 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'info', `🎬 ${procLabel}: CRF18 + VBV 720p HD (max 2500kbps, preset medium)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
+        ...inputArgs,
         ...hardenedLiveInputArgs,
+        '-fflags', '+genpts',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
         '-i', actualSource,
@@ -1214,10 +1216,12 @@ app.post('/api/emit', async (req, res) => {
           '-maxrate', '2500k',
           '-bufsize', '7500k',
         '-g', '60',
+        '-keyint_min', '60',
+        '-sc_threshold', '0',
         '-r', '30',
         '-vf', 'scale=-2:720',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '192k',
         '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-reset_timestamps', '1',
