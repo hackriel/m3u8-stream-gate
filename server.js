@@ -923,81 +923,7 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // (Tigo processes removed - IDs 2, 8, 9 no longer active)
-    const isTigoProcess = false;
-    const tigoChannelId = '664237788f085ac1f2a15f81';
-    const tigoChannelName = CHANNEL_MAP[process_id]?.channelName || 'Tigo';
-    
-    if (isTigoProcess) {
-      sendLog(process_id, 'info', `🆕 ${tigoChannelName}: obteniendo URL virgen...`);
-      const freshResult = await scrapeStreamUrlLocal(tigoChannelId, tigoChannelName);
-      if (!freshResult.url) {
-        return res.status(502).json({ error: freshResult.error || 'No se pudo obtener URL para Tigo' });
-      }
-      effectiveSourceM3u8 = freshResult.url;
-      scrapeSessionCache.set(process_id, {
-        cookies: freshResult.cookies || null,
-        accessToken: freshResult.accessToken || null,
-        timestamp: Date.now(),
-      });
-      sendLog(process_id, 'success', `✅ ${tigoChannelName}: URL virgen obtenida`);
-      
-      // Proceso 9 (Tigo Master): usar master playlist directa, sin resolver variante
-      if (process_id !== '9') {
-        // Procesos 2 y 8: resolver variante directa (720p)
-        const { resolvedUrl, bandwidth, resolution } = await resolveBestHLSVariant(effectiveSourceM3u8, 2500000);
-        let variantUrl = effectiveSourceM3u8;
-        if (resolvedUrl && resolvedUrl !== effectiveSourceM3u8) {
-          variantUrl = resolvedUrl;
-          sendLog(process_id, 'info', `🎯 ${tigoChannelName}: variante → ${resolution} @ ${Math.round((bandwidth||0)/1000)}kbps`);
-        }
-        
-        // Extraer nimblesessionid del playlist para mantener la sesión viva
-        const sessionHeaders = {};
-        if (freshResult.accessToken) sessionHeaders['Authorization'] = `Bearer ${freshResult.accessToken}`;
-        const { sessionId, error: sessErr } = await extractNimbleSession(variantUrl, sessionHeaders);
-        
-        if (sessionId) {
-          sendLog(process_id, 'info', `🔑 ${tigoChannelName}: nimblesessionid=${sessionId}, obteniendo token fresco...`);
-          const freshResult2 = await scrapeStreamUrlLocal(tigoChannelId, tigoChannelName);
-          if (freshResult2.url) {
-            effectiveSourceM3u8 = freshResult2.url;
-            scrapeSessionCache.set(process_id, {
-              cookies: freshResult2.cookies || null,
-              accessToken: freshResult2.accessToken || null,
-              timestamp: Date.now(),
-            });
-            const { resolvedUrl: freshVariant } = await resolveBestHLSVariant(freshResult2.url, 2500000);
-            const finalVariant = freshVariant || freshResult2.url;
-            effectiveSourceM3u8 = appendNimbleSession(finalVariant, sessionId);
-            sendLog(process_id, 'success', `✅ ${tigoChannelName}: URL con sesión Nimble (session=${sessionId})`);
-          }
-        } else {
-          sendLog(process_id, 'warn', `⚠️ ${tigoChannelName}: no nimblesessionid (${sessErr}), obteniendo token fresco...`);
-          const freshResult2 = await scrapeStreamUrlLocal(tigoChannelId, tigoChannelName);
-          if (freshResult2.url) {
-            effectiveSourceM3u8 = freshResult2.url;
-            scrapeSessionCache.set(process_id, { cookies: freshResult2.cookies || null, accessToken: freshResult2.accessToken || null, timestamp: Date.now() });
-          }
-        }
-      } else {
-        // Proceso 9: usar master directo, solo appendear nimblesessionid si existe
-        const sessionHeaders = {};
-        if (freshResult.accessToken) sessionHeaders['Authorization'] = `Bearer ${freshResult.accessToken}`;
-        const { sessionId } = await extractNimbleSession(effectiveSourceM3u8, sessionHeaders);
-        if (sessionId) {
-          // Obtener token fresco (el anterior se quemó con el fetch)
-          const freshResult2 = await scrapeStreamUrlLocal(tigoChannelId, tigoChannelName);
-          if (freshResult2.url) {
-            effectiveSourceM3u8 = appendNimbleSession(freshResult2.url, sessionId);
-            scrapeSessionCache.set(process_id, { cookies: freshResult2.cookies || null, accessToken: freshResult2.accessToken || null, timestamp: Date.now() });
-            sendLog(process_id, 'success', `✅ ${tigoChannelName}: Master con sesión Nimble (session=${sessionId})`);
-          }
-        } else {
-          sendLog(process_id, 'info', `📡 ${tigoChannelName}: usando master directo sin session ID`);
-        }
-      }
-    }
+    // (Tigo processes removed — dead code cleaned up)
 
     // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP
     const conflictingProcessId = checkRTMPConflict(target_rtmp, process_id);
@@ -1150,7 +1076,7 @@ app.post('/api/emit', async (req, res) => {
     let authorizationHeader = null;
     if (cachedSession && !isTigo) {
       const sessionAge = Date.now() - cachedSession.timestamp;
-      if (sessionAge < 300000) {
+      if (sessionAge < 600000) { // 10 minutos de TTL para cubrir recoveries lentos
         if (cachedSession.cookies) {
           extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
           sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
@@ -1201,7 +1127,9 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'info', `🎬 ${procLabel}: CRF18 + VBV 720p HD (max 2500kbps, preset medium)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
+        ...inputArgs,
         ...hardenedLiveInputArgs,
+        '-fflags', '+genpts',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
         '-i', actualSource,
@@ -1214,10 +1142,12 @@ app.post('/api/emit', async (req, res) => {
           '-maxrate', '2500k',
           '-bufsize', '7500k',
         '-g', '60',
+        '-keyint_min', '60',
+        '-sc_threshold', '0',
         '-r', '30',
         '-vf', 'scale=-2:720',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '192k',
         '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-reset_timestamps', '1',
@@ -1234,6 +1164,7 @@ app.post('/api/emit', async (req, res) => {
       
       ffmpegArgs = [
         ...inputArgs,
+        '-fflags', '+genpts',
         '-analyzeduration', analyzeDuration,
         '-probesize', probeSize,
         '-i', inputSourceUrl,
@@ -1251,7 +1182,7 @@ app.post('/api/emit', async (req, res) => {
         '-keyint_min', '60',
         '-sc_threshold', '0',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '192k',
         '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-reset_timestamps', '1',
@@ -2133,6 +2064,10 @@ app.post('/api/emit/stop', async (req, res) => {
       
       ffmpegProcesses.delete(process_id);
       resolutionCache.delete(process_id);
+      detectedErrors.delete(process_id);
+      quickRetryState.delete(process_id);
+      lastFrameTime.delete(process_id);
+      lastProgressLog.delete(process_id);
       
       emissionStatuses.set(process_id, 'idle');
       sendLog(process_id, 'success', `Emisión detenida correctamente`);
@@ -2347,7 +2282,7 @@ app.get('/api/status', (req, res) => {
   } else {
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i <= 10; i++) {
       const id = i.toString();
       const processData = ffmpegProcesses.get(id);
       allStatuses[id] = {
