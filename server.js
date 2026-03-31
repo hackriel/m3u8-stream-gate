@@ -181,6 +181,14 @@ const PROGRESS_LOG_INTERVAL = 5000; // Loguear progreso cada 5 segundos
 const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames en running = proceso colgado
 const WATCHDOG_START_TIMEOUT = 25000; // 25 segundos en starting sin primer frame = arranque colgado
 const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
+const HLS_INPUT_RESILIENCE_ARGS = [
+  '-rw_timeout', '30000000',
+  '-reconnect', '1',
+  '-reconnect_streamed', '1',
+  '-reconnect_at_eof', '1',
+  '-reconnect_on_http_error', '5xx',
+  '-reconnect_delay_max', '5',
+];
 
 // Watchdog interval: detecta procesos FFmpeg colgados, tanto en arranque como en ejecución
 setInterval(() => {
@@ -1139,6 +1147,7 @@ app.post('/api/emit', async (req, res) => {
     // Para Tigo (proceso 2), el proxy maneja la auth y los segmentos tienen sus propios tokens
     const cachedSession = scrapeSessionCache.get(process_id);
     let extraFfmpegInputArgs = [];
+    let authorizationHeader = null;
     if (cachedSession && !isTigo) {
       const sessionAge = Date.now() - cachedSession.timestamp;
       if (sessionAge < 300000) {
@@ -1147,7 +1156,7 @@ app.post('/api/emit', async (req, res) => {
           sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
         }
         if (cachedSession.accessToken) {
-          extraFfmpegInputArgs.push('-headers', `Authorization: Bearer ${cachedSession.accessToken}\r\n`);
+          authorizationHeader = `Authorization: Bearer ${cachedSession.accessToken}`;
           sendLog(process_id, 'info', `🔑 Inyectando accessToken a FFmpeg`);
         }
       } else {
@@ -1156,10 +1165,17 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
+    const combinedHeaders = [
+      authorizationHeader,
+      `Referer: ${refererDomain}`,
+      `Origin: ${originDomain}`,
+    ].filter(Boolean).join('\r\n') + '\r\n';
+
     const inputArgs = [
+      ...HLS_INPUT_RESILIENCE_ARGS,
       ...extraFfmpegInputArgs,
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      '-headers', `Referer: ${refererDomain}\r\nOrigin: ${originDomain}\r\n`,
+      '-headers', combinedHeaders,
     ];
 
     // Para Tigo, FFmpeg ya apunta al proxy local, no necesita resolución de variante
@@ -1242,7 +1258,6 @@ app.post('/api/emit', async (req, res) => {
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
         '-rtmp_live', 'live',
-        '-rtmp_buffer', '1000',
         target_rtmp,
       ];
     }
@@ -1878,7 +1893,6 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
         '-rtmp_live', 'live',
-        '-rtmp_buffer', '1000',
         target_rtmp
       ];
     } else {
@@ -1890,7 +1904,6 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
         '-rtmp_live', 'live',
-        '-rtmp_buffer', '1000',
         target_rtmp
       ];
     }
