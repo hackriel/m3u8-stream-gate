@@ -2064,6 +2064,10 @@ app.post('/api/emit/stop', async (req, res) => {
       
       ffmpegProcesses.delete(process_id);
       resolutionCache.delete(process_id);
+      detectedErrors.delete(process_id);
+      quickRetryState.delete(process_id);
+      lastFrameTime.delete(process_id);
+      lastProgressLog.delete(process_id);
       
       emissionStatuses.set(process_id, 'idle');
       sendLog(process_id, 'success', `Emisión detenida correctamente`);
