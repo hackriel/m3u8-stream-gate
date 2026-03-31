@@ -1124,7 +1124,7 @@ app.post('/api/emit', async (req, res) => {
       const procLabel = hdLabels[String(process_id)] || 'HD';
       const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
       sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
-      sendLog(process_id, 'info', `🎬 ${procLabel}: CRF18 + VBV 720p HD (max 2500kbps, preset medium)${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: CBR 2500k + VBV 720p HD (preset medium)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
         ...inputArgs,
