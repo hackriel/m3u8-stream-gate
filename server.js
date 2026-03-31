@@ -1076,7 +1076,7 @@ app.post('/api/emit', async (req, res) => {
     let authorizationHeader = null;
     if (cachedSession && !isTigo) {
       const sessionAge = Date.now() - cachedSession.timestamp;
-      if (sessionAge < 300000) {
+      if (sessionAge < 600000) { // 10 minutos de TTL para cubrir recoveries lentos
         if (cachedSession.cookies) {
           extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
           sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
