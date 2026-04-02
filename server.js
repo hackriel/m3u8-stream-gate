@@ -996,12 +996,6 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
-    // Tigo (procesos 2, 8, 9): su CDN Streann valida headers más estrictos
-    const isTigo = ['2', '8', '9'].includes(String(process_id));
-    if (isTigo) {
-      refererDomain = 'https://www.tdmax.com/';
-      originDomain = 'https://www.tdmax.com';
-    }
 
     const hardenedLiveInputArgs = [];
     if (isManualProcess || isUnivisionLikeSource) {
