@@ -408,56 +408,6 @@ const scrapeStreamUrl = async (channelId, channelName) => {
 };
 // ==================== FIN SCRAPING ====================
 
-// ==================== TIGO SESSION EXTRACTION ====================
-// Nimble Streamer usa `nimblesessionid` para mantener sesiones HLS vivas.
-// Al hacer el primer fetch del playlist, los segmentos contienen este session ID.
-// Si appendeamos el nimblesessionid a la URL del playlist, Nimble reconoce
-// la sesión existente y no requiere un wmsAuthSign válido para reloads.
-
-const extractNimbleSession = async (playlistUrl, headers = {}) => {
-  try {
-    const resp = await fetch(playlistUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        ...headers,
-      },
-    });
-    if (!resp.ok) return { sessionId: null, error: `HTTP ${resp.status}` };
-    
-    const body = await resp.text();
-    
-    // Buscar nimblesessionid en las URLs de segmentos
-    const sessionMatch = body.match(/nimblesessionid=(\d+)/);
-    if (sessionMatch) {
-      return { sessionId: sessionMatch[1], error: null };
-    }
-    
-    // También puede venir como redirect o en headers
-    const locationHeader = resp.headers.get('location');
-    if (locationHeader) {
-      const locMatch = locationHeader.match(/nimblesessionid=(\d+)/);
-      if (locMatch) return { sessionId: locMatch[1], error: null };
-    }
-    
-    return { sessionId: null, error: 'No nimblesessionid found in playlist' };
-  } catch (err) {
-    return { sessionId: null, error: err.message };
-  }
-};
-
-// Enriquecer una URL con nimblesessionid
-const appendNimbleSession = (url, sessionId) => {
-  if (!sessionId) return url;
-  try {
-    const parsed = new URL(url);
-    parsed.searchParams.set('nimblesessionid', sessionId);
-    return parsed.toString();
-  } catch (_) {
-    const sep = url.includes('?') ? '&' : '?';
-    return `${url}${sep}nimblesessionid=${sessionId}`;
-  }
-};
-// ==================== FIN TIGO SESSION ====================
 
 
 
