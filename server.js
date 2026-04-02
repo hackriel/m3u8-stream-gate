@@ -1004,12 +1004,10 @@ app.post('/api/emit', async (req, res) => {
         '-max_reload', '1000',
         '-m3u8_hold_counters', '1000'
       );
-      // Para fuentes tipo TUDN/Univision: throttlear lectura a velocidad real (1x)
-      // para no descargar segmentos más rápido que un navegador y evitar detección de bot
-      if (isUnivisionLikeSource) {
-        hardenedLiveInputArgs.push('-re');
-      }
     }
+    // Throttlear lectura a velocidad real (1x) en TODOS los canales
+    // Evita ráfagas de datos que causan pausa + fast-forward en el reproductor
+    hardenedLiveInputArgs.push('-re');
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
     const cachedSession = scrapeSessionCache.get(process_id);
