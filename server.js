@@ -1548,7 +1548,6 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
-      resolutionCache.delete(process_id);
       lastFrameTime.delete(process_id);
     });
 
