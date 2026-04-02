@@ -1124,7 +1124,7 @@ app.post('/api/emit', async (req, res) => {
       const procLabel = hdLabels[String(process_id)] || 'HD';
       const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
       sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
-      sendLog(process_id, 'info', `🎬 ${procLabel}: CBR 2500k + VBV 720p HD (preset medium)${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🎬 ${procLabel}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
       
       ffmpegArgs = [
         ...inputArgs,
@@ -1135,19 +1135,19 @@ app.post('/api/emit', async (req, res) => {
         '-i', actualSource,
         '-map', '0:v:0?', '-map', '0:a:0?',
          '-c:v', 'libx264',
-         '-preset', 'medium',
-         '-profile:v', 'high',
+         '-preset', 'veryfast',
+         '-profile:v', 'main',
          '-threads', '4',
-         '-b:v', '2500k',
-         '-maxrate', '2500k',
-         '-bufsize', '5000k',
+         '-b:v', '2000k',
+         '-maxrate', '2000k',
+         '-bufsize', '4000k',
         '-g', '60',
         '-keyint_min', '60',
         '-sc_threshold', '0',
         '-r', '30',
         '-vf', 'scale=-2:720',
         '-c:a', 'aac',
-        '-b:a', '192k',
+        '-b:a', '128k',
         '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-reset_timestamps', '1',
@@ -1160,7 +1160,7 @@ app.post('/api/emit', async (req, res) => {
       // Demás procesos: 720p @ 2500kbps
       const channelLabels = { '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '6': 'Multimedios', '7': 'Subida' };
       const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-      sendLog(process_id, 'info', `🎬 ${procName}: CBR 2500k + VBV 720p (preset medium)${isRecovery ? ' [recovery]' : ''}...`);
+      sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}...`);
       
       ffmpegArgs = [
         ...inputArgs,
@@ -1170,19 +1170,19 @@ app.post('/api/emit', async (req, res) => {
         '-i', inputSourceUrl,
         '-map', '0:v:0?', '-map', '0:a:0?',
          '-c:v', 'libx264',
-         '-preset', 'medium',
-         '-profile:v', 'high',
+         '-preset', 'veryfast',
+         '-profile:v', 'main',
          '-threads', '4',
-         '-b:v', '2500k',
-         '-maxrate', '2500k',
-         '-bufsize', '5000k',
+         '-b:v', '2000k',
+         '-maxrate', '2000k',
+         '-bufsize', '4000k',
         '-vf', 'scale=-2:720',
         '-r', '30',
         '-g', '60',
         '-keyint_min', '60',
         '-sc_threshold', '0',
         '-c:a', 'aac',
-        '-b:a', '192k',
+        '-b:a', '128k',
         '-ar', '44100',
         '-max_muxing_queue_size', '1024',
         '-reset_timestamps', '1',
