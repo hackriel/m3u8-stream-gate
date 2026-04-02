@@ -1450,9 +1450,9 @@ app.post('/api/emit', async (req, res) => {
             autoRecoverChannel(process_id, channelId, channelName);
           }, 500);
         } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
-          // Procesos manuales (Disney 7, Canal 6, Disney 8): reutilizar la misma URL M3U8 guardada en DB
+          // Procesos manuales (Disney 7, Disney 8): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
-          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
+          const manualLabels = { '0': 'Disney 7', '10': 'Disney 8' };
           const procLabel = manualLabels[String(process_id)] || 'Manual';
           
           // Determinar causa del fallo para log más informativo
