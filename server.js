@@ -154,8 +154,8 @@ const DIRECT_URL_CHANNELS = {
   // '5' ya no tiene URL fija — se trata como Disney (manual)
 };
 
-// Procesos manuales (Disney 7, Canal 6, Disney 8): recovery reutiliza la URL guardada en DB
-const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
+// Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
+const MANUAL_URL_PROCESSES = new Set(['0', '10']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
