@@ -1048,91 +1048,57 @@ app.post('/api/emit', async (req, res) => {
     // Para Tigo, FFmpeg ya apunta al proxy local, no necesita resolución de variante
     let inputSourceUrl = effectiveSourceM3u8;
 
-    // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante + HD @ 2800kbps
-    const isHDProcess = String(process_id) === '0' || String(process_id) === '5' || String(process_id) === '10';
-    
-    if (isHDProcess) {
+    // Procesos manuales (Disney 7, Canal 6, Disney 8): resolver mejor variante HLS
+    const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
+    if (isManualUrlProcess) {
       const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(effectiveSourceM3u8, preferredBandwidth);
-      const actualSource = resolvedUrl;
+      inputSourceUrl = resolvedUrl;
       const bwKbps = Math.round(bandwidth / 1000);
       
       if (allVariants && allVariants.length > 0) {
         const varList = allVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
         sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
       }
-      const hdLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
-      const procLabel = hdLabels[String(process_id)] || 'HD';
       const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
-      sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
-      sendLog(process_id, 'info', `🎬 ${procLabel}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
-      
-      ffmpegArgs = [
-        ...inputArgs,
-        ...hardenedLiveInputArgs,
-        '-fflags', '+genpts',
-        '-analyzeduration', analyzeDuration,
-        '-probesize', probeSize,
-        '-i', actualSource,
-        '-map', '0:v:0?', '-map', '0:a:0?',
-         '-c:v', 'libx264',
-         '-preset', 'veryfast',
-         '-profile:v', 'main',
-         '-threads', '4',
-         '-b:v', '2000k',
-         '-maxrate', '2000k',
-         '-bufsize', '4000k',
-        '-g', '60',
-        '-keyint_min', '60',
-        '-sc_threshold', '0',
-        '-r', '30',
-        '-vf', 'scale=-2:720',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ar', '44100',
-        '-max_muxing_queue_size', '1024',
-        '-reset_timestamps', '1',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        '-rtmp_live', 'live',
-        target_rtmp,
-      ];
-    } else {
-      // Demás procesos: 720p @ 2500kbps
-      const channelLabels = { '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '6': 'Multimedios', '7': 'Subida' };
-      const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-      sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}...`);
-      
-      ffmpegArgs = [
-        ...inputArgs,
-        '-fflags', '+genpts',
-        '-analyzeduration', analyzeDuration,
-        '-probesize', probeSize,
-        '-i', inputSourceUrl,
-        '-map', '0:v:0?', '-map', '0:a:0?',
-         '-c:v', 'libx264',
-         '-preset', 'veryfast',
-         '-profile:v', 'main',
-         '-threads', '4',
-         '-b:v', '2000k',
-         '-maxrate', '2000k',
-         '-bufsize', '4000k',
-        '-vf', 'scale=-2:720',
-        '-r', '30',
-        '-g', '60',
-        '-keyint_min', '60',
-        '-sc_threshold', '0',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ar', '44100',
-        '-max_muxing_queue_size', '1024',
-        '-reset_timestamps', '1',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        '-rtmp_live', 'live',
-        target_rtmp,
-      ];
+      sendLog(process_id, 'success', `📺 Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
     }
+
+    // Nombre del proceso para logs
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8' };
+    const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
+    sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
+
+    ffmpegArgs = [
+      ...inputArgs,
+      ...hardenedLiveInputArgs,
+      '-fflags', '+genpts',
+      '-analyzeduration', analyzeDuration,
+      '-probesize', probeSize,
+      '-i', inputSourceUrl,
+      '-map', '0:v:0?', '-map', '0:a:0?',
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-profile:v', 'main',
+      '-threads', '4',
+      '-b:v', '2000k',
+      '-maxrate', '2000k',
+      '-bufsize', '4000k',
+      '-vf', 'scale=-2:720',
+      '-r', '30',
+      '-g', '60',
+      '-keyint_min', '60',
+      '-sc_threshold', '0',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-ar', '44100',
+      '-max_muxing_queue_size', '1024',
+      '-reset_timestamps', '1',
+      '-f', 'flv',
+      '-flvflags', 'no_duration_filesize',
+      '-rtmp_live', 'live',
+      target_rtmp,
+    ];
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 100)}...`);
