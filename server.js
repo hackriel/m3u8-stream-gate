@@ -1005,9 +1005,21 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // Throttlear lectura a velocidad real (1x) en TODOS los canales
-    // Evita ráfagas de datos que causan pausa + fast-forward en el reproductor
-    hardenedLiveInputArgs.push('-re');
+
+    // Throttlear lectura a velocidad real para evitar ráfagas de datos
+    // Fuentes CloudFront/Repretel usan -readrate 1 (throttle flexible) porque sus segmentos
+    // tienen timing irregular que causa underrun con -re estricto.
+    // El resto usa -re (throttle estricto 1x) que funciona perfecto con TDMax/Teletica.
+    const sourceHostname = (() => {
+      try { return new URL(effectiveSourceM3u8).hostname.toLowerCase(); } catch (_) { return ''; }
+    })();
+    const needsSoftThrottle = sourceHostname.includes('cloudfront.net') || sourceHostname.includes('repretel.com');
+    if (needsSoftThrottle) {
+      hardenedLiveInputArgs.push('-readrate', '1');
+      sendLog(process_id, 'info', `⏱️ Usando throttle flexible (-readrate 1) para fuente CloudFront/Repretel`);
+    } else {
+      hardenedLiveInputArgs.push('-re');
+    }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
     const cachedSession = scrapeSessionCache.get(process_id);
