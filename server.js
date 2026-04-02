@@ -164,8 +164,6 @@ const CHANNEL_FALLBACK_URLS = {
 // Track de intentos de recovery para saber cuándo usar fallback
 const recoveryAttempts = new Map(); // Map<processId, number>
 
-// Cache de resolución por canal para evitar re-sondear en cada recovery
-const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, height }>
 
 // Cache de sesión de scraping: guarda cookies + accessToken para pasarlos a FFmpeg
 // Esto es CRÍTICO para Tigo cuyo CDN valida cookies/token junto con la IP
