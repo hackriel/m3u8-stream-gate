@@ -1969,7 +1969,7 @@ app.post('/api/emit/stop', async (req, res) => {
       }
       
       ffmpegProcesses.delete(process_id);
-      resolutionCache.delete(process_id);
+      
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
       lastFrameTime.delete(process_id);
