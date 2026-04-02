@@ -149,9 +149,7 @@ const CHANNEL_MAP = {
 };
 
 // Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL guardada en DB
-// Canal 6 ahora funciona igual que Disney 7/8: el usuario pega la URL manualmente
 const DIRECT_URL_CHANNELS = {
-  // '5' ya no tiene URL fija — se trata como Disney (manual)
 };
 
 // Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
