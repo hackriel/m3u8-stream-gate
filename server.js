@@ -144,6 +144,7 @@ const CHANNEL_MAP = {
   '1': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV' },
   '3': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDmas 1' },
   '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
+  '5': { channelId: '65d7aca4e4b0140cbf380bd0', channelName: 'Canal 6' },
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
 };
 
