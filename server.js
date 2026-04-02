@@ -1045,7 +1045,7 @@ app.post('/api/emit', async (req, res) => {
     // Para Tigo, FFmpeg ya apunta al proxy local, no necesita resolución de variante
     let inputSourceUrl = effectiveSourceM3u8;
 
-    // Procesos manuales (Disney 7, Canal 6, Disney 8): resolver mejor variante HLS
+    // Procesos manuales (Disney 7, Disney 8): resolver mejor variante HLS
     const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
     if (isManualUrlProcess) {
       const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
