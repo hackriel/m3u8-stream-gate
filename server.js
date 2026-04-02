@@ -1335,7 +1335,7 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
-      resolutionCache.delete(process_id); // Limpiar caché de resolución
+      
       lastFrameTime.delete(process_id); // Limpiar watchdog
       
       // AUTO-RECOVERY: Para canales con scraping (usa CHANNEL_MAP global)
