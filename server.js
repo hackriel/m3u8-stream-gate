@@ -164,8 +164,6 @@ const CHANNEL_FALLBACK_URLS = {
 // Track de intentos de recovery para saber cuándo usar fallback
 const recoveryAttempts = new Map(); // Map<processId, number>
 
-// Cache de resolución por canal para evitar re-sondear en cada recovery
-const resolutionCache = new Map(); // Map<process_id, { needsRecode, width, height }>
 
 // Cache de sesión de scraping: guarda cookies + accessToken para pasarlos a FFmpeg
 // Esto es CRÍTICO para Tigo cuyo CDN valida cookies/token junto con la IP
@@ -410,56 +408,6 @@ const scrapeStreamUrl = async (channelId, channelName) => {
 };
 // ==================== FIN SCRAPING ====================
 
-// ==================== TIGO SESSION EXTRACTION ====================
-// Nimble Streamer usa `nimblesessionid` para mantener sesiones HLS vivas.
-// Al hacer el primer fetch del playlist, los segmentos contienen este session ID.
-// Si appendeamos el nimblesessionid a la URL del playlist, Nimble reconoce
-// la sesión existente y no requiere un wmsAuthSign válido para reloads.
-
-const extractNimbleSession = async (playlistUrl, headers = {}) => {
-  try {
-    const resp = await fetch(playlistUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        ...headers,
-      },
-    });
-    if (!resp.ok) return { sessionId: null, error: `HTTP ${resp.status}` };
-    
-    const body = await resp.text();
-    
-    // Buscar nimblesessionid en las URLs de segmentos
-    const sessionMatch = body.match(/nimblesessionid=(\d+)/);
-    if (sessionMatch) {
-      return { sessionId: sessionMatch[1], error: null };
-    }
-    
-    // También puede venir como redirect o en headers
-    const locationHeader = resp.headers.get('location');
-    if (locationHeader) {
-      const locMatch = locationHeader.match(/nimblesessionid=(\d+)/);
-      if (locMatch) return { sessionId: locMatch[1], error: null };
-    }
-    
-    return { sessionId: null, error: 'No nimblesessionid found in playlist' };
-  } catch (err) {
-    return { sessionId: null, error: err.message };
-  }
-};
-
-// Enriquecer una URL con nimblesessionid
-const appendNimbleSession = (url, sessionId) => {
-  if (!sessionId) return url;
-  try {
-    const parsed = new URL(url);
-    parsed.searchParams.set('nimblesessionid', sessionId);
-    return parsed.toString();
-  } catch (_) {
-    const sep = url.includes('?') ? '&' : '?';
-    return `${url}${sep}nimblesessionid=${sessionId}`;
-  }
-};
-// ==================== FIN TIGO SESSION ====================
 
 
 
@@ -1048,12 +996,6 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
-    // Tigo (procesos 2, 8, 9): su CDN Streann valida headers más estrictos
-    const isTigo = ['2', '8', '9'].includes(String(process_id));
-    if (isTigo) {
-      refererDomain = 'https://www.tdmax.com/';
-      originDomain = 'https://www.tdmax.com';
-    }
 
     const hardenedLiveInputArgs = [];
     if (isManualProcess || isUnivisionLikeSource) {
@@ -1070,11 +1012,10 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
-    // Para Tigo (proceso 2), el proxy maneja la auth y los segmentos tienen sus propios tokens
     const cachedSession = scrapeSessionCache.get(process_id);
     let extraFfmpegInputArgs = [];
     let authorizationHeader = null;
-    if (cachedSession && !isTigo) {
+    if (cachedSession) {
       const sessionAge = Date.now() - cachedSession.timestamp;
       if (sessionAge < 600000) { // 10 minutos de TTL para cubrir recoveries lentos
         if (cachedSession.cookies) {
@@ -1107,91 +1048,57 @@ app.post('/api/emit', async (req, res) => {
     // Para Tigo, FFmpeg ya apunta al proxy local, no necesita resolución de variante
     let inputSourceUrl = effectiveSourceM3u8;
 
-    // Proceso 0 (Disney 7), 5 (Canal 6) y 10 (Disney 8): Tomar MEJOR variante + HD @ 2800kbps
-    const isHDProcess = String(process_id) === '0' || String(process_id) === '5' || String(process_id) === '10';
-    
-    if (isHDProcess) {
+    // Procesos manuales (Disney 7, Canal 6, Disney 8): resolver mejor variante HLS
+    const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
+    if (isManualUrlProcess) {
       const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(effectiveSourceM3u8, preferredBandwidth);
-      const actualSource = resolvedUrl;
+      inputSourceUrl = resolvedUrl;
       const bwKbps = Math.round(bandwidth / 1000);
       
       if (allVariants && allVariants.length > 0) {
         const varList = allVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
         sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
       }
-      const hdLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
-      const procLabel = hdLabels[String(process_id)] || 'HD';
       const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
-      sendLog(process_id, 'success', `📺 ${procLabel}: Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
-      sendLog(process_id, 'info', `🎬 ${procLabel}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
-      
-      ffmpegArgs = [
-        ...inputArgs,
-        ...hardenedLiveInputArgs,
-        '-fflags', '+genpts',
-        '-analyzeduration', analyzeDuration,
-        '-probesize', probeSize,
-        '-i', actualSource,
-        '-map', '0:v:0?', '-map', '0:a:0?',
-         '-c:v', 'libx264',
-         '-preset', 'veryfast',
-         '-profile:v', 'main',
-         '-threads', '4',
-         '-b:v', '2000k',
-         '-maxrate', '2000k',
-         '-bufsize', '4000k',
-        '-g', '60',
-        '-keyint_min', '60',
-        '-sc_threshold', '0',
-        '-r', '30',
-        '-vf', 'scale=-2:720',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ar', '44100',
-        '-max_muxing_queue_size', '1024',
-        '-reset_timestamps', '1',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        '-rtmp_live', 'live',
-        target_rtmp,
-      ];
-    } else {
-      // Demás procesos: 720p @ 2500kbps
-      const channelLabels = { '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '6': 'Multimedios', '7': 'Subida' };
-      const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-      sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}...`);
-      
-      ffmpegArgs = [
-        ...inputArgs,
-        '-fflags', '+genpts',
-        '-analyzeduration', analyzeDuration,
-        '-probesize', probeSize,
-        '-i', inputSourceUrl,
-        '-map', '0:v:0?', '-map', '0:a:0?',
-         '-c:v', 'libx264',
-         '-preset', 'veryfast',
-         '-profile:v', 'main',
-         '-threads', '4',
-         '-b:v', '2000k',
-         '-maxrate', '2000k',
-         '-bufsize', '4000k',
-        '-vf', 'scale=-2:720',
-        '-r', '30',
-        '-g', '60',
-        '-keyint_min', '60',
-        '-sc_threshold', '0',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ar', '44100',
-        '-max_muxing_queue_size', '1024',
-        '-reset_timestamps', '1',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        '-rtmp_live', 'live',
-        target_rtmp,
-      ];
+      sendLog(process_id, 'success', `📺 Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
     }
+
+    // Nombre del proceso para logs
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8' };
+    const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
+    sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
+
+    ffmpegArgs = [
+      ...inputArgs,
+      ...hardenedLiveInputArgs,
+      '-fflags', '+genpts',
+      '-analyzeduration', analyzeDuration,
+      '-probesize', probeSize,
+      '-i', inputSourceUrl,
+      '-map', '0:v:0?', '-map', '0:a:0?',
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-profile:v', 'main',
+      '-threads', '4',
+      '-b:v', '2000k',
+      '-maxrate', '2000k',
+      '-bufsize', '4000k',
+      '-vf', 'scale=-2:720',
+      '-r', '30',
+      '-g', '60',
+      '-keyint_min', '60',
+      '-sc_threshold', '0',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-ar', '44100',
+      '-max_muxing_queue_size', '1024',
+      '-reset_timestamps', '1',
+      '-f', 'flv',
+      '-flvflags', 'no_duration_filesize',
+      '-rtmp_live', 'live',
+      target_rtmp,
+    ];
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 100)}...`);
@@ -1428,7 +1335,7 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
-      resolutionCache.delete(process_id); // Limpiar caché de resolución
+      
       lastFrameTime.delete(process_id); // Limpiar watchdog
       
       // AUTO-RECOVERY: Para canales con scraping (usa CHANNEL_MAP global)
@@ -1641,7 +1548,6 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
-      resolutionCache.delete(process_id);
       lastFrameTime.delete(process_id);
     });
 
@@ -1801,12 +1707,12 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       videoParams = ['-c:v', 'copy'];
       audioParams = ['-c:a', 'copy'];
     } else {
-      // >5000kbps o no detectado: re-encodear a 720p @ 2500kbps
-      sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode 720p @ 2500kbps (2000-3000k)`);
+      // >5000kbps o no detectado: re-encodear con perfil unificado CBR 2000k
+      sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode CBR 2000k 720p30 (perfil unificado)`);
       videoParams = [
-        '-c:v', 'libx264', '-preset', 'medium', '-profile:v', 'high',
-        '-threads', '4', '-crf', '18',
-        '-maxrate', '2500k', '-bufsize', '7500k',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'main',
+        '-threads', '4',
+        '-b:v', '2000k', '-maxrate', '2000k', '-bufsize', '4000k',
         '-vf', 'scale=-2:720',
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
@@ -2063,7 +1969,7 @@ app.post('/api/emit/stop', async (req, res) => {
       }
       
       ffmpegProcesses.delete(process_id);
-      resolutionCache.delete(process_id);
+      
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
       lastFrameTime.delete(process_id);
