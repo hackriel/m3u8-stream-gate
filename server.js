@@ -1707,12 +1707,12 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       videoParams = ['-c:v', 'copy'];
       audioParams = ['-c:a', 'copy'];
     } else {
-      // >5000kbps o no detectado: re-encodear a 720p @ 2500kbps
-      sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode 720p @ 2500kbps (2000-3000k)`);
+      // >5000kbps o no detectado: re-encodear con perfil unificado CBR 2000k
+      sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode CBR 2000k 720p30 (perfil unificado)`);
       videoParams = [
-        '-c:v', 'libx264', '-preset', 'medium', '-profile:v', 'high',
-        '-threads', '4', '-crf', '18',
-        '-maxrate', '2500k', '-bufsize', '7500k',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'main',
+        '-threads', '4',
+        '-b:v', '2000k', '-maxrate', '2000k', '-bufsize', '4000k',
         '-vf', 'scale=-2:720',
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
