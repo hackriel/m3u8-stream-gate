@@ -176,6 +176,9 @@ const scrapeSessionCache = new Map(); // Map<processId, { cookies, accessToken, 
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 
+// Control de reintentos progresivos para canales manuales (404 transitorios del CDN)
+const manualRetryCounters = new Map(); // Map<'manual_retry_${pid}', attemptNumber>
+
 // Watchdog: última vez que cada proceso produjo frames (timestamp ms)
 const lastFrameTime = new Map(); // Map<processId, timestampMs>
 const lastProgressLog = new Map(); // Map<processId, timestampMs> — throttle de logs de progreso
@@ -1066,6 +1069,8 @@ app.post('/api/emit', async (req, res) => {
     ].filter(Boolean).join('\r\n') + '\r\n';
 
     // Para procesos manuales con fuentes estables (Canal 6, Disney), usar args de resiliencia reforzados
+    // reconnect_delay_max=15 da a FFmpeg hasta ~30s de reintentos internos (0+1+3+5+5+5+5=24s)
+    // antes de salir, cubriendo caídas transitorias del CDN sin necesidad de recovery externo
     const effectiveResilienceArgs = isManualProcess
       ? [
           '-rw_timeout', '15000000',   // 15s (más tolerante que los 10s globales)
@@ -1073,7 +1078,7 @@ app.post('/api/emit', async (req, res) => {
           '-reconnect_streamed', '1',
           '-reconnect_at_eof', '1',
           '-reconnect_on_http_error', '4xx,5xx',  // Cubrir 403/404 transitorios del CDN
-          '-reconnect_delay_max', '5',
+          '-reconnect_delay_max', '15',            // 15s max entre reintentos (antes 5s, muy agresivo)
         ]
       : HLS_INPUT_RESILIENCE_ARGS;
 
@@ -1193,6 +1198,9 @@ app.post('/api/emit', async (req, res) => {
         if (currentStatus === 'starting') {
           emissionStatuses.set(process_id, 'running');
           sendLog(process_id, 'success', `Emisión iniciada exitosamente`);
+          
+          // Resetear contador de reintentos manuales al emitir exitosamente
+          manualRetryCounters.delete(`manual_retry_${process_id}`);
           
           // Actualizar base de datos a estado 'running'
           if (supabase) {
@@ -1513,81 +1521,107 @@ app.post('/api/emit', async (req, res) => {
             autoRecoverChannel(process_id, channelId, channelName);
           }, 500);
         } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
-          // Procesos manuales (Disney 7, Disney 8): reutilizar la misma URL M3U8 guardada en DB
+          // Procesos manuales (Disney 7, Disney 8, Canal 6): reutilizar la misma URL M3U8 guardada en DB
+          // Con reintentos progresivos para cubrir caídas transitorias del CDN (404 temporales)
           const procId = parseInt(String(process_id), 10);
-          const manualLabels = { '0': 'Disney 7', '10': 'Disney 8' };
+          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
           const procLabel = manualLabels[String(process_id)] || 'Manual';
           
           // Determinar causa del fallo para log más informativo
           const failureType = detectedErrors.get(process_id);
           const failureInfo = failureType ? ` (${failureType.reason || failureType.type})` : '';
           const isStableProc = STABLE_SOURCE_PROCESSES.has(String(process_id));
-          const recoveryDelay = isStableProc ? 3000 : 500; // Fuentes estables: 3s para no crear loops
-          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Reiniciando con misma URL en ${recoveryDelay}ms...`);
           
-          setTimeout(async () => {
-            try {
-              // Verificar si el usuario detuvo manualmente mientras esperábamos
-              if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
-                sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
-                manualStopProcesses.delete(String(process_id));
-                manualStopProcesses.delete(Number(process_id));
-                return;
-              }
-              if (!supabase) {
-                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: Base de datos no disponible`);
-                return;
-              }
-              const { data: procData } = await supabase
-                .from('emission_processes')
-                .select('m3u8, rtmp')
-                .eq('id', procId)
-                .single();
-              
-              const sourceUrl = procData?.m3u8;
-              const targetRtmp = procData?.rtmp;
-              
-              if (sourceUrl && targetRtmp) {
-                sendLog(procId, 'info', `🔄 AUTO-RECOVERY ${procLabel}: Reiniciando con URL existente...`);
-                autoRecoveryInProgress.set(String(process_id), true);
-                
-                await supabase
-                  .from('emission_processes')
-                  .update({ emit_status: 'starting', is_emitting: true, is_active: true })
-                  .eq('id', procId);
-                
-                const emitResp = await fetch(`http://localhost:${PORT}/api/emit`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    source_m3u8: sourceUrl,
-                    target_rtmp: targetRtmp,
-                    process_id: String(process_id),
-                    is_recovery: true
-                  })
-                });
-                
-                if (emitResp.ok) {
-                  sendLog(procId, 'success', `✅ AUTO-RECOVERY ${procLabel} completado: Emisión reiniciada`);
-                  if (supabase) {
-                    const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: procId });
-                    if (rpcErr) {
-                      const { data: row } = await supabase.from('emission_processes').select('recovery_count').eq('id', procId).single();
-                      await supabase.from('emission_processes').update({ recovery_count: (row?.recovery_count || 0) + 1 }).eq('id', procId);
-                    }
-                  }
-                } else {
-                  sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} falló: ${emitResp.status}`);
-                }
-                autoRecoveryInProgress.set(String(process_id), false);
-              } else {
-                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: No hay M3U8 o RTMP guardados`);
-              }
-            } catch (err) {
-              sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
-              autoRecoveryInProgress.set(String(process_id), false);
+          // Reintentos progresivos: 3s → 8s → 15s → 30s (máx 4 intentos)
+          // Esto cubre CDNs que tardan hasta ~1 minuto en recuperarse
+          const retryKey = `manual_retry_${process_id}`;
+          const currentRetry = (manualRetryCounters.get(retryKey) || 0);
+          const MAX_MANUAL_RETRIES = 4;
+          const RETRY_DELAYS = [3000, 8000, 15000, 30000]; // Backoff progresivo
+          
+          if (currentRetry >= MAX_MANUAL_RETRIES) {
+            sendLog(process_id, 'error', `❌ ${procLabel}: ${MAX_MANUAL_RETRIES} reintentos agotados${failureInfo}. Deteniendo auto-recovery.`);
+            manualRetryCounters.delete(retryKey);
+            // Marcar como inactivo en DB
+            if (supabase) {
+              await supabase.from('emission_processes').update({
+                is_active: false, is_emitting: false, emit_status: 'error',
+                ended_at: new Date().toISOString(),
+                failure_reason: failureType?.reason || 'max_retries',
+                failure_details: `Agotados ${MAX_MANUAL_RETRIES} reintentos. Última causa: ${failureInfo || 'desconocida'}`
+              }).eq('id', procId);
             }
-          }, recoveryDelay);
+          } else {
+            const recoveryDelay = RETRY_DELAYS[currentRetry];
+            manualRetryCounters.set(retryKey, currentRetry + 1);
+            sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Reintento ${currentRetry + 1}/${MAX_MANUAL_RETRIES} en ${recoveryDelay / 1000}s...`);
+            
+            setTimeout(async () => {
+              try {
+                // Verificar si el usuario detuvo manualmente mientras esperábamos
+                if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+                  sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
+                  manualStopProcesses.delete(String(process_id));
+                  manualStopProcesses.delete(Number(process_id));
+                  manualRetryCounters.delete(retryKey); // Reset contador
+                  return;
+                }
+                if (!supabase) {
+                  sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: Base de datos no disponible`);
+                  return;
+                }
+                const { data: procData } = await supabase
+                  .from('emission_processes')
+                  .select('m3u8, rtmp')
+                  .eq('id', procId)
+                  .single();
+                
+                const sourceUrl = procData?.m3u8;
+                const targetRtmp = procData?.rtmp;
+                
+                if (sourceUrl && targetRtmp) {
+                  sendLog(procId, 'info', `🔄 AUTO-RECOVERY ${procLabel} (intento ${currentRetry + 1}/${MAX_MANUAL_RETRIES}): Reiniciando con URL existente...`);
+                  autoRecoveryInProgress.set(String(process_id), true);
+                  
+                  await supabase
+                    .from('emission_processes')
+                    .update({ emit_status: 'starting', is_emitting: true, is_active: true })
+                    .eq('id', procId);
+                  
+                  const emitResp = await fetch(`http://localhost:${PORT}/api/emit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      source_m3u8: sourceUrl,
+                      target_rtmp: targetRtmp,
+                      process_id: String(process_id),
+                      is_recovery: true
+                    })
+                  });
+                  
+                  if (emitResp.ok) {
+                    sendLog(procId, 'success', `✅ AUTO-RECOVERY ${procLabel} completado: Emisión reiniciada`);
+                    // El contador se resetea cuando el proceso emite exitosamente (ver abajo)
+                    if (supabase) {
+                      const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: procId });
+                      if (rpcErr) {
+                        const { data: row } = await supabase.from('emission_processes').select('recovery_count').eq('id', procId).single();
+                        await supabase.from('emission_processes').update({ recovery_count: (row?.recovery_count || 0) + 1 }).eq('id', procId);
+                      }
+                    }
+                  } else {
+                    sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} falló: ${emitResp.status}`);
+                  }
+                  autoRecoveryInProgress.set(String(process_id), false);
+                } else {
+                  sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: No hay M3U8 o RTMP guardados`);
+                }
+              } catch (err) {
+                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
+                autoRecoveryInProgress.set(String(process_id), false);
+              }
+            }, recoveryDelay);
+          }
         }
       }
     });
@@ -1989,6 +2023,7 @@ app.post('/api/emit/stop', async (req, res) => {
       emissionStatuses.set(process_id, 'stopping');
       manualStopProcesses.add(process_id); // Marcar como parada manual para evitar auto-recovery
       manualStopProcesses.add(Number(process_id));
+      manualRetryCounters.delete(`manual_retry_${process_id}`); // Reset reintentos progresivos
       
       // Actualizar base de datos antes de detener (solo si Supabase está disponible)
       if (supabase) {
