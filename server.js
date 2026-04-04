@@ -439,6 +439,14 @@ const waitForProcessDeath = (proc, timeoutMs = 1500) => {
 };
 
 const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') => {
+  // Verificar si hubo parada manual mientras se esperaba
+  if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+    sendLog(process_id, 'info', `🛑 AUTO-RECOVERY cancelado: parada manual detectada para ${channelName}`);
+    manualStopProcesses.delete(String(process_id));
+    manualStopProcesses.delete(Number(process_id));
+    return;
+  }
+  
   if (autoRecoveryInProgress.get(process_id)) {
     sendLog(process_id, 'warn', '⏳ Auto-recovery ya en progreso, ignorando...');
     return;
