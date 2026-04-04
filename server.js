@@ -1510,7 +1510,9 @@ app.post('/api/emit', async (req, res) => {
           // Determinar causa del fallo para log más informativo
           const failureType = detectedErrors.get(process_id);
           const failureInfo = failureType ? ` (${failureType.reason || failureType.type})` : '';
-          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Reiniciando con misma URL en 500ms...`);
+          const isStableProc = STABLE_SOURCE_PROCESSES.has(String(process_id));
+          const recoveryDelay = isStableProc ? 3000 : 500; // Fuentes estables: 3s para no crear loops
+          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Reiniciando con misma URL en ${recoveryDelay}ms...`);
           
           setTimeout(async () => {
             try {
