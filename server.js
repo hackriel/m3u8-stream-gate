@@ -986,7 +986,7 @@ app.post('/api/emit', async (req, res) => {
       if (hostname.includes('teletica.com')) {
         refererDomain = 'https://www.teletica.com/';
         originDomain = 'https://www.teletica.com';
-      } else if (hostname.includes('cloudfront.net') || hostname.includes('repretel.com')) {
+      } else if (hostname.includes('cloudfront.net') || hostname.includes('repretel.com') || hostname.includes('mediatiquestream.com')) {
         refererDomain = 'https://www.repretel.com/';
         originDomain = 'https://www.repretel.com';
       } else if (
