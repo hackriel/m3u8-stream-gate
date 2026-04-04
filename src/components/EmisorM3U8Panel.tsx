@@ -79,6 +79,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
 
 const defaultProcess = (): EmissionProcess => ({
   m3u8: '',
+  m3u8Backup: '',
   rtmp: '',
   previewSuffix: '/video.m3u8',
   isEmitiendo: false,
