@@ -981,9 +981,11 @@ app.post('/api/emit', async (req, res) => {
     
     // Si es recovery, damos un poco menos de análisis para reenganchar rápido,
     // pero suficiente para evitar fallos por parámetros incompletos de streams HLS.
+    // Fuentes estables (Canal 6) siempre usan valores altos para enganchar limpiamente.
     const isRecovery = Boolean(is_recovery);
-    const analyzeDuration = isRecovery ? '1500000' : '3000000';  // 1.5s / 3s
-    const probeSize      = isRecovery ? '500000'  : '1500000';   // 500KB / 1.5MB
+    const isStableSource = STABLE_SOURCE_PROCESSES.has(String(process_id));
+    const analyzeDuration = isStableSource ? '5000000' : (isRecovery ? '1500000' : '3000000');  // 5s estable / 1.5s recovery / 3s normal
+    const probeSize      = isStableSource ? '3000000' : (isRecovery ? '500000'  : '1500000');   // 3MB estable / 500KB recovery / 1.5MB normal
 
     // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
     const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id));
