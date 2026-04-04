@@ -157,7 +157,7 @@ const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 
 // Fuentes estables (no requieren -re ni recovery agresivo)
 // Canal 6 usa mediatiquestream.com que es un HLS estable y público
-const STABLE_SOURCE_PROCESSES = new Set(['5']);
+const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
