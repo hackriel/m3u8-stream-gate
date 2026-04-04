@@ -27,12 +27,13 @@ const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).fil
 // Tipo para un proceso de emisión
 interface EmissionProcess {
   m3u8: string;
+  m3u8Backup: string;
   rtmp: string;
   previewSuffix: string;
   isEmitiendo: boolean;
   elapsed: number;
   startTime: number;
-  emitStatus: "idle" | "starting" | "running" | "stopping" | "error";
+  emitStatus: "idle" | "starting" | "running" | "stopping" | "error" | "waiting_cdn";
   emitMsg: string;
   reconnectAttempts: number;
   lastReconnectTime: number;
@@ -78,6 +79,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
 
 const defaultProcess = (): EmissionProcess => ({
   m3u8: '',
+  m3u8Backup: '',
   rtmp: '',
   previewSuffix: '/video.m3u8',
   isEmitiendo: false,
@@ -134,6 +136,7 @@ export default function EmisorM3U8Panel() {
               const loadFailure = isRunning || row.is_emitting;
               return {
                 m3u8: row.m3u8 || '',
+                m3u8Backup: (row as any).m3u8_backup || '',
                 rtmp: row.rtmp || '',
                 previewSuffix: row.preview_suffix || '/video.m3u8',
                 isEmitiendo: row.is_emitting || isRunning,
@@ -226,6 +229,7 @@ export default function EmisorM3U8Panel() {
 
                 newProcesses[row.id] = {
                   m3u8: row.m3u8,
+                  m3u8Backup: (row as any).m3u8_backup || '',
                   rtmp: row.rtmp,
                   previewSuffix: row.preview_suffix,
                   isEmitiendo: row.is_emitting || isRunning,
@@ -322,10 +326,11 @@ export default function EmisorM3U8Panel() {
       i === index ? { ...process, ...updates } : process
     ));
     
-    if (updates.m3u8 !== undefined || updates.rtmp !== undefined) {
+    if (updates.m3u8 !== undefined || updates.rtmp !== undefined || updates.m3u8Backup !== undefined) {
       const dataToUpdate: any = {};
       if (updates.m3u8 !== undefined) dataToUpdate.m3u8 = updates.m3u8;
       if (updates.rtmp !== undefined) dataToUpdate.rtmp = updates.rtmp;
+      if (updates.m3u8Backup !== undefined) dataToUpdate.m3u8_backup = updates.m3u8Backup;
       
       supabase
         .from('emission_processes')
@@ -895,9 +900,21 @@ export default function EmisorM3U8Panel() {
                     </button>
                   )}
                 </div>
+                {/* URL de respaldo para Canal 6 (failover automático) */}
+                {processIndex === 5 && (
+                  <>
+                    <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 de respaldo (failover)</label>
+                    <input
+                      type="url"
+                      placeholder="https://servidor/respaldo/playlist.m3u8"
+                      value={process.m3u8Backup}
+                      onChange={(e) => updateProcess(processIndex, { m3u8Backup: e.target.value })}
+                      className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-accent/50 transition-all duration-200"
+                    />
+                  </>
+                )}
               </>
             )}
-
             <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
             <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
             <input

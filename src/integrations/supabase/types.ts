@@ -31,6 +31,7 @@ export type Database = {
           is_emitting: boolean
           last_signal_duration: number
           m3u8: string
+          m3u8_backup: string | null
           night_rest: boolean
           preview_suffix: string
           process_logs: string | null
@@ -56,6 +57,7 @@ export type Database = {
           is_emitting?: boolean
           last_signal_duration?: number
           m3u8?: string
+          m3u8_backup?: string | null
           night_rest?: boolean
           preview_suffix?: string
           process_logs?: string | null
@@ -81,6 +83,7 @@ export type Database = {
           is_emitting?: boolean
           last_signal_duration?: number
           m3u8?: string
+          m3u8_backup?: string | null
           night_rest?: boolean
           preview_suffix?: string
           process_logs?: string | null
