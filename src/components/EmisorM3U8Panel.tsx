@@ -27,12 +27,13 @@ const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).fil
 // Tipo para un proceso de emisión
 interface EmissionProcess {
   m3u8: string;
+  m3u8Backup: string;
   rtmp: string;
   previewSuffix: string;
   isEmitiendo: boolean;
   elapsed: number;
   startTime: number;
-  emitStatus: "idle" | "starting" | "running" | "stopping" | "error";
+  emitStatus: "idle" | "starting" | "running" | "stopping" | "error" | "waiting_cdn";
   emitMsg: string;
   reconnectAttempts: number;
   lastReconnectTime: number;
