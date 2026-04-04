@@ -1454,6 +1454,13 @@ app.post('/api/emit', async (req, res) => {
             sendLog(process_id, 'warn', `🔄 ${channelName} caído (código ${code}) - Iniciando recovery completo...`);
           }
           setTimeout(() => {
+            // Verificar si el usuario detuvo manualmente mientras esperábamos
+            if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+              sendLog(process_id, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
+              manualStopProcesses.delete(String(process_id));
+              manualStopProcesses.delete(Number(process_id));
+              return;
+            }
             autoRecoverChannel(process_id, channelId, channelName);
           }, 500);
         } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
