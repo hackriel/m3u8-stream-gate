@@ -439,6 +439,14 @@ const waitForProcessDeath = (proc, timeoutMs = 1500) => {
 };
 
 const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') => {
+  // Verificar si hubo parada manual mientras se esperaba
+  if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+    sendLog(process_id, 'info', `🛑 AUTO-RECOVERY cancelado: parada manual detectada para ${channelName}`);
+    manualStopProcesses.delete(String(process_id));
+    manualStopProcesses.delete(Number(process_id));
+    return;
+  }
+  
   if (autoRecoveryInProgress.get(process_id)) {
     sendLog(process_id, 'warn', '⏳ Auto-recovery ya en progreso, ignorando...');
     return;
@@ -1372,6 +1380,13 @@ app.post('/api/emit', async (req, res) => {
           
           setTimeout(async () => {
             try {
+              // Verificar si el usuario detuvo manualmente mientras esperábamos
+              if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+                sendLog(process_id, 'info', `🛑 Retry rápido cancelado: parada manual detectada durante espera`);
+                manualStopProcesses.delete(String(process_id));
+                manualStopProcesses.delete(Number(process_id));
+                return;
+              }
               if (!supabase) {
                 sendLog(process_id, 'error', '❌ RETRY: Base de datos no disponible, saltando a recovery completo');
                 // Ir directo a recovery completo
@@ -1447,6 +1462,13 @@ app.post('/api/emit', async (req, res) => {
             sendLog(process_id, 'warn', `🔄 ${channelName} caído (código ${code}) - Iniciando recovery completo...`);
           }
           setTimeout(() => {
+            // Verificar si el usuario detuvo manualmente mientras esperábamos
+            if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+              sendLog(process_id, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
+              manualStopProcesses.delete(String(process_id));
+              manualStopProcesses.delete(Number(process_id));
+              return;
+            }
             autoRecoverChannel(process_id, channelId, channelName);
           }, 500);
         } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
@@ -1462,6 +1484,13 @@ app.post('/api/emit', async (req, res) => {
           
           setTimeout(async () => {
             try {
+              // Verificar si el usuario detuvo manualmente mientras esperábamos
+              if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+                sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
+                manualStopProcesses.delete(String(process_id));
+                manualStopProcesses.delete(Number(process_id));
+                return;
+              }
               if (!supabase) {
                 sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: Base de datos no disponible`);
                 return;
@@ -1980,11 +2009,35 @@ app.post('/api/emit/stop', async (req, res) => {
         message: `Emisión ${process_id} detenida correctamente` 
       });
     } else {
+      // IMPORTANTE: Marcar como parada manual incluso sin proceso activo,
+      // para cancelar cualquier recovery programado (setTimeout pendiente)
+      manualStopProcesses.add(process_id);
+      manualStopProcesses.add(Number(process_id));
+      
+      // Limpiar estado en DB por si quedó marcado como activo
+      if (supabase) {
+        await supabase
+          .from('emission_processes')
+          .update({
+            is_active: false,
+            is_emitting: false,
+            emit_status: 'stopped',
+            ended_at: new Date().toISOString(),
+            start_time: 0,
+            elapsed: 0,
+            recovery_count: 0,
+            last_signal_duration: 0,
+            failure_reason: null,
+            failure_details: null,
+          })
+          .eq('id', parseInt(process_id));
+      }
+      
       emissionStatuses.set(process_id, 'idle');
-      sendLog(process_id, 'info', `No hay emisión activa`);
+      sendLog(process_id, 'info', `No hay emisión activa (recovery pendiente cancelado si existía)`);
       res.json({ 
         success: true, 
-        message: `No hay emisión activa para proceso ${process_id}` 
+        message: `Proceso ${process_id} marcado como detenido` 
       });
     }
     
