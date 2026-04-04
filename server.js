@@ -1108,10 +1108,11 @@ app.post('/api/emit', async (req, res) => {
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
-    // Para fuentes estables: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
+    // Procesos CFR: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
     // Esto evita micro-jitter por forzar 30fps en una fuente 29.97fps (frame duplicado cada ~33s)
-    const outputFps = isStableSource ? '29.97' : '30';
-    const gopSize = isStableSource ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
+    const isCfrOutput = CFR_OUTPUT_PROCESSES.has(String(process_id));
+    const outputFps = isCfrOutput ? '29.97' : '30';
+    const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
     ffmpegArgs = [
       ...inputArgs,
