@@ -2069,7 +2069,7 @@ app.post('/api/emit/stop', async (req, res) => {
       emissionStatuses.set(process_id, 'stopping');
       manualStopProcesses.add(process_id); // Marcar como parada manual para evitar auto-recovery
       manualStopProcesses.add(Number(process_id));
-      manualRetryCounters.delete(`manual_retry_${process_id}`); // Reset reintentos progresivos
+      
       
       // Actualizar base de datos antes de detener (solo si Supabase está disponible)
       if (supabase) {
