@@ -1462,6 +1462,13 @@ app.post('/api/emit', async (req, res) => {
           
           setTimeout(async () => {
             try {
+              // Verificar si el usuario detuvo manualmente mientras esperábamos
+              if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+                sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
+                manualStopProcesses.delete(String(process_id));
+                manualStopProcesses.delete(Number(process_id));
+                return;
+              }
               if (!supabase) {
                 sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: Base de datos no disponible`);
                 return;
