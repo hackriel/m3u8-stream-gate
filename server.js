@@ -1199,6 +1199,9 @@ app.post('/api/emit', async (req, res) => {
           emissionStatuses.set(process_id, 'running');
           sendLog(process_id, 'success', `Emisión iniciada exitosamente`);
           
+          // Resetear contador de reintentos manuales al emitir exitosamente
+          manualRetryCounters.delete(`manual_retry_${process_id}`);
+          
           // Actualizar base de datos a estado 'running'
           if (supabase) {
             supabase
