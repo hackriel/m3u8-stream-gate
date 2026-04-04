@@ -326,10 +326,11 @@ export default function EmisorM3U8Panel() {
       i === index ? { ...process, ...updates } : process
     ));
     
-    if (updates.m3u8 !== undefined || updates.rtmp !== undefined) {
+    if (updates.m3u8 !== undefined || updates.rtmp !== undefined || updates.m3u8Backup !== undefined) {
       const dataToUpdate: any = {};
       if (updates.m3u8 !== undefined) dataToUpdate.m3u8 = updates.m3u8;
       if (updates.rtmp !== undefined) dataToUpdate.rtmp = updates.rtmp;
+      if (updates.m3u8Backup !== undefined) dataToUpdate.m3u8_backup = updates.m3u8Backup;
       
       supabase
         .from('emission_processes')
