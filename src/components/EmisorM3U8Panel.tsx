@@ -135,6 +135,7 @@ export default function EmisorM3U8Panel() {
               const loadFailure = isRunning || row.is_emitting;
               return {
                 m3u8: row.m3u8 || '',
+                m3u8Backup: (row as any).m3u8_backup || '',
                 rtmp: row.rtmp || '',
                 previewSuffix: row.preview_suffix || '/video.m3u8',
                 isEmitiendo: row.is_emitting || isRunning,
