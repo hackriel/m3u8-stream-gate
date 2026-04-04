@@ -229,6 +229,7 @@ export default function EmisorM3U8Panel() {
 
                 newProcesses[row.id] = {
                   m3u8: row.m3u8,
+                  m3u8Backup: (row as any).m3u8_backup || '',
                   rtmp: row.rtmp,
                   previewSuffix: row.preview_suffix,
                   isEmitiendo: row.is_emitting || isRunning,
