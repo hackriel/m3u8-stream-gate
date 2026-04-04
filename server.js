@@ -155,9 +155,10 @@ const DIRECT_URL_CHANNELS = {
 // Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
 const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 
-// Fuentes estables (no requieren -re ni recovery agresivo)
-// Canal 6 usa mediatiquestream.com que es un HLS estable y público
+// Fuentes estables (watchdogs tolerantes + recovery lento) - solo canales manuales con CDN fijo
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10']);
+// Procesos con cadencia CFR (vsync cfr + 29.97fps) - incluye TDMax para estabilizar picos
+const CFR_OUTPUT_PROCESSES = new Set(['0', '4', '5', '10']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
