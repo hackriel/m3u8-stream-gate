@@ -1980,11 +1980,35 @@ app.post('/api/emit/stop', async (req, res) => {
         message: `Emisión ${process_id} detenida correctamente` 
       });
     } else {
+      // IMPORTANTE: Marcar como parada manual incluso sin proceso activo,
+      // para cancelar cualquier recovery programado (setTimeout pendiente)
+      manualStopProcesses.add(process_id);
+      manualStopProcesses.add(Number(process_id));
+      
+      // Limpiar estado en DB por si quedó marcado como activo
+      if (supabase) {
+        await supabase
+          .from('emission_processes')
+          .update({
+            is_active: false,
+            is_emitting: false,
+            emit_status: 'stopped',
+            ended_at: new Date().toISOString(),
+            start_time: 0,
+            elapsed: 0,
+            recovery_count: 0,
+            last_signal_duration: 0,
+            failure_reason: null,
+            failure_details: null,
+          })
+          .eq('id', parseInt(process_id));
+      }
+      
       emissionStatuses.set(process_id, 'idle');
-      sendLog(process_id, 'info', `No hay emisión activa`);
+      sendLog(process_id, 'info', `No hay emisión activa (recovery pendiente cancelado si existía)`);
       res.json({ 
         success: true, 
-        message: `No hay emisión activa para proceso ${process_id}` 
+        message: `Proceso ${process_id} marcado como detenido` 
       });
     }
     
