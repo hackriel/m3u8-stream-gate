@@ -1043,8 +1043,20 @@ app.post('/api/emit', async (req, res) => {
       `Origin: ${originDomain}`,
     ].filter(Boolean).join('\r\n') + '\r\n';
 
+    // Para procesos manuales con fuentes estables (Canal 6, Disney), usar args de resiliencia reforzados
+    const effectiveResilienceArgs = isManualProcess
+      ? [
+          '-rw_timeout', '15000000',   // 15s (más tolerante que los 10s globales)
+          '-reconnect', '1',
+          '-reconnect_streamed', '1',
+          '-reconnect_at_eof', '1',
+          '-reconnect_on_http_error', '4xx,5xx',  // Cubrir 403/404 transitorios del CDN
+          '-reconnect_delay_max', '5',
+        ]
+      : HLS_INPUT_RESILIENCE_ARGS;
+
     const inputArgs = [
-      ...HLS_INPUT_RESILIENCE_ARGS,
+      ...effectiveResilienceArgs,
       ...extraFfmpegInputArgs,
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
       '-headers', combinedHeaders,
