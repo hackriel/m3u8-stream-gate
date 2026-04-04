@@ -201,7 +201,9 @@ setInterval(() => {
     const runtimeMs = Date.now() - (processData.startTime || Date.now());
 
     // Caso 1: proceso pegado arrancando y nunca produjo el primer frame
-    if (status === 'starting' && !lastFrame && runtimeMs > WATCHDOG_START_TIMEOUT) {
+    // Fuentes estables (Canal 6) tienen más tolerancia porque no usan -re y pueden tardar más
+    const startTimeout = STABLE_SOURCE_PROCESSES.has(String(processId)) ? 45000 : WATCHDOG_START_TIMEOUT;
+    if (status === 'starting' && !lastFrame && runtimeMs > startTimeout) {
       const stalledSecs = Math.floor(runtimeMs / 1000);
       sendLog(processId, 'error', `🐕 WATCHDOG: Arranque colgado — ${stalledSecs}s sin primer frame. Forzando cierre para recovery...`);
 
