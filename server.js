@@ -1561,7 +1561,7 @@ app.post('/api/emit', async (req, res) => {
               // Polling HTTP al M3U8 cada 5s (máx 12 intentos = 60s)
               // Solo lanzar FFmpeg cuando el CDN confirme que está vivo (HTTP 200)
               const HEALTH_CHECK_INTERVAL = 5000; // 5s entre checks
-              const HEALTH_CHECK_MAX_ATTEMPTS = 12; // 60s máximo
+              const HEALTH_CHECK_MAX_ATTEMPTS = 4; // 20s máximo de espera
               let healthCheckAttempt = 0;
               let cdnReady = false;
               
