@@ -1091,9 +1091,12 @@ app.post('/api/emit', async (req, res) => {
     // Para Tigo, FFmpeg ya apunta al proxy local, no necesita resolución de variante
     let inputSourceUrl = effectiveSourceM3u8;
 
-    // Procesos manuales (Disney 7, Disney 8): resolver mejor variante HLS
+    // Procesos manuales: resolver mejor variante HLS
+    // EXCEPTO Canal 6 (ID 5): su variante "original.m3u8" tiene bitrate=0 y tarda ~80s en arrancar
+    // FFmpeg maneja el master playlist internamente de forma más eficiente para este CDN
     const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
-    if (isManualUrlProcess) {
+    const SKIP_VARIANT_RESOLUTION = new Set(['5']); // Canal 6: dejar que FFmpeg elija variante
+    if (isManualUrlProcess && !SKIP_VARIANT_RESOLUTION.has(String(process_id))) {
       const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(effectiveSourceM3u8, preferredBandwidth);
       inputSourceUrl = resolvedUrl;
@@ -1105,6 +1108,8 @@ app.post('/api/emit', async (req, res) => {
       }
       const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
       sendLog(process_id, 'success', `📺 Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
+    } else if (isManualUrlProcess && SKIP_VARIANT_RESOLUTION.has(String(process_id))) {
+      sendLog(process_id, 'info', `📺 Fuente: master playlist directo (FFmpeg selecciona variante internamente)`);
     }
 
     // Nombre del proceso para logs
