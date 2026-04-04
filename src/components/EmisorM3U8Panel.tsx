@@ -900,8 +900,19 @@ export default function EmisorM3U8Panel() {
                     </button>
                   )}
                 </div>
-              </>
-            )}
+                {/* URL de respaldo para Canal 6 (failover automático) */}
+                {processIndex === 5 && (
+                  <>
+                    <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 de respaldo (failover)</label>
+                    <input
+                      type="url"
+                      placeholder="https://servidor/respaldo/playlist.m3u8"
+                      value={process.m3u8Backup}
+                      onChange={(e) => updateProcess(processIndex, { m3u8Backup: e.target.value })}
+                      className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-accent/50 transition-all duration-200"
+                    />
+                  </>
+                )}
 
             <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
             <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
