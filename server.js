@@ -634,11 +634,18 @@ const detectAndCategorizeError = (output, processId) => {
       return true; // Ignorar silenciosamente, no es un error real
     }
 
-    // Para procesos manuales: 404 y EOF transitorios suelen venir del CDN.
+    // Para procesos manuales: 403, 404 y EOF transitorios suelen venir del CDN.
     // Los tratamos como advertencia operativa, pero sí dejamos la causa registrada
     // por si FFmpeg termina cerrando el proceso después de agotar sus reintentos internos.
-    if (isManualProcess && (output.includes('Server returned 404') || (isEOF && elapsed > 10))) {
-      const reason = output.includes('404')
+    if (isManualProcess && (
+      output.includes('Server returned 404') || 
+      output.includes('Server returned 403') || 
+      output.includes('HTTP error 403') || 
+      (isEOF && elapsed > 10)
+    )) {
+      const reason = output.includes('403')
+        ? '403 transitorio del CDN (FFmpeg reintentará internamente con reconnect 4xx)'
+        : output.includes('404')
         ? '404 transitorio del CDN (FFmpeg reintentará internamente)'
         : 'EOF transitorio del CDN (FFmpeg reintentará internamente)';
       sendLog(processId, 'warn', `⚠️ CDN: ${reason}`);
