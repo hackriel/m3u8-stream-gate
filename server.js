@@ -634,11 +634,18 @@ const detectAndCategorizeError = (output, processId) => {
       return true; // Ignorar silenciosamente, no es un error real
     }
 
-    // Para procesos manuales: 404 y EOF transitorios suelen venir del CDN.
+    // Para procesos manuales: 403, 404 y EOF transitorios suelen venir del CDN.
     // Los tratamos como advertencia operativa, pero sí dejamos la causa registrada
     // por si FFmpeg termina cerrando el proceso después de agotar sus reintentos internos.
-    if (isManualProcess && (output.includes('Server returned 404') || (isEOF && elapsed > 10))) {
-      const reason = output.includes('404')
+    if (isManualProcess && (
+      output.includes('Server returned 404') || 
+      output.includes('Server returned 403') || 
+      output.includes('HTTP error 403') || 
+      (isEOF && elapsed > 10)
+    )) {
+      const reason = output.includes('403')
+        ? '403 transitorio del CDN (FFmpeg reintentará internamente con reconnect 4xx)'
+        : output.includes('404')
         ? '404 transitorio del CDN (FFmpeg reintentará internamente)'
         : 'EOF transitorio del CDN (FFmpeg reintentará internamente)';
       sendLog(processId, 'warn', `⚠️ CDN: ${reason}`);
@@ -986,7 +993,7 @@ app.post('/api/emit', async (req, res) => {
       if (hostname.includes('teletica.com')) {
         refererDomain = 'https://www.teletica.com/';
         originDomain = 'https://www.teletica.com';
-      } else if (hostname.includes('cloudfront.net') || hostname.includes('repretel.com')) {
+      } else if (hostname.includes('cloudfront.net') || hostname.includes('repretel.com') || hostname.includes('mediatiquestream.com')) {
         refererDomain = 'https://www.repretel.com/';
         originDomain = 'https://www.repretel.com';
       } else if (
@@ -1043,8 +1050,20 @@ app.post('/api/emit', async (req, res) => {
       `Origin: ${originDomain}`,
     ].filter(Boolean).join('\r\n') + '\r\n';
 
+    // Para procesos manuales con fuentes estables (Canal 6, Disney), usar args de resiliencia reforzados
+    const effectiveResilienceArgs = isManualProcess
+      ? [
+          '-rw_timeout', '15000000',   // 15s (más tolerante que los 10s globales)
+          '-reconnect', '1',
+          '-reconnect_streamed', '1',
+          '-reconnect_at_eof', '1',
+          '-reconnect_on_http_error', '4xx,5xx',  // Cubrir 403/404 transitorios del CDN
+          '-reconnect_delay_max', '5',
+        ]
+      : HLS_INPUT_RESILIENCE_ARGS;
+
     const inputArgs = [
-      ...HLS_INPUT_RESILIENCE_ARGS,
+      ...effectiveResilienceArgs,
       ...extraFfmpegInputArgs,
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
       '-headers', combinedHeaders,
