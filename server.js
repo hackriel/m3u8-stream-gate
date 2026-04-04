@@ -176,8 +176,7 @@ const scrapeSessionCache = new Map(); // Map<processId, { cookies, accessToken, 
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 
-// Control de reintentos progresivos para canales manuales (404 transitorios del CDN)
-const manualRetryCounters = new Map(); // Map<'manual_retry_${pid}', attemptNumber>
+// Watchdog: última vez que cada proceso produjo frames (timestamp ms)
 
 // Watchdog: última vez que cada proceso produjo frames (timestamp ms)
 const lastFrameTime = new Map(); // Map<processId, timestampMs>
