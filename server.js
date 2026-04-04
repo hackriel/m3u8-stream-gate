@@ -1028,13 +1028,13 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // Throttlear lectura a velocidad real (1x) — EXCEPTO fuentes estables
-    // Para fuentes estables (Canal 6), FFmpeg lee a velocidad natural como VLC,
-    // evitando buffer starvation que causa falsos arranques y loops de recovery
-    if (!isStableSource) {
-      hardenedLiveInputArgs.push('-re');
-    } else {
-      sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: sin -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
+    // Throttlear lectura a velocidad real (1x) en TODOS los canales.
+    // Mantener -re evita ráfagas al RTMP que algunos players interpretan como reload/buffering.
+    // Para Canal 6 mantenemos el perfil estable con más análisis/watchdogs más tolerantes,
+    // pero SIN quitar el pacing en tiempo real.
+    hardenedLiveInputArgs.push('-re');
+    if (isStableSource) {
+      sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: con -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
     }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
