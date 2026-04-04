@@ -238,8 +238,9 @@ setInterval(() => {
     if (status !== 'running') continue;
     if (!lastFrame) continue;
     
+    const stallTimeout = STABLE_SOURCE_PROCESSES.has(String(processId)) ? 60000 : WATCHDOG_STALL_TIMEOUT;
     const stalledMs = Date.now() - lastFrame;
-    if (stalledMs > WATCHDOG_STALL_TIMEOUT) {
+    if (stalledMs > stallTimeout) {
       const stalledSecs = Math.floor(stalledMs / 1000);
       sendLog(processId, 'error', `🐕 WATCHDOG: Proceso colgado — ${stalledSecs}s sin producir frames. Forzando cierre para recovery...`);
       
