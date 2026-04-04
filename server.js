@@ -1025,9 +1025,14 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // Throttlear lectura a velocidad real (1x) en TODOS los canales
-    // Evita ráfagas de datos que causan pausa + fast-forward en el reproductor
-    hardenedLiveInputArgs.push('-re');
+    // Throttlear lectura a velocidad real (1x) — EXCEPTO fuentes estables
+    // Para fuentes estables (Canal 6), FFmpeg lee a velocidad natural como VLC,
+    // evitando buffer starvation que causa falsos arranques y loops de recovery
+    if (!isStableSource) {
+      hardenedLiveInputArgs.push('-re');
+    } else {
+      sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: sin -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
+    }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
     const cachedSession = scrapeSessionCache.get(process_id);
