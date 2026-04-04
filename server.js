@@ -987,8 +987,8 @@ app.post('/api/emit', async (req, res) => {
     // Fuentes estables (Canal 6) siempre usan valores altos para enganchar limpiamente.
     const isRecovery = Boolean(is_recovery);
     const isStableSource = STABLE_SOURCE_PROCESSES.has(String(process_id));
-    const analyzeDuration = isStableSource ? '5000000' : (isRecovery ? '1500000' : '3000000');  // 5s estable / 1.5s recovery / 3s normal
-    const probeSize      = isStableSource ? '3000000' : (isRecovery ? '500000'  : '1500000');   // 3MB estable / 500KB recovery / 1.5MB normal
+    const analyzeDuration = isStableSource ? '3000000' : (isRecovery ? '1500000' : '3000000');  // 3s estable / 1.5s recovery / 3s normal
+    const probeSize      = isStableSource ? '2000000' : (isRecovery ? '500000'  : '1500000');   // 2MB estable / 500KB recovery / 1.5MB normal
 
     // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
     const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id));
@@ -1107,6 +1107,11 @@ app.post('/api/emit', async (req, res) => {
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
+    // Para fuentes estables: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
+    // Esto evita micro-jitter por forzar 30fps en una fuente 29.97fps (frame duplicado cada ~33s)
+    const outputFps = isStableSource ? '29.97' : '30';
+    const gopSize = isStableSource ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
+
     ffmpegArgs = [
       ...inputArgs,
       ...hardenedLiveInputArgs,
@@ -1123,9 +1128,10 @@ app.post('/api/emit', async (req, res) => {
       '-maxrate', '2000k',
       '-bufsize', '4000k',
       '-vf', 'scale=-2:720',
-      '-r', '30',
-      '-g', '60',
-      '-keyint_min', '60',
+      '-r', outputFps,
+      '-vsync', 'cfr',
+      '-g', gopSize,
+      '-keyint_min', gopSize,
       '-sc_threshold', '0',
       '-c:a', 'aac',
       '-b:a', '128k',
