@@ -155,6 +155,10 @@ const DIRECT_URL_CHANNELS = {
 // Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
 const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 
+// Fuentes estables (no requieren -re ni recovery agresivo)
+// Canal 6 usa mediatiquestream.com que es un HLS estable y público
+const STABLE_SOURCE_PROCESSES = new Set(['5']);
+
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
   '6': 'https://mdstrm.com/live-stream-playlist/5a7b1e63a8da282c34d65445.m3u8', // Multimedios oficial
@@ -197,7 +201,9 @@ setInterval(() => {
     const runtimeMs = Date.now() - (processData.startTime || Date.now());
 
     // Caso 1: proceso pegado arrancando y nunca produjo el primer frame
-    if (status === 'starting' && !lastFrame && runtimeMs > WATCHDOG_START_TIMEOUT) {
+    // Fuentes estables (Canal 6) tienen más tolerancia porque no usan -re y pueden tardar más
+    const startTimeout = STABLE_SOURCE_PROCESSES.has(String(processId)) ? 45000 : WATCHDOG_START_TIMEOUT;
+    if (status === 'starting' && !lastFrame && runtimeMs > startTimeout) {
       const stalledSecs = Math.floor(runtimeMs / 1000);
       sendLog(processId, 'error', `🐕 WATCHDOG: Arranque colgado — ${stalledSecs}s sin primer frame. Forzando cierre para recovery...`);
 
@@ -232,8 +238,9 @@ setInterval(() => {
     if (status !== 'running') continue;
     if (!lastFrame) continue;
     
+    const stallTimeout = STABLE_SOURCE_PROCESSES.has(String(processId)) ? 60000 : WATCHDOG_STALL_TIMEOUT;
     const stalledMs = Date.now() - lastFrame;
-    if (stalledMs > WATCHDOG_STALL_TIMEOUT) {
+    if (stalledMs > stallTimeout) {
       const stalledSecs = Math.floor(stalledMs / 1000);
       sendLog(processId, 'error', `🐕 WATCHDOG: Proceso colgado — ${stalledSecs}s sin producir frames. Forzando cierre para recovery...`);
       
@@ -977,9 +984,11 @@ app.post('/api/emit', async (req, res) => {
     
     // Si es recovery, damos un poco menos de análisis para reenganchar rápido,
     // pero suficiente para evitar fallos por parámetros incompletos de streams HLS.
+    // Fuentes estables (Canal 6) siempre usan valores altos para enganchar limpiamente.
     const isRecovery = Boolean(is_recovery);
-    const analyzeDuration = isRecovery ? '1500000' : '3000000';  // 1.5s / 3s
-    const probeSize      = isRecovery ? '500000'  : '1500000';   // 500KB / 1.5MB
+    const isStableSource = STABLE_SOURCE_PROCESSES.has(String(process_id));
+    const analyzeDuration = isStableSource ? '5000000' : (isRecovery ? '1500000' : '3000000');  // 5s estable / 1.5s recovery / 3s normal
+    const probeSize      = isStableSource ? '3000000' : (isRecovery ? '500000'  : '1500000');   // 3MB estable / 500KB recovery / 1.5MB normal
 
     // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
     const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id));
@@ -1019,9 +1028,14 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // Throttlear lectura a velocidad real (1x) en TODOS los canales
-    // Evita ráfagas de datos que causan pausa + fast-forward en el reproductor
-    hardenedLiveInputArgs.push('-re');
+    // Throttlear lectura a velocidad real (1x) — EXCEPTO fuentes estables
+    // Para fuentes estables (Canal 6), FFmpeg lee a velocidad natural como VLC,
+    // evitando buffer starvation que causa falsos arranques y loops de recovery
+    if (!isStableSource) {
+      hardenedLiveInputArgs.push('-re');
+    } else {
+      sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: sin -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
+    }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
     const cachedSession = scrapeSessionCache.get(process_id);
@@ -1499,7 +1513,9 @@ app.post('/api/emit', async (req, res) => {
           // Determinar causa del fallo para log más informativo
           const failureType = detectedErrors.get(process_id);
           const failureInfo = failureType ? ` (${failureType.reason || failureType.type})` : '';
-          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Reiniciando con misma URL en 500ms...`);
+          const isStableProc = STABLE_SOURCE_PROCESSES.has(String(process_id));
+          const recoveryDelay = isStableProc ? 3000 : 500; // Fuentes estables: 3s para no crear loops
+          sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Reiniciando con misma URL en ${recoveryDelay}ms...`);
           
           setTimeout(async () => {
             try {
@@ -1563,7 +1579,7 @@ app.post('/api/emit', async (req, res) => {
               sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
               autoRecoveryInProgress.set(String(process_id), false);
             }
-          }, 500); // 500ms - recovery ultra-rápido para no perder el slot RTMP
+          }, recoveryDelay);
         }
       }
     });
