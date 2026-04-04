@@ -1091,6 +1091,56 @@ app.post('/api/emit', async (req, res) => {
     // Para Tigo, FFmpeg ya apunta al proxy local, no necesita resolución de variante
     let inputSourceUrl = effectiveSourceM3u8;
 
+    // ── PRE-CHECK DE SALUD EN ARRANQUE INICIAL (Canal 6 con failover) ──
+    // Si es Canal 6 y tiene backup, verificar que la URL principal responda antes de lanzar FFmpeg.
+    // Si no responde, probar la backup. Esto evita esperar a que FFmpeg falle (~30-45s).
+    const FAILOVER_PROCESSES = new Set(['5']); // Procesos con soporte dual-URL
+    if (FAILOVER_PROCESSES.has(String(process_id)) && !is_recovery) {
+      const backupUrl = dbRecord?.m3u8_backup || null;
+      if (backupUrl) {
+        sendLog(process_id, 'info', `🔍 Pre-check de salud antes de arrancar...`);
+        const PRE_CHECK_ATTEMPTS = 3;
+        const PRE_CHECK_INTERVAL = 3000; // 3s entre intentos (total ~9s)
+        
+        let primaryOk = false;
+        for (let i = 1; i <= PRE_CHECK_ATTEMPTS; i++) {
+          try {
+            const resp = await fetch(effectiveSourceM3u8, { method: 'GET', signal: AbortSignal.timeout(5000) });
+            if (resp.ok) { primaryOk = true; break; }
+            sendLog(process_id, 'warn', `⚠️ URL principal: HTTP ${resp.status} (intento ${i}/${PRE_CHECK_ATTEMPTS})`);
+          } catch (e) {
+            sendLog(process_id, 'warn', `⚠️ URL principal: ${e.message || 'timeout'} (intento ${i}/${PRE_CHECK_ATTEMPTS})`);
+          }
+          if (i < PRE_CHECK_ATTEMPTS) await new Promise(r => setTimeout(r, PRE_CHECK_INTERVAL));
+        }
+        
+        if (!primaryOk) {
+          sendLog(process_id, 'warn', `🔄 URL principal no responde, probando URL de respaldo...`);
+          let backupOk = false;
+          for (let i = 1; i <= PRE_CHECK_ATTEMPTS; i++) {
+            try {
+              const resp = await fetch(backupUrl, { method: 'GET', signal: AbortSignal.timeout(5000) });
+              if (resp.ok) { backupOk = true; break; }
+              sendLog(process_id, 'warn', `⚠️ URL respaldo: HTTP ${resp.status} (intento ${i}/${PRE_CHECK_ATTEMPTS})`);
+            } catch (e) {
+              sendLog(process_id, 'warn', `⚠️ URL respaldo: ${e.message || 'timeout'} (intento ${i}/${PRE_CHECK_ATTEMPTS})`);
+            }
+            if (i < PRE_CHECK_ATTEMPTS) await new Promise(r => setTimeout(r, PRE_CHECK_INTERVAL));
+          }
+          
+          if (backupOk) {
+            sendLog(process_id, 'success', `✅ Usando URL de respaldo (principal no disponible)`);
+            effectiveSourceM3u8 = backupUrl;
+            inputSourceUrl = backupUrl;
+          } else {
+            sendLog(process_id, 'error', `❌ Ambas URLs no responden. Iniciando con URL principal de todos modos.`);
+          }
+        } else {
+          sendLog(process_id, 'success', `✅ URL principal responde correctamente`);
+        }
+      }
+    }
+
     // Procesos manuales: resolver mejor variante HLS
     // EXCEPTO Canal 6 (ID 5): su variante "original.m3u8" tiene bitrate=0 y tarda ~80s en arrancar
     // FFmpeg maneja el master playlist internamente de forma más eficiente para este CDN
