@@ -1,0 +1,1 @@
+ALTER TABLE public.emission_processes ADD COLUMN IF NOT EXISTS m3u8_backup TEXT DEFAULT '';
