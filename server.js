@@ -155,9 +155,10 @@ const DIRECT_URL_CHANNELS = {
 // Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
 const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 
-// Fuentes estables (no requieren -re ni recovery agresivo)
-// Canal 6 usa mediatiquestream.com que es un HLS estable y público
+// Fuentes estables (watchdogs tolerantes + recovery lento) - solo canales manuales con CDN fijo
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10']);
+// Procesos con cadencia CFR (vsync cfr + 29.97fps) - incluye TDMax para estabilizar picos
+const CFR_OUTPUT_PROCESSES = new Set(['0', '4', '5', '10']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
@@ -1107,10 +1108,11 @@ app.post('/api/emit', async (req, res) => {
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
-    // Para fuentes estables: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
+    // Procesos CFR: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
     // Esto evita micro-jitter por forzar 30fps en una fuente 29.97fps (frame duplicado cada ~33s)
-    const outputFps = isStableSource ? '29.97' : '30';
-    const gopSize = isStableSource ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
+    const isCfrOutput = CFR_OUTPUT_PROCESSES.has(String(process_id));
+    const outputFps = isCfrOutput ? '29.97' : '30';
+    const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
     ffmpegArgs = [
       ...inputArgs,
