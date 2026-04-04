@@ -1142,24 +1142,39 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Procesos manuales: resolver mejor variante HLS
-    // EXCEPTO Canal 6 (ID 5): su variante "original.m3u8" tiene bitrate=0 y tarda ~80s en arrancar
-    // FFmpeg maneja el master playlist internamente de forma más eficiente para este CDN
     const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
-    const SKIP_VARIANT_RESOLUTION = new Set(['5']); // Canal 6: dejar que FFmpeg elija variante
-    if (isManualUrlProcess && !SKIP_VARIANT_RESOLUTION.has(String(process_id))) {
+    if (isManualUrlProcess) {
       const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
-      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(effectiveSourceM3u8, preferredBandwidth);
-      inputSourceUrl = resolvedUrl;
-      const bwKbps = Math.round(bandwidth / 1000);
+      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, preferredBandwidth);
       
-      if (allVariants && allVariants.length > 0) {
-        const varList = allVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
+      // Filtrar variantes con bandwidth=0 (como "original.m3u8" de Repretel que cuelga FFmpeg)
+      const validVariants = (allVariants || []).filter(v => v.bandwidth > 0);
+      
+      if (validVariants.length > 0 && bandwidth === 0) {
+        // La variante seleccionada tiene bandwidth=0 → re-seleccionar de las válidas
+        const bestValid = validVariants[validVariants.length - 1]; // ya vienen ordenadas ascendente
+        let bestUrl = bestValid.url;
+        if (!bestUrl.startsWith('http')) {
+          bestUrl = new URL(bestUrl, new URL(inputSourceUrl)).toString();
+        }
+        inputSourceUrl = bestUrl;
+        const bwKbps = Math.round(bestValid.bandwidth / 1000);
+        const varList = validVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
         sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
+        sendLog(process_id, 'success', `📺 Fuente seleccionada → ${bestValid.resolution || '?'} @ ${bwKbps}kbps (mejor calidad, filtrado bw=0)`);
+      } else if (bandwidth > 0) {
+        // Variante válida seleccionada normalmente
+        inputSourceUrl = resolvedUrl;
+        const bwKbps = Math.round(bandwidth / 1000);
+        if (allVariants && allVariants.length > 0) {
+          const varList = allVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
+          sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
+        }
+        const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
+        sendLog(process_id, 'success', `📺 Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
+      } else {
+        sendLog(process_id, 'info', `📺 Fuente: URL directa (sin variantes HLS detectadas)`);
       }
-      const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
-      sendLog(process_id, 'success', `📺 Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
-    } else if (isManualUrlProcess && SKIP_VARIANT_RESOLUTION.has(String(process_id))) {
-      sendLog(process_id, 'info', `📺 Fuente: master playlist directo (FFmpeg selecciona variante internamente)`);
     }
 
     // Nombre del proceso para logs
