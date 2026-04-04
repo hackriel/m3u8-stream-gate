@@ -1545,11 +1545,12 @@ app.post('/api/emit', async (req, res) => {
               
               const { data: procData } = await supabase
                 .from('emission_processes')
-                .select('m3u8, rtmp')
+                .select('m3u8, rtmp, m3u8_backup')
                 .eq('id', procId)
                 .single();
               
               const sourceUrl = procData?.m3u8;
+              const backupUrl = procData?.m3u8_backup || '';
               const targetRtmp = procData?.rtmp;
               
               if (!sourceUrl || !targetRtmp) {
@@ -1557,24 +1558,70 @@ app.post('/api/emit', async (req, res) => {
                 return;
               }
               
-              // === PRE-FLIGHT HEALTH CHECK ===
-              // Polling HTTP al M3U8 cada 5s (máx 12 intentos = 60s)
-              // Solo lanzar FFmpeg cuando el CDN confirme que está vivo (HTTP 200)
-              const HEALTH_CHECK_INTERVAL = 5000; // 5s entre checks
-              const HEALTH_CHECK_MAX_ATTEMPTS = 4; // 20s máximo de espera
-              let healthCheckAttempt = 0;
-              let cdnReady = false;
+              // === PRE-FLIGHT HEALTH CHECK CON FAILOVER ===
+              // 1. Verificar URL principal (máx 4 intentos × 5s = 20s)
+              // 2. Si falla y hay backup, probar backup URL
+              // 3. Lanzar FFmpeg con la URL que responda
+              const HEALTH_CHECK_INTERVAL = 5000;
+              const HEALTH_CHECK_MAX_ATTEMPTS = 4; // 20s máximo por URL
               
-              sendLog(procId, 'info', `⏳ ${procLabel}: Verificando disponibilidad del CDN antes de reiniciar...`);
               autoRecoveryInProgress.set(String(process_id), true);
               
               await supabase.from('emission_processes').update({
                 emit_status: 'waiting_cdn', is_active: true, is_emitting: false
               }).eq('id', procId);
               
-              while (healthCheckAttempt < HEALTH_CHECK_MAX_ATTEMPTS && !cdnReady) {
-                // Verificar parada manual en cada iteración
-                if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+              // Función helper para verificar una URL
+              const checkUrlHealth = async (url, label) => {
+                sendLog(procId, 'info', `⏳ ${procLabel}: Verificando ${label}...`);
+                for (let attempt = 1; attempt <= HEALTH_CHECK_MAX_ATTEMPTS; attempt++) {
+                  // Verificar parada manual
+                  if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+                    return { ready: false, cancelled: true };
+                  }
+                  try {
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), 8000);
+                    const resp = await fetch(url, {
+                      method: 'GET',
+                      signal: controller.signal,
+                      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' }
+                    });
+                    clearTimeout(timeout);
+                    if (resp.ok) {
+                      sendLog(procId, 'success', `✅ ${procLabel}: ${label} respondió HTTP ${resp.status}`);
+                      return { ready: true, cancelled: false };
+                    }
+                    sendLog(procId, 'warn', `⏳ ${procLabel}: ${label} HTTP ${resp.status} (${attempt}/${HEALTH_CHECK_MAX_ATTEMPTS})`);
+                  } catch (fetchErr) {
+                    const errMsg = fetchErr.name === 'AbortError' ? 'timeout' : fetchErr.message;
+                    sendLog(procId, 'warn', `⏳ ${procLabel}: ${label} - ${errMsg} (${attempt}/${HEALTH_CHECK_MAX_ATTEMPTS})`);
+                  }
+                  if (attempt < HEALTH_CHECK_MAX_ATTEMPTS) {
+                    await new Promise(resolve => setTimeout(resolve, HEALTH_CHECK_INTERVAL));
+                  }
+                }
+                return { ready: false, cancelled: false };
+              };
+              
+              // Intentar URL principal
+              let finalUrl = sourceUrl;
+              let primaryResult = await checkUrlHealth(sourceUrl, 'URL principal');
+              
+              if (primaryResult.cancelled) {
+                sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual durante health-check`);
+                manualStopProcesses.delete(String(process_id));
+                manualStopProcesses.delete(Number(process_id));
+                autoRecoveryInProgress.set(String(process_id), false);
+                return;
+              }
+              
+              // Si la principal falla y hay backup, intentar backup
+              if (!primaryResult.ready && backupUrl) {
+                sendLog(procId, 'warn', `⚠️ ${procLabel}: URL principal no responde, probando URL de respaldo...`);
+                const backupResult = await checkUrlHealth(backupUrl, 'URL respaldo');
+                
+                if (backupResult.cancelled) {
                   sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual durante health-check`);
                   manualStopProcesses.delete(String(process_id));
                   manualStopProcesses.delete(Number(process_id));
@@ -1582,50 +1629,35 @@ app.post('/api/emit', async (req, res) => {
                   return;
                 }
                 
-                healthCheckAttempt++;
-                try {
-                  const controller = new AbortController();
-                  const timeout = setTimeout(() => controller.abort(), 8000);
-                  const resp = await fetch(sourceUrl, {
-                    method: 'GET',
-                    signal: controller.signal,
-                    headers: {
-                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-                    }
-                  });
-                  clearTimeout(timeout);
-                  
-                  if (resp.ok) {
-                    cdnReady = true;
-                    sendLog(procId, 'success', `✅ ${procLabel}: CDN respondió HTTP ${resp.status} - Lanzando FFmpeg`);
-                  } else {
-                    sendLog(procId, 'warn', `⏳ ${procLabel}: CDN respondió HTTP ${resp.status} (intento ${healthCheckAttempt}/${HEALTH_CHECK_MAX_ATTEMPTS})`);
-                  }
-                } catch (fetchErr) {
-                  const errMsg = fetchErr.name === 'AbortError' ? 'timeout' : fetchErr.message;
-                  sendLog(procId, 'warn', `⏳ ${procLabel}: CDN no responde - ${errMsg} (intento ${healthCheckAttempt}/${HEALTH_CHECK_MAX_ATTEMPTS})`);
-                }
-                
-                if (!cdnReady && healthCheckAttempt < HEALTH_CHECK_MAX_ATTEMPTS) {
-                  await new Promise(resolve => setTimeout(resolve, HEALTH_CHECK_INTERVAL));
-                }
-              }
-              
-              if (!cdnReady) {
-                sendLog(procId, 'error', `❌ ${procLabel}: CDN no respondió tras ${HEALTH_CHECK_MAX_ATTEMPTS} intentos (${HEALTH_CHECK_MAX_ATTEMPTS * HEALTH_CHECK_INTERVAL / 1000}s). Recovery detenido.`);
-                autoRecoveryInProgress.set(String(process_id), false);
-                if (supabase) {
+                if (backupResult.ready) {
+                  finalUrl = backupUrl;
+                  sendLog(procId, 'success', `🔀 ${procLabel}: Usando URL de respaldo para recovery`);
+                } else {
+                  // Ambas URLs fallaron
+                  sendLog(procId, 'error', `❌ ${procLabel}: Ni URL principal ni respaldo respondieron. Recovery detenido.`);
+                  autoRecoveryInProgress.set(String(process_id), false);
                   await supabase.from('emission_processes').update({
                     is_active: false, is_emitting: false, emit_status: 'error',
                     ended_at: new Date().toISOString(),
                     failure_reason: 'cdn_unavailable',
-                    failure_details: `CDN no respondió tras ${HEALTH_CHECK_MAX_ATTEMPTS * HEALTH_CHECK_INTERVAL / 1000}s de polling`
+                    failure_details: 'Ambas URLs (principal y respaldo) no respondieron'
                   }).eq('id', procId);
+                  return;
                 }
+              } else if (!primaryResult.ready) {
+                // Sin backup y principal falló
+                sendLog(procId, 'error', `❌ ${procLabel}: CDN no respondió y no hay URL de respaldo. Recovery detenido.`);
+                autoRecoveryInProgress.set(String(process_id), false);
+                await supabase.from('emission_processes').update({
+                  is_active: false, is_emitting: false, emit_status: 'error',
+                  ended_at: new Date().toISOString(),
+                  failure_reason: 'cdn_unavailable',
+                  failure_details: `CDN no respondió tras ${HEALTH_CHECK_MAX_ATTEMPTS * HEALTH_CHECK_INTERVAL / 1000}s de polling`
+                }).eq('id', procId);
                 return;
               }
               
-              // Verificar parada manual una última vez antes de lanzar
+              // Verificar parada manual una última vez
               if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
                 sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual justo antes de lanzar FFmpeg`);
                 manualStopProcesses.delete(String(process_id));
@@ -1643,7 +1675,7 @@ app.post('/api/emit', async (req, res) => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  source_m3u8: sourceUrl,
+                  source_m3u8: finalUrl,
                   target_rtmp: targetRtmp,
                   process_id: String(process_id),
                   is_recovery: true
@@ -1651,7 +1683,7 @@ app.post('/api/emit', async (req, res) => {
               });
               
               if (emitResp.ok) {
-                sendLog(procId, 'success', `✅ AUTO-RECOVERY ${procLabel} completado: Emisión reiniciada`);
+                sendLog(procId, 'success', `✅ AUTO-RECOVERY ${procLabel} completado: Emisión reiniciada${finalUrl !== sourceUrl ? ' (con URL respaldo)' : ''}`);
                 if (supabase) {
                   const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: procId });
                   if (rpcErr) {
