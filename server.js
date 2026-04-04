@@ -155,6 +155,10 @@ const DIRECT_URL_CHANNELS = {
 // Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
 const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 
+// Fuentes estables (no requieren -re ni recovery agresivo)
+// Canal 6 usa mediatiquestream.com que es un HLS estable y público
+const STABLE_SOURCE_PROCESSES = new Set(['5']);
+
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
   '6': 'https://mdstrm.com/live-stream-playlist/5a7b1e63a8da282c34d65445.m3u8', // Multimedios oficial
