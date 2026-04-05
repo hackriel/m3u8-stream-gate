@@ -1142,7 +1142,7 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
-    // Procesos manuales: resolver mejor variante HLS
+    // Procesos manuales: resolver mejor variante HLS (1 fetch rápido, sin listar todas)
     const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
     if (isManualUrlProcess) {
       const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
@@ -1152,29 +1152,18 @@ app.post('/api/emit', async (req, res) => {
       const validVariants = (allVariants || []).filter(v => v.bandwidth > 0);
       
       if (validVariants.length > 0 && bandwidth === 0) {
-        // La variante seleccionada tiene bandwidth=0 → re-seleccionar de las válidas
-        const bestValid = validVariants[validVariants.length - 1]; // ya vienen ordenadas ascendente
+        const bestValid = validVariants[validVariants.length - 1];
         let bestUrl = bestValid.url;
         if (!bestUrl.startsWith('http')) {
           bestUrl = new URL(bestUrl, new URL(inputSourceUrl)).toString();
         }
         inputSourceUrl = bestUrl;
-        const bwKbps = Math.round(bestValid.bandwidth / 1000);
-        const varList = validVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
-        sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
-        sendLog(process_id, 'success', `📺 Fuente seleccionada → ${bestValid.resolution || '?'} @ ${bwKbps}kbps (mejor calidad, filtrado bw=0)`);
+        sendLog(process_id, 'success', `📺 Fuente → ${bestValid.resolution || '?'} @ ${Math.round(bestValid.bandwidth / 1000)}kbps`);
       } else if (bandwidth > 0) {
-        // Variante válida seleccionada normalmente
         inputSourceUrl = resolvedUrl;
-        const bwKbps = Math.round(bandwidth / 1000);
-        if (allVariants && allVariants.length > 0) {
-          const varList = allVariants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
-          sendLog(process_id, 'info', `📋 Variantes disponibles: ${varList}`);
-        }
-        const sourceSelectionLabel = preferredBandwidth > 0 ? 'mejor calidad estable' : 'mejor calidad';
-        sendLog(process_id, 'success', `📺 Fuente seleccionada → ${resolution} @ ${bwKbps}kbps (${sourceSelectionLabel})`);
+        sendLog(process_id, 'success', `📺 Fuente → ${resolution} @ ${Math.round(bandwidth / 1000)}kbps`);
       } else {
-        sendLog(process_id, 'info', `📺 Fuente: URL directa (sin variantes HLS detectadas)`);
+        sendLog(process_id, 'info', `📺 Fuente: URL directa`);
       }
     }
 
