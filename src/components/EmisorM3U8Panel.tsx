@@ -918,8 +918,9 @@ export default function EmisorM3U8Panel() {
                       value={process.m3u8Backup}
                       onChange={(e) => updateProcess(processIndex, { m3u8Backup: e.target.value })}
                       className={`w-full bg-card border-2 rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-accent/50 transition-all duration-200 ${
-                        process.isEmitiendo && process.sourceUrl && process.m3u8Backup && process.sourceUrl.startsWith(process.m3u8Backup.replace(/\/[^/]*$/, ''))
-                          && !(process.m3u8 && process.sourceUrl.startsWith(process.m3u8.replace(/\/[^/]*$/, '')))
+                        process.isEmitiendo && process.sourceUrl && process.m3u8Backup
+                          && (process.sourceUrl === process.m3u8Backup || process.sourceUrl.startsWith(process.m3u8Backup))
+                          && !(process.m3u8 && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8)))
                           ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.4)]'
                           : 'border-border'
                       }`}
