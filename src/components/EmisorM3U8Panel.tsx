@@ -44,6 +44,7 @@ interface EmissionProcess {
   recoveryCount: number;
   lastSignalDuration: number;
   nightRest: boolean;
+  sourceUrl?: string;
 }
 
 // Tipo para una entrada de log
@@ -153,6 +154,7 @@ export default function EmisorM3U8Panel() {
                 recoveryCount: (isRunning || row.is_emitting) ? ((row as any).recovery_count || 0) : 0,
                 lastSignalDuration: (row as any).last_signal_duration || 0,
                 nightRest: (row as any).night_rest || false,
+                sourceUrl: (row as any).source_url || '',
               };
             } else {
               return defaultProcess();
@@ -246,6 +248,7 @@ export default function EmisorM3U8Panel() {
                   recoveryCount: row.recovery_count || 0,
                   lastSignalDuration: (row as any).last_signal_duration || 0,
                   nightRest: (row as any).night_rest || false,
+                  sourceUrl: (row as any).source_url || '',
                 };
               }
               return newProcesses;
@@ -880,7 +883,12 @@ export default function EmisorM3U8Panel() {
                     placeholder="https://servidor/origen/playlist.m3u8"
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    className="flex-1 bg-card border border-border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+                    className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
+                      processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
+                        && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
+                        ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.4)]'
+                        : 'border-border'
+                    }`}
                   />
                   {channelConfig.scrapeFn && (
                     <button
@@ -909,7 +917,13 @@ export default function EmisorM3U8Panel() {
                       placeholder="https://servidor/respaldo/playlist.m3u8"
                       value={process.m3u8Backup}
                       onChange={(e) => updateProcess(processIndex, { m3u8Backup: e.target.value })}
-                      className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-accent/50 transition-all duration-200"
+                      className={`w-full bg-card border-2 rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-accent/50 transition-all duration-200 ${
+                        process.isEmitiendo && process.sourceUrl && process.m3u8Backup
+                          && (process.sourceUrl === process.m3u8Backup || process.sourceUrl.startsWith(process.m3u8Backup))
+                          && !(process.m3u8 && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8)))
+                          ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.4)]'
+                          : 'border-border'
+                      }`}
                     />
                   </>
                 )}
