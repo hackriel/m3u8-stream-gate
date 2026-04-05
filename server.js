@@ -1195,7 +1195,7 @@ app.post('/api/emit', async (req, res) => {
       '-bufsize', '4000k',
       '-vf', 'scale=-2:720',
       '-r', outputFps,
-      '-vsync', 'cfr',
+      ...(isCfrOutput ? ['-vsync', 'cfr'] : []),
       '-g', gopSize,
       '-keyint_min', gopSize,
       '-sc_threshold', '0',
