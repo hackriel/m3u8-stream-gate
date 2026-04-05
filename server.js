@@ -1032,10 +1032,11 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // -re se aplica DESPUÉS de -i (como flag de output) para no frenar el probing inicial.
-    // Esto permite arranque rápido (~8s vs ~78s) mientras mantiene la emisión a velocidad real 1x.
+    // -re DEBE ir antes de -i (la versión de FFmpeg del VPS no soporta -re como output flag).
+    // Para acelerar el arranque, usamos analyzeduration/probesize reducidos.
+    hardenedLiveInputArgs.push('-re');
     if (isStableSource) {
-      sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: -re en output, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
+      sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: con -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
     }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
