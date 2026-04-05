@@ -1032,13 +1032,10 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // Throttlear lectura a velocidad real (1x) en TODOS los canales.
-    // Mantener -re evita ráfagas al RTMP que algunos players interpretan como reload/buffering.
-    // Para Canal 6 mantenemos el perfil estable con más análisis/watchdogs más tolerantes,
-    // pero SIN quitar el pacing en tiempo real.
-    hardenedLiveInputArgs.push('-re');
+    // -re se aplica DESPUÉS de -i (como flag de output) para no frenar el probing inicial.
+    // Esto permite arranque rápido (~8s vs ~78s) mientras mantiene la emisión a velocidad real 1x.
     if (isStableSource) {
-      sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: con -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
+      sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: -re en output, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
     }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
@@ -1185,6 +1182,7 @@ app.post('/api/emit', async (req, res) => {
       '-analyzeduration', analyzeDuration,
       '-probesize', probeSize,
       '-i', inputSourceUrl,
+      '-re',
       '-map', '0:v:0?', '-map', '0:a:0?',
       '-c:v', 'libx264',
       '-preset', 'veryfast',
