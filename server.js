@@ -1182,6 +1182,7 @@ app.post('/api/emit', async (req, res) => {
       '-analyzeduration', analyzeDuration,
       '-probesize', probeSize,
       '-i', inputSourceUrl,
+      '-re',
       '-map', '0:v:0?', '-map', '0:a:0?',
       '-c:v', 'libx264',
       '-preset', 'veryfast',
