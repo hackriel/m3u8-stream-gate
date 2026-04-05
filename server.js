@@ -157,8 +157,10 @@ const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 
 // Fuentes estables (watchdogs tolerantes + recovery lento) - solo canales manuales con CDN fijo
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10']);
-// Procesos con cadencia CFR (vsync cfr + 29.97fps) - todos los canales de emisión
-const CFR_OUTPUT_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10']);
+// Procesos con cadencia CFR (vsync cfr + 29.97fps) - canales de emisión EXCEPTO Disney 7 (TUDN)
+// Disney 7 (ID 0) usa valores enteros (30fps/GOP60) porque el servidor RTMP destino
+// rechaza conexiones con GOP decimal (59.94) causando Broken pipe a los ~120s
+const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
