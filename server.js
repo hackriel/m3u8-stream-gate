@@ -1276,6 +1276,7 @@ app.post('/api/emit', async (req, res) => {
                 emit_status: 'running',
                 is_active: true,
                 is_emitting: true,
+                source_url: inputSourceUrl,
                 updated_at: new Date().toISOString()
               })
               .eq('id', parseInt(process_id))
