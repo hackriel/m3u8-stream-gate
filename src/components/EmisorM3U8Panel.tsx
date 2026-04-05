@@ -44,6 +44,7 @@ interface EmissionProcess {
   recoveryCount: number;
   lastSignalDuration: number;
   nightRest: boolean;
+  sourceUrl?: string;
 }
 
 // Tipo para una entrada de log
