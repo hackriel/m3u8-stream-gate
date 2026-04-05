@@ -883,7 +883,11 @@ export default function EmisorM3U8Panel() {
                     placeholder="https://servidor/origen/playlist.m3u8"
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    className="flex-1 bg-card border border-border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+                    className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
+                      processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8 && process.sourceUrl.includes(new URL(process.m3u8).hostname)
+                        ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.4)]'
+                        : 'border-border'
+                    }`}
                   />
                   {channelConfig.scrapeFn && (
                     <button
@@ -912,7 +916,12 @@ export default function EmisorM3U8Panel() {
                       placeholder="https://servidor/respaldo/playlist.m3u8"
                       value={process.m3u8Backup}
                       onChange={(e) => updateProcess(processIndex, { m3u8Backup: e.target.value })}
-                      className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-accent/50 transition-all duration-200"
+                      className={`w-full bg-card border-2 rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-accent/50 transition-all duration-200 ${
+                        process.isEmitiendo && process.sourceUrl && process.m3u8Backup && process.sourceUrl.includes(new URL(process.m3u8Backup).hostname)
+                          && !(process.m3u8 && process.sourceUrl.includes(new URL(process.m3u8).hostname))
+                          ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.4)]'
+                          : 'border-border'
+                      }`}
                     />
                   </>
                 )}
