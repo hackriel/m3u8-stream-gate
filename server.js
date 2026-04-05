@@ -951,6 +951,7 @@ app.post('/api/emit', async (req, res) => {
           id: parseInt(process_id),
           m3u8: effectiveSourceM3u8,
           rtmp: target_rtmp,
+          source_url: effectiveSourceM3u8,
           is_active: true,
           is_emitting: true,
           emit_status: 'starting',
