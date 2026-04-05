@@ -248,6 +248,7 @@ export default function EmisorM3U8Panel() {
                   recoveryCount: row.recovery_count || 0,
                   lastSignalDuration: (row as any).last_signal_duration || 0,
                   nightRest: (row as any).night_rest || false,
+                  sourceUrl: (row as any).source_url || '',
                 };
               }
               return newProcesses;
