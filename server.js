@@ -1050,7 +1050,7 @@ app.post('/api/emit', async (req, res) => {
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
 
-    if (isManualProcess || isUnivisionLikeSource) {
+    if (isManualProcess || isUnivisionLikeSource || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-max_reload', '1000',
