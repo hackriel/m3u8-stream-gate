@@ -1039,15 +1039,8 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // Procesos sin -re: arrancar 3 segmentos atrás del live edge para buffer natural
-    if (usesNoRe) {
-      hardenedLiveInputArgs.push(
-        '-live_start_index', '-3',
-      );
-      if (!isManualProcess) {
-        hardenedLiveInputArgs.push('-http_seekable', '0');
-      }
-    }
+    // Sin -re: no se necesitan flags adicionales de HLS.
+    // HLS se auto-regula al live edge, y los CDNs de paga (TDMax/Streann) entregan streams limpios.
     // -re solo para procesos que lo necesitan (Disney 7 y Canal 6)
     if (!usesNoRe) {
       hardenedLiveInputArgs.push('-re');
