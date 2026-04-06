@@ -188,12 +188,12 @@ const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames en running = pro
 const WATCHDOG_START_TIMEOUT = 25000; // 25 segundos en starting sin primer frame = arranque colgado
 const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
 const HLS_INPUT_RESILIENCE_ARGS = [
-  '-rw_timeout', '10000000', // 10 segundos - tope máximo si la conexión se cuelga sin respuesta
+  '-rw_timeout', '5000000', // 5 segundos - reducido de 10s para fallar rápido y no causar stalls de 10s
   '-reconnect', '1',
   '-reconnect_streamed', '1',
   '-reconnect_at_eof', '1',
   '-reconnect_on_http_error', '5xx',
-  '-reconnect_delay_max', '5',
+  '-reconnect_delay_max', '3', // 3s max entre reintentos (antes 5s) para recovery más ágil
 ];
 
 // Watchdog interval: detecta procesos FFmpeg colgados, tanto en arranque como en ejecución
