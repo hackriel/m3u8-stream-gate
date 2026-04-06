@@ -765,7 +765,7 @@ const resolveBestHLSVariant = async (masterUrl, options = {}) => {
         const variantUrl = lines[i + 1];
 
         if (variantUrl && !variantUrl.startsWith('#')) {
-          variants.push({ bandwidth, resolution, url: variantUrl });
+          variants.push({ bandwidth, resolution, url: variantUrl, programIndex: variants.length });
         }
       }
     }
@@ -1050,7 +1050,7 @@ app.post('/api/emit', async (req, res) => {
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
 
-    if (isManualProcess || isUnivisionLikeSource) {
+    if (isManualProcess || isUnivisionLikeSource || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-max_reload', '1000',
@@ -1174,13 +1174,15 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
-    // Resolver variante HLS SOLO para fuentes manuales (Disney, Canal 6, Repretel).
-    // Los canales scrapeados de TDMax/Streann usan tokens wmsAuthSign con validminutes=1,
-    // y al pinnear la URL hija (chunks.m3u8), FFmpeg no puede renovar el token → EOF a los ~30s.
-    // Dejando el master playlist, FFmpeg lo re-lee periódicamente y el CDN renueva las URLs hijas.
+    // === Estrategia de selección de variante HLS ===
+    // MANUALES (Disney, Canal 6, Repretel): pinnear URL hija directa (tokens largos/inexistentes)
+    // SCRAPEADOS (TDMax): mantener master playlist vivo (token de 1min necesita renovación del CDN)
+    //   pero forzar el programa 720p con -map 0:p:N para evitar cambios de calidad
     const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
-    const shouldResolveVariant = isManualUrlProcess;
-    if (shouldResolveVariant) {
+    let hlsProgramIndex = -1; // -1 = sin forzar programa específico
+
+    if (isManualUrlProcess) {
+      // Canales manuales: resolver y pinnear URL hija directamente
       const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
         targetBandwidth: preferredBandwidth,
@@ -1192,7 +1194,6 @@ app.post('/api/emit', async (req, res) => {
         cookies: sessionCookies,
       });
 
-      // Filtrar variantes con bandwidth=0 (como "original.m3u8" de Repretel que cuelga FFmpeg)
       const validVariants = (allVariants || []).filter(v => v.bandwidth > 0);
 
       if (validVariants.length > 0 && bandwidth === 0) {
@@ -1208,6 +1209,39 @@ app.post('/api/emit', async (req, res) => {
         sendLog(process_id, 'success', `📺 Variante HLS fijada → ${resolution} @ ${Math.round(bandwidth / 1000)}kbps`);
       } else {
         sendLog(process_id, 'info', `📺 Fuente: URL directa`);
+      }
+    } else if (isScrapedChannel) {
+      // Canales scrapeados: NO pinnear URL (master se mantiene para renovación de sesión CDN)
+      // pero sí identificar el programa 720p para forzarlo con -map
+      try {
+        const { bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
+          targetBandwidth: 0,
+          headers: {
+            Referer: refererDomain,
+            Origin: originDomain,
+            ...(authorizationValue ? { Authorization: authorizationValue } : {}),
+          },
+          cookies: sessionCookies,
+        });
+
+        // Buscar la variante 720p (o la de mayor bandwidth con resolución válida)
+        const validVariants = (allVariants || []).filter(v => v.bandwidth > 0 && v.resolution);
+        if (validVariants.length > 0) {
+          // Preferir 720p explícito, sino la de mayor bandwidth válida
+          const target720 = validVariants.find(v => v.resolution && v.resolution.includes('720'));
+          const best = target720 || validVariants[validVariants.length - 1];
+          hlsProgramIndex = best.programIndex;
+          sendLog(process_id, 'success', `📺 Programa HLS fijado → p:${hlsProgramIndex} (${best.resolution} @ ${Math.round(best.bandwidth / 1000)}kbps) [master vivo]`);
+        } else if (allVariants && allVariants.length > 0) {
+          // Todas las variantes sin resolución válida — usar la primera con mayor bandwidth
+          const sorted = [...allVariants].filter(v => v.bandwidth > 0).sort((a,b) => b.bandwidth - a.bandwidth);
+          if (sorted.length > 0) {
+            hlsProgramIndex = sorted[0].programIndex;
+            sendLog(process_id, 'success', `📺 Programa HLS fijado → p:${hlsProgramIndex} (${Math.round(sorted[0].bandwidth / 1000)}kbps) [master vivo]`);
+          }
+        }
+      } catch (err) {
+        sendLog(process_id, 'warn', `⚠️ No se pudo analizar master HLS: ${err.message} — FFmpeg elegirá automáticamente`);
       }
     }
 
@@ -1231,7 +1265,11 @@ app.post('/api/emit', async (req, res) => {
       '-analyzeduration', analyzeDuration,
       '-probesize', probeSize,
       '-i', inputSourceUrl,
-      '-map', '0:v:0?', '-map', '0:a:0?',
+      // Si hlsProgramIndex >= 0, forzar ese programa HLS específico (720p) dentro del master playlist.
+      // Esto evita que FFmpeg cambie de variante/calidad sin romper la renovación del token CDN.
+      ...(hlsProgramIndex >= 0
+        ? ['-map', `0:p:${hlsProgramIndex}:v?`, '-map', `0:p:${hlsProgramIndex}:a?`]
+        : ['-map', '0:v:0?', '-map', '0:a:0?']),
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-profile:v', 'main',
