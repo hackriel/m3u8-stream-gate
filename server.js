@@ -1039,15 +1039,8 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // Procesos sin -re: arrancar 3 segmentos atrás del live edge para buffer natural
-    if (usesNoRe) {
-      hardenedLiveInputArgs.push(
-        '-live_start_index', '-3',
-      );
-      if (!isManualProcess) {
-        hardenedLiveInputArgs.push('-http_seekable', '0');
-      }
-    }
+    // Sin -re: no se necesitan flags adicionales de HLS.
+    // HLS se auto-regula al live edge, y los CDNs de paga (TDMax/Streann) entregan streams limpios.
     // -re solo para procesos que lo necesitan (Disney 7 y Canal 6)
     if (!usesNoRe) {
       hardenedLiveInputArgs.push('-re');
@@ -1196,8 +1189,7 @@ app.post('/api/emit', async (req, res) => {
     const outputFps = isCfrOutput ? '29.97' : '30';
     const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
-    // fflags: genpts + discardcorrupt para todos los procesos sin -re (manejar discontinuidades HLS)
-    const fflags = usesNoRe ? '+genpts+discardcorrupt' : '+genpts';
+    const fflags = '+genpts';
 
     ffmpegArgs = [
       ...inputArgs,
@@ -1205,7 +1197,6 @@ app.post('/api/emit', async (req, res) => {
       '-fflags', fflags,
       '-analyzeduration', analyzeDuration,
       '-probesize', probeSize,
-      ...(usesNoRe ? ['-err_detect', 'ignore_err'] : []), // Ignorar errores de decode en discontinuidades
       '-i', inputSourceUrl,
       '-map', '0:v:0?', '-map', '0:a:0?',
       '-c:v', 'libx264',
@@ -1226,7 +1217,6 @@ app.post('/api/emit', async (req, res) => {
       '-ar', '44100',
       '-max_muxing_queue_size', '1024',
       '-reset_timestamps', '1',
-      '-avoid_negative_ts', 'make_zero', // Normalizar timestamps en discontinuidades HLS (evita saltos de PTS al RTMP)
       '-f', 'flv',
       '-flvflags', 'no_duration_filesize',
       '-rtmp_live', 'live',
