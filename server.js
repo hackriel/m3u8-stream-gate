@@ -1174,15 +1174,26 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
-    // Procesos manuales: resolver mejor variante HLS (1 fetch rápido, sin listar todas)
+    // Resolver variante HLS final antes de FFmpeg tanto en fuentes manuales como scrapeadas.
+    // Esto evita que FFmpeg tenga que navegar el master playlist completo y reduce cambios raros
+    // entre programas/variants que suelen sentirse como reloads o arranques inestables.
     const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
-    if (isManualUrlProcess) {
+    const shouldResolveVariant = isManualUrlProcess || isScrapedChannel;
+    if (shouldResolveVariant) {
       const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
-      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, preferredBandwidth);
-      
+      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
+        targetBandwidth: preferredBandwidth,
+        headers: {
+          Referer: refererDomain,
+          Origin: originDomain,
+          ...(authorizationValue ? { Authorization: authorizationValue } : {}),
+        },
+        cookies: sessionCookies,
+      });
+
       // Filtrar variantes con bandwidth=0 (como "original.m3u8" de Repretel que cuelga FFmpeg)
       const validVariants = (allVariants || []).filter(v => v.bandwidth > 0);
-      
+
       if (validVariants.length > 0 && bandwidth === 0) {
         const bestValid = validVariants[validVariants.length - 1];
         let bestUrl = bestValid.url;
@@ -1190,10 +1201,10 @@ app.post('/api/emit', async (req, res) => {
           bestUrl = new URL(bestUrl, new URL(inputSourceUrl)).toString();
         }
         inputSourceUrl = bestUrl;
-        sendLog(process_id, 'success', `📺 Fuente → ${bestValid.resolution || '?'} @ ${Math.round(bestValid.bandwidth / 1000)}kbps`);
+        sendLog(process_id, 'success', `📺 Variante HLS fijada → ${bestValid.resolution || '?'} @ ${Math.round(bestValid.bandwidth / 1000)}kbps`);
       } else if (bandwidth > 0) {
         inputSourceUrl = resolvedUrl;
-        sendLog(process_id, 'success', `📺 Fuente → ${resolution} @ ${Math.round(bandwidth / 1000)}kbps`);
+        sendLog(process_id, 'success', `📺 Variante HLS fijada → ${resolution} @ ${Math.round(bandwidth / 1000)}kbps`);
       } else {
         sendLog(process_id, 'info', `📺 Fuente: URL directa`);
       }
