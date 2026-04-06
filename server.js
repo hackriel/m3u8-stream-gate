@@ -1057,31 +1057,35 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // SIN -re para canales scrapeados: el fps alto en logs es solo velocidad de encoding del CPU,
-    // NO la tasa de frames de salida (esa la controlan -r 29.97 y -vsync cfr).
-    // Con -re, FFmpeg acumula drift progresivo en HLS live → segmentos expiran → reloads.
-    // Sin -re, FFmpeg procesa al ritmo natural del HLS y se estabiliza al live edge.
+    // Mantener -re como pacing de entrada para HLS live.
+    // Quitar -re hace que FFmpeg lea a velocidad CPU, agote segmentos y termine en EOF.
+    // Los reloads deben mitigarse fijando la variante HLS final antes de FFmpeg,
+    // no dejando el master playlist completo al analizador interno.
     const usesReFlag = RE_FLAG_PROCESSES.has(String(process_id));
     if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
       sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
     } else {
-      sendLog(process_id, 'info', `📡 Perfil SIN -re: HLS auto-pacing (fps en logs = velocidad CPU, salida real = ${CFR_OUTPUT_PROCESSES.has(String(process_id)) ? '29.97' : '30'}fps por -r/-vsync cfr)`);
+      sendLog(process_id, 'info', `📡 Perfil SIN -re: salida real = ${CFR_OUTPUT_PROCESSES.has(String(process_id)) ? '29.97' : '30'}fps por -r${CFR_OUTPUT_PROCESSES.has(String(process_id)) ? '/-vsync cfr' : ''}`);
     }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
     const cachedSession = scrapeSessionCache.get(process_id);
     let extraFfmpegInputArgs = [];
     let authorizationHeader = null;
+    let authorizationValue = null;
+    let sessionCookies = null;
     if (cachedSession) {
       const sessionAge = Date.now() - cachedSession.timestamp;
       if (sessionAge < 600000) { // 10 minutos de TTL para cubrir recoveries lentos
         if (cachedSession.cookies) {
+          sessionCookies = cachedSession.cookies;
           extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
           sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
         }
         if (cachedSession.accessToken) {
-          authorizationHeader = `Authorization: Bearer ${cachedSession.accessToken}`;
+          authorizationValue = `Bearer ${cachedSession.accessToken}`;
+          authorizationHeader = `Authorization: ${authorizationValue}`;
           sendLog(process_id, 'info', `🔑 Inyectando accessToken a FFmpeg`);
         }
       } else {
