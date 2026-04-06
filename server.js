@@ -1028,9 +1028,6 @@ app.post('/api/emit', async (req, res) => {
 
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
-    // Procesos sin -re: scrapeados TDMax + Disney 8 (test A/B vs Disney 7 con -re)
-    const noReProcesses = new Set([...Object.keys(CHANNEL_MAP), '10']);
-    const usesNoRe = noReProcesses.has(process_id);
 
     if (isManualProcess || isUnivisionLikeSource) {
       hardenedLiveInputArgs.push(
@@ -1039,16 +1036,11 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // Sin -re: no se necesitan flags adicionales de HLS.
-    // HLS se auto-regula al live edge, y los CDNs de paga (TDMax/Streann) entregan streams limpios.
-    // -re solo para procesos que lo necesitan (Disney 7 y Canal 6)
-    if (!usesNoRe) {
-      hardenedLiveInputArgs.push('-re');
-    } else {
-      const profileLabel = isScrapedChannel ? 'SCRAPEADO' : 'MANUAL SIN -re (test)';
-      sendLog(process_id, 'info', `📡 Perfil ${profileLabel}: HLS auto-pacing, discardcorrupt, live_start_index=-3`);
-    }
-    if (isStableSource && !usesNoRe) {
+    // -re OBLIGATORIO para TODOS los procesos: sin él, FFmpeg procesa a máxima velocidad del CPU
+    // (fps=57+) y bombardea el RTMP con frames más rápido que tiempo real, causando fast-forward.
+    // HLS NO se auto-regula lo suficiente porque al arrancar hay varios segmentos disponibles en el playlist.
+    hardenedLiveInputArgs.push('-re');
+    if (isStableSource) {
       sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: con -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
     }
 
