@@ -148,15 +148,16 @@ const CHANNEL_MAP = {
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
 };
 
-// Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL guardada en DB
-const DIRECT_URL_CHANNELS = {
-};
+// (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
 // Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
 const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 
 // Fuentes estables (watchdogs tolerantes + recovery lento) - solo canales manuales con CDN fijo
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10']);
+// Fuentes que usan -re (lectura a tasa nativa) — solo CDNs fijos y estables
+// Disney 8 (10) se excluye porque su HLS necesita auto-pacing sin -re
+const RE_FLAG_PROCESSES = new Set(['0', '5']);
 // Procesos con cadencia CFR (vsync cfr + 29.97fps) - canales de emisión EXCEPTO Disney 7 (TUDN)
 // Disney 7 (ID 0) usa valores enteros (30fps/GOP60) porque el servidor RTMP destino
 // rechaza conexiones con GOP decimal (59.94) causando Broken pipe a los ~120s
@@ -918,13 +919,18 @@ app.post('/api/emit', async (req, res) => {
 
     // Si ya hay un proceso corriendo para este ID, detenerlo primero
     const existingProcess = ffmpegProcesses.get(process_id);
-    manualStopProcesses.delete(process_id); // Limpiar flag de parada manual al iniciar nueva emisión
     if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
       sendLog(process_id, 'warn', `Deteniendo proceso ffmpeg existente para reinicio`);
+      // Marcar como manual temporalmente para que el close handler del VIEJO proceso no dispare recovery
       manualStopProcesses.add(String(process_id));
       manualStopProcesses.add(Number(process_id));
       existingProcess.process.kill('SIGTERM');
+      await waitForProcessDeath(existingProcess.process, 2000);
       ffmpegProcesses.delete(process_id);
+      // CRÍTICO: Limpiar flag de parada manual DESPUÉS de que el viejo proceso murió
+      // para que el NUEVO proceso pueda hacer recovery si se cae
+      manualStopProcesses.delete(String(process_id));
+      manualStopProcesses.delete(Number(process_id));
       
       // Actualizar el registro anterior como finalizado (solo si Supabase está disponible)
       if (supabase) {
@@ -1040,9 +1046,10 @@ app.post('/api/emit', async (req, res) => {
     // NO la tasa de frames de salida (esa la controlan -r 29.97 y -vsync cfr).
     // Con -re, FFmpeg acumula drift progresivo en HLS live → segmentos expiran → reloads.
     // Sin -re, FFmpeg procesa al ritmo natural del HLS y se estabiliza al live edge.
-    if (isStableSource) {
+    const usesReFlag = RE_FLAG_PROCESSES.has(String(process_id));
+    if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
-      sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: con -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
+      sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
     } else {
       sendLog(process_id, 'info', `📡 Perfil SIN -re: HLS auto-pacing (fps en logs = velocidad CPU, salida real = ${CFR_OUTPUT_PROCESSES.has(String(process_id)) ? '29.97' : '30'}fps por -r/-vsync cfr)`);
     }
@@ -1804,14 +1811,8 @@ app.post('/api/emit', async (req, res) => {
       lastFrameTime.delete(process_id);
     });
 
-    // Timeout de inicio simple
-    setTimeout(() => {
-      const currentStatus = emissionStatuses.get(process_id);
-      const processData = ffmpegProcesses.get(process_id);
-      if (currentStatus === 'starting' && processData && processData.process && !processData.process.killed) {
-        emissionStatuses.set(process_id, 'running');
-      }
-    }, 2000);
+    // NOTA: No forzar 'running' por timeout — el watchdog y el parser de stderr
+    // se encargan de detectar el primer frame y cambiar el estado correctamente.
 
     res.json({ 
       success: true, 
@@ -2134,13 +2135,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       ffmpegProcesses.delete(process_id);
     });
 
-    setTimeout(() => {
-      const currentStatus = emissionStatuses.get(process_id);
-      const processData = ffmpegProcesses.get(process_id);
-      if (currentStatus === 'starting' && processData && processData.process && !processData.process.killed) {
-        emissionStatuses.set(process_id, 'running');
-      }
-    }, 2000);
+    // NOTA: No forzar 'running' por timeout — el parser de stderr detecta el primer frame.
 
     res.json({ 
       success: true, 
@@ -2228,6 +2223,8 @@ app.post('/api/emit/stop', async (req, res) => {
       quickRetryState.delete(process_id);
       lastFrameTime.delete(process_id);
       lastProgressLog.delete(process_id);
+      recoveryAttempts.delete(process_id);
+      scrapeSessionCache.delete(process_id);
       
       emissionStatuses.set(process_id, 'idle');
       sendLog(process_id, 'success', `Emisión detenida correctamente`);
@@ -2292,11 +2289,10 @@ app.post('/api/emit/drop-signal', async (req, res) => {
     }
     
     const channelInfo = CHANNEL_MAP[process_id];
-    const directInfo = DIRECT_URL_CHANNELS[process_id];
     
     // Para procesos sin scraping (Libre=0, Subida=7, etc.), solo matamos FFmpeg
     // y dejamos que la auto-recuperación lo levante con la misma URL
-    const processName = channelInfo ? channelInfo.channelName : (directInfo ? directInfo.channelName : `Proceso ${process_id}`);
+    const processName = channelInfo ? channelInfo.channelName : (CHANNEL_CONFIGS_SERVER[process_id] || `Proceso ${process_id}`);
     
     sendLog(process_id, 'warn', `📡 BOTAR SEÑAL: Forzando caída de ${processName}...`);
     
