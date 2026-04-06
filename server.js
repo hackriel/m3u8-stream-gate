@@ -2135,13 +2135,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       ffmpegProcesses.delete(process_id);
     });
 
-    setTimeout(() => {
-      const currentStatus = emissionStatuses.get(process_id);
-      const processData = ffmpegProcesses.get(process_id);
-      if (currentStatus === 'starting' && processData && processData.process && !processData.process.killed) {
-        emissionStatuses.set(process_id, 'running');
-      }
-    }, 2000);
+    // NOTA: No forzar 'running' por timeout — el parser de stderr detecta el primer frame.
 
     res.json({ 
       success: true, 
