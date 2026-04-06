@@ -723,24 +723,39 @@ const detectAndCategorizeError = (output, processId) => {
 // Función para resolver variante de un master HLS playlist
 // targetBandwidth: si se pasa (en bps), selecciona la variante más cercana sin exceder ese target.
 //                  Si no se pasa o es 0, selecciona la de mayor BANDWIDTH.
-const resolveBestHLSVariant = async (masterUrl, targetBandwidth = 0) => {
+const resolveBestHLSVariant = async (masterUrl, options = {}) => {
+  const {
+    targetBandwidth = 0,
+    headers = {},
+    cookies = null,
+  } = options;
+
   try {
-    const resp = await fetch(masterUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      },
-    });
+    const requestHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      ...headers,
+    };
+
+    if (cookies) {
+      requestHeaders.Cookie = cookies;
+    }
+
+    const resp = await fetch(masterUrl, { headers: requestHeaders });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+
     const body = await resp.text();
-    
+
     // Si no es un master playlist (no tiene #EXT-X-STREAM-INF), devolver la URL original
     if (!body.includes('#EXT-X-STREAM-INF')) {
-      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'direct' };
+      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'direct', allVariants: [] };
     }
-    
+
     // Parsear todas las variantes
     const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
     const variants = [];
-    
+
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
         const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
@@ -748,20 +763,20 @@ const resolveBestHLSVariant = async (masterUrl, targetBandwidth = 0) => {
         const resMatch = lines[i].match(/RESOLUTION=([\dx]+)/);
         const resolution = resMatch ? resMatch[1] : null;
         const variantUrl = lines[i + 1];
-        
+
         if (variantUrl && !variantUrl.startsWith('#')) {
           variants.push({ bandwidth, resolution, url: variantUrl });
         }
       }
     }
-    
+
     if (variants.length === 0) {
-      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'unknown' };
+      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'unknown', allVariants: [] };
     }
 
     // Ordenar por bandwidth ascendente
     variants.sort((a, b) => a.bandwidth - b.bandwidth);
-    
+
     let selected;
     if (targetBandwidth > 0) {
       // Seleccionar la variante más alta que no exceda el target
@@ -772,21 +787,21 @@ const resolveBestHLSVariant = async (masterUrl, targetBandwidth = 0) => {
       // Sin target: tomar la más alta
       selected = variants[variants.length - 1];
     }
-    
+
     let bestUrl = selected.url;
-    
+
     // Resolver URL relativa
     if (!bestUrl.startsWith('http')) {
       const base = new URL(masterUrl);
       bestUrl = new URL(bestUrl, base).toString();
     }
-    
+
     const resolution = selected.resolution || `${Math.round(selected.bandwidth / 1000)}kbps`;
-    
+
     // Log de todas las variantes disponibles para diagnóstico
     const variantList = variants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
     console.log(`HLS variants: [${variantList}] → Selected: ${resolution} @ ${Math.round(selected.bandwidth / 1000)}kbps (target: ${targetBandwidth > 0 ? Math.round(targetBandwidth / 1000) + 'kbps' : 'MAX'})`);
-    
+
     return { resolvedUrl: bestUrl, bandwidth: selected.bandwidth, resolution, allVariants: variants };
   } catch (err) {
     console.error('Error parsing HLS master playlist:', err.message);
@@ -1042,31 +1057,35 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // SIN -re para canales scrapeados: el fps alto en logs es solo velocidad de encoding del CPU,
-    // NO la tasa de frames de salida (esa la controlan -r 29.97 y -vsync cfr).
-    // Con -re, FFmpeg acumula drift progresivo en HLS live → segmentos expiran → reloads.
-    // Sin -re, FFmpeg procesa al ritmo natural del HLS y se estabiliza al live edge.
+    // Mantener -re como pacing de entrada para HLS live.
+    // Quitar -re hace que FFmpeg lea a velocidad CPU, agote segmentos y termine en EOF.
+    // Los reloads deben mitigarse fijando la variante HLS final antes de FFmpeg,
+    // no dejando el master playlist completo al analizador interno.
     const usesReFlag = RE_FLAG_PROCESSES.has(String(process_id));
     if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
       sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
     } else {
-      sendLog(process_id, 'info', `📡 Perfil SIN -re: HLS auto-pacing (fps en logs = velocidad CPU, salida real = ${CFR_OUTPUT_PROCESSES.has(String(process_id)) ? '29.97' : '30'}fps por -r/-vsync cfr)`);
+      sendLog(process_id, 'info', `📡 Perfil SIN -re: salida real = ${CFR_OUTPUT_PROCESSES.has(String(process_id)) ? '29.97' : '30'}fps por -r${CFR_OUTPUT_PROCESSES.has(String(process_id)) ? '/-vsync cfr' : ''}`);
     }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
     const cachedSession = scrapeSessionCache.get(process_id);
     let extraFfmpegInputArgs = [];
     let authorizationHeader = null;
+    let authorizationValue = null;
+    let sessionCookies = null;
     if (cachedSession) {
       const sessionAge = Date.now() - cachedSession.timestamp;
       if (sessionAge < 600000) { // 10 minutos de TTL para cubrir recoveries lentos
         if (cachedSession.cookies) {
+          sessionCookies = cachedSession.cookies;
           extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
           sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
         }
         if (cachedSession.accessToken) {
-          authorizationHeader = `Authorization: Bearer ${cachedSession.accessToken}`;
+          authorizationValue = `Bearer ${cachedSession.accessToken}`;
+          authorizationHeader = `Authorization: ${authorizationValue}`;
           sendLog(process_id, 'info', `🔑 Inyectando accessToken a FFmpeg`);
         }
       } else {
@@ -1155,15 +1174,26 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
-    // Procesos manuales: resolver mejor variante HLS (1 fetch rápido, sin listar todas)
+    // Resolver variante HLS final antes de FFmpeg tanto en fuentes manuales como scrapeadas.
+    // Esto evita que FFmpeg tenga que navegar el master playlist completo y reduce cambios raros
+    // entre programas/variants que suelen sentirse como reloads o arranques inestables.
     const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
-    if (isManualUrlProcess) {
+    const shouldResolveVariant = isManualUrlProcess || isScrapedChannel;
+    if (shouldResolveVariant) {
       const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
-      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, preferredBandwidth);
-      
+      const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
+        targetBandwidth: preferredBandwidth,
+        headers: {
+          Referer: refererDomain,
+          Origin: originDomain,
+          ...(authorizationValue ? { Authorization: authorizationValue } : {}),
+        },
+        cookies: sessionCookies,
+      });
+
       // Filtrar variantes con bandwidth=0 (como "original.m3u8" de Repretel que cuelga FFmpeg)
       const validVariants = (allVariants || []).filter(v => v.bandwidth > 0);
-      
+
       if (validVariants.length > 0 && bandwidth === 0) {
         const bestValid = validVariants[validVariants.length - 1];
         let bestUrl = bestValid.url;
@@ -1171,10 +1201,10 @@ app.post('/api/emit', async (req, res) => {
           bestUrl = new URL(bestUrl, new URL(inputSourceUrl)).toString();
         }
         inputSourceUrl = bestUrl;
-        sendLog(process_id, 'success', `📺 Fuente → ${bestValid.resolution || '?'} @ ${Math.round(bestValid.bandwidth / 1000)}kbps`);
+        sendLog(process_id, 'success', `📺 Variante HLS fijada → ${bestValid.resolution || '?'} @ ${Math.round(bestValid.bandwidth / 1000)}kbps`);
       } else if (bandwidth > 0) {
         inputSourceUrl = resolvedUrl;
-        sendLog(process_id, 'success', `📺 Fuente → ${resolution} @ ${Math.round(bandwidth / 1000)}kbps`);
+        sendLog(process_id, 'success', `📺 Variante HLS fijada → ${resolution} @ ${Math.round(bandwidth / 1000)}kbps`);
       } else {
         sendLog(process_id, 'info', `📺 Fuente: URL directa`);
       }
