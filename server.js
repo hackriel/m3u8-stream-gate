@@ -148,9 +148,7 @@ const CHANNEL_MAP = {
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
 };
 
-// Canales con URL directa (sin scraping TDMax) — recovery reutiliza la misma URL guardada en DB
-const DIRECT_URL_CHANNELS = {
-};
+// (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
 // Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
 const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
