@@ -1027,11 +1027,20 @@ app.post('/api/emit', async (req, res) => {
 
 
     const hardenedLiveInputArgs = [];
+    const isScrapedChannel = !!CHANNEL_MAP[process_id];
     if (isManualProcess || isUnivisionLikeSource) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-max_reload', '1000',
         '-m3u8_hold_counters', '1000'
+      );
+    }
+    // Canales scrapeados TDMax: arrancar 3 segmentos atrás del live edge para tener buffer
+    // y evitar stalls cuando un segmento no está listo al momento exacto de pedirlo
+    if (isScrapedChannel) {
+      hardenedLiveInputArgs.push(
+        '-live_start_index', '-3',
+        '-http_seekable', '0',
       );
     }
     // -re DEBE ir antes de -i (la versión de FFmpeg del VPS no soporta -re como output flag).
