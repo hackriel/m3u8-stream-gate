@@ -1813,14 +1813,8 @@ app.post('/api/emit', async (req, res) => {
       lastFrameTime.delete(process_id);
     });
 
-    // Timeout de inicio simple
-    setTimeout(() => {
-      const currentStatus = emissionStatuses.get(process_id);
-      const processData = ffmpegProcesses.get(process_id);
-      if (currentStatus === 'starting' && processData && processData.process && !processData.process.killed) {
-        emissionStatuses.set(process_id, 'running');
-      }
-    }, 2000);
+    // NOTA: No forzar 'running' por timeout — el watchdog y el parser de stderr
+    // se encargan de detectar el primer frame y cambiar el estado correctamente.
 
     res.json({ 
       success: true, 
