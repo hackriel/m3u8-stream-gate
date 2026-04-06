@@ -1174,11 +1174,12 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
-    // Resolver variante HLS final antes de FFmpeg tanto en fuentes manuales como scrapeadas.
-    // Esto evita que FFmpeg tenga que navegar el master playlist completo y reduce cambios raros
-    // entre programas/variants que suelen sentirse como reloads o arranques inestables.
+    // Resolver variante HLS SOLO para fuentes manuales (Disney, Canal 6, Repretel).
+    // Los canales scrapeados de TDMax/Streann usan tokens wmsAuthSign con validminutes=1,
+    // y al pinnear la URL hija (chunks.m3u8), FFmpeg no puede renovar el token → EOF a los ~30s.
+    // Dejando el master playlist, FFmpeg lo re-lee periódicamente y el CDN renueva las URLs hijas.
     const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
-    const shouldResolveVariant = isManualUrlProcess || isScrapedChannel;
+    const shouldResolveVariant = isManualUrlProcess;
     if (shouldResolveVariant) {
       const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
