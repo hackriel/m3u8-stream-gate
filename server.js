@@ -179,6 +179,27 @@ const scrapeSessionCache = new Map(); // Map<processId, { cookies, accessToken, 
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 
+// Última configuración útil conocida para no depender 100% de la base en un recovery
+const lastKnownStreamState = new Map(); // Map<processId, { source_m3u8, target_rtmp, updatedAt }>
+
+const rememberStreamState = (processId, streamState = {}) => {
+  const key = String(processId);
+  const previous = lastKnownStreamState.get(key) || {};
+  const nextState = Object.fromEntries(
+    Object.entries(streamState).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  );
+
+  lastKnownStreamState.set(key, {
+    ...previous,
+    ...nextState,
+    updatedAt: Date.now(),
+  });
+};
+
+const getRememberedStreamState = (processId) => lastKnownStreamState.get(String(processId)) || null;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Watchdog: última vez que cada proceso produjo frames (timestamp ms)
 
 // Watchdog: última vez que cada proceso produjo frames (timestamp ms)
@@ -188,6 +209,10 @@ const PROGRESS_LOG_INTERVAL = 5000; // Loguear progreso cada 5 segundos
 const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames en running = proceso colgado
 const WATCHDOG_START_TIMEOUT = 25000; // 25 segundos en starting sin primer frame = arranque colgado
 const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
+const SCRAPED_WATCHDOG_START_TIMEOUT = 45000; // TDMax puede tardar más en reenganchar tras jitter del CDN
+const SCRAPED_WATCHDOG_STALL_TIMEOUT = 75000; // Dejar que FFmpeg agote más reintentos internos antes de matar
+const RECOVERY_SCRAPE_ATTEMPTS = 3;
+const RECOVERY_SCRAPE_BACKOFF_MS = 2500;
 const HLS_INPUT_RESILIENCE_ARGS = [
   '-rw_timeout', '5000000', // 5 segundos - reducido de 10s para fallar rápido y no causar stalls de 10s
   '-reconnect', '1',
@@ -205,10 +230,15 @@ setInterval(() => {
     const lastFrame = lastFrameTime.get(processId);
     const status = emissionStatuses.get(processId);
     const runtimeMs = Date.now() - (processData.startTime || Date.now());
+    const isScrapedProcess = !!CHANNEL_MAP[String(processId)];
 
     // Caso 1: proceso pegado arrancando y nunca produjo el primer frame
     // Fuentes estables (Canal 6) tienen más tolerancia porque no usan -re y pueden tardar más
-    const startTimeout = STABLE_SOURCE_PROCESSES.has(String(processId)) ? 45000 : WATCHDOG_START_TIMEOUT;
+    const startTimeout = STABLE_SOURCE_PROCESSES.has(String(processId))
+      ? 45000
+      : isScrapedProcess
+      ? SCRAPED_WATCHDOG_START_TIMEOUT
+      : WATCHDOG_START_TIMEOUT;
     if (status === 'starting' && !lastFrame && runtimeMs > startTimeout) {
       const stalledSecs = Math.floor(runtimeMs / 1000);
       sendLog(processId, 'error', `🐕 WATCHDOG: Arranque colgado — ${stalledSecs}s sin primer frame. Forzando cierre para recovery...`);
@@ -244,7 +274,11 @@ setInterval(() => {
     if (status !== 'running') continue;
     if (!lastFrame) continue;
     
-    const stallTimeout = STABLE_SOURCE_PROCESSES.has(String(processId)) ? 60000 : WATCHDOG_STALL_TIMEOUT;
+    const stallTimeout = STABLE_SOURCE_PROCESSES.has(String(processId))
+      ? 60000
+      : isScrapedProcess
+      ? SCRAPED_WATCHDOG_STALL_TIMEOUT
+      : WATCHDOG_STALL_TIMEOUT;
     const stalledMs = Date.now() - lastFrame;
     if (stalledMs > stallTimeout) {
       const stalledSecs = Math.floor(stalledMs / 1000);
@@ -303,6 +337,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
     // Paso 1: Login — capturar cookies de la respuesta
     const loginResp = await fetch(`${STREANN_BASE_URL}/web/services/v3/external/login?r=${STREANN_RESELLER_ID}`, {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -346,7 +381,10 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
       lbHeaders['Cookie'] = loginCookieStr;
     }
     
-    const lbResp = await fetch(lbUrl, { headers: lbHeaders });
+    const lbResp = await fetch(lbUrl, {
+      headers: lbHeaders,
+      signal: AbortSignal.timeout(15000),
+    });
     
     if (!lbResp.ok) {
       const errorText = await lbResp.text();
@@ -385,6 +423,7 @@ const scrapeStreamUrlRemote = async (channelId, channelName) => {
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
@@ -417,6 +456,35 @@ const scrapeStreamUrl = async (channelId, channelName) => {
   
   // Fallback: Edge Function
   return await scrapeStreamUrlRemote(channelId, channelName);
+};
+
+const scrapeStreamUrlWithRetries = async (process_id, channelId, channelName) => {
+  let lastError = 'No se obtuvo URL';
+
+  for (let attempt = 1; attempt <= RECOVERY_SCRAPE_ATTEMPTS; attempt++) {
+    try {
+      const result = await scrapeStreamUrl(channelId, channelName);
+
+      if (result?.url) {
+        if (attempt > 1) {
+          sendLog(process_id, 'success', `✅ Scraping recuperado en intento ${attempt}/${RECOVERY_SCRAPE_ATTEMPTS}`);
+        }
+        return result;
+      }
+
+      lastError = result?.error || lastError;
+      sendLog(process_id, 'warn', `⚠️ Scraping intento ${attempt}/${RECOVERY_SCRAPE_ATTEMPTS} sin URL: ${lastError}`);
+    } catch (error) {
+      lastError = error?.message || String(error);
+      sendLog(process_id, 'warn', `⚠️ Scraping intento ${attempt}/${RECOVERY_SCRAPE_ATTEMPTS} falló: ${lastError}`);
+    }
+
+    if (attempt < RECOVERY_SCRAPE_ATTEMPTS) {
+      await sleep(RECOVERY_SCRAPE_BACKOFF_MS * attempt);
+    }
+  }
+
+  return { url: null, error: lastError };
 };
 // ==================== FIN SCRAPING ====================
 
@@ -471,6 +539,7 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
   
   let newUrl = null;
   const fallbackUrl = CHANNEL_FALLBACK_URLS[process_id];
+  const rememberedState = getRememberedStreamState(process_id);
   
   // Si es el segundo intento (o más) y hay fallback, usar directamente la URL oficial
   if (attempts >= 2 && fallbackUrl) {
@@ -480,7 +549,7 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
     sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Obteniendo nueva URL...`);
     
     try {
-      const result = await scrapeStreamUrl(channelId, channelName);
+      const result = await scrapeStreamUrlWithRetries(process_id, channelId, channelName);
       
       if (result.url) {
         newUrl = result.url;
@@ -529,6 +598,10 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
     }
     
     let targetRtmp = '';
+    if (rememberedState?.target_rtmp) {
+      targetRtmp = rememberedState.target_rtmp;
+    }
+
     if (supabase) {
       const { data: row } = await supabase
         .from('emission_processes')
@@ -543,6 +616,8 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       autoRecoveryInProgress.set(process_id, false);
       return;
     }
+
+    rememberStreamState(process_id, { source_m3u8: newUrl, target_rtmp: targetRtmp });
     
     if (supabase) {
       await supabase
@@ -912,6 +987,8 @@ app.post('/api/emit', async (req, res) => {
         error: 'Faltan parámetros requeridos: source_m3u8 y target_rtmp' 
       });
     }
+
+    rememberStreamState(process_id, { source_m3u8: effectiveSourceM3u8, target_rtmp });
 
     // (Tigo processes removed — dead code cleaned up)
 
@@ -1570,6 +1647,10 @@ app.post('/api/emit', async (req, res) => {
           
           setTimeout(async () => {
             try {
+              const rememberedState = getRememberedStreamState(process_id);
+              let retrySourceUrl = rememberedState?.source_m3u8 || '';
+              let retryTargetRtmp = rememberedState?.target_rtmp || '';
+
               // Verificar si el usuario detuvo manualmente mientras esperábamos
               if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
                 sendLog(process_id, 'info', `🛑 Retry rápido cancelado: parada manual detectada durante espera`);
@@ -1577,31 +1658,34 @@ app.post('/api/emit', async (req, res) => {
                 manualStopProcesses.delete(Number(process_id));
                 return;
               }
-              if (!supabase) {
-                sendLog(process_id, 'error', '❌ RETRY: Base de datos no disponible, saltando a recovery completo');
-                // Ir directo a recovery completo
-                if (CHANNEL_MAP[process_id]) {
-                  const { channelId, channelName } = CHANNEL_MAP[process_id];
-                  autoRecoverChannel(process_id, channelId, channelName);
+
+              if (supabase) {
+                const { data: procData, error: procError } = await supabase
+                  .from('emission_processes')
+                  .select('m3u8, rtmp')
+                  .eq('id', parseInt(process_id))
+                  .single();
+
+                if (procError) {
+                  sendLog(process_id, 'warn', `⚠️ RETRY: lectura de base falló (${procError.message}), usando memoria local si existe...`);
                 }
-                return;
+
+                retrySourceUrl = procData?.m3u8 || retrySourceUrl;
+                retryTargetRtmp = procData?.rtmp || retryTargetRtmp;
+              } else if (retrySourceUrl && retryTargetRtmp) {
+                sendLog(process_id, 'warn', '⚠️ RETRY: Base no disponible, usando última configuración en memoria');
               }
               
-              const { data: procData } = await supabase
-                .from('emission_processes')
-                .select('m3u8, rtmp')
-                .eq('id', parseInt(process_id))
-                .single();
-              
-              if (procData && procData.m3u8 && procData.rtmp) {
+              if (retrySourceUrl && retryTargetRtmp) {
+                rememberStreamState(process_id, { source_m3u8: retrySourceUrl, target_rtmp: retryTargetRtmp });
                 // Reiniciar con misma URL
                 const emitUrl = `http://localhost:${PORT}/api/emit`;
                 const emitResp = await fetch(emitUrl, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    source_m3u8: procData.m3u8,
-                    target_rtmp: procData.rtmp,
+                    source_m3u8: retrySourceUrl,
+                    target_rtmp: retryTargetRtmp,
                     process_id: process_id,
                     is_recovery: true
                   })
@@ -1622,14 +1706,15 @@ app.post('/api/emit', async (req, res) => {
                   }
                   // Monitorear: si cae de nuevo rápido (<15s), la próxima vez va directo a recovery
                 } else {
-                  sendLog(process_id, 'warn', `⚠️ RETRY RÁPIDO falló, iniciando recovery completo...`);
+                  const errText = await emitResp.text().catch(() => '');
+                  sendLog(process_id, 'warn', `⚠️ RETRY RÁPIDO falló (${emitResp.status}${errText ? `: ${errText.substring(0, 120)}` : ''}), iniciando recovery completo...`);
                   if (CHANNEL_MAP[process_id]) {
                     const { channelId, channelName } = CHANNEL_MAP[process_id];
                     await autoRecoverChannel(process_id, channelId, channelName);
                   }
                 }
               } else {
-                sendLog(process_id, 'warn', `⚠️ RETRY: No hay URL guardada, saltando a recovery completo`);
+                sendLog(process_id, 'warn', `⚠️ RETRY: No hay URL/RTMP guardados ni en base ni en memoria, saltando a recovery completo`);
                 if (CHANNEL_MAP[process_id]) {
                   const { channelId, channelName } = CHANNEL_MAP[process_id];
                   await autoRecoverChannel(process_id, channelId, channelName);
