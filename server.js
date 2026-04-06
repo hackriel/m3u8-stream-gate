@@ -1217,7 +1217,6 @@ app.post('/api/emit', async (req, res) => {
       '-ar', '44100',
       '-max_muxing_queue_size', '1024',
       '-reset_timestamps', '1',
-      '-avoid_negative_ts', 'make_zero', // Normalizar timestamps en discontinuidades HLS (evita saltos de PTS al RTMP)
       '-f', 'flv',
       '-flvflags', 'no_duration_filesize',
       '-rtmp_live', 'live',
