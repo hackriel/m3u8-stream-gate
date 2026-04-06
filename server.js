@@ -723,24 +723,39 @@ const detectAndCategorizeError = (output, processId) => {
 // Función para resolver variante de un master HLS playlist
 // targetBandwidth: si se pasa (en bps), selecciona la variante más cercana sin exceder ese target.
 //                  Si no se pasa o es 0, selecciona la de mayor BANDWIDTH.
-const resolveBestHLSVariant = async (masterUrl, targetBandwidth = 0) => {
+const resolveBestHLSVariant = async (masterUrl, options = {}) => {
+  const {
+    targetBandwidth = 0,
+    headers = {},
+    cookies = null,
+  } = options;
+
   try {
-    const resp = await fetch(masterUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      },
-    });
+    const requestHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      ...headers,
+    };
+
+    if (cookies) {
+      requestHeaders.Cookie = cookies;
+    }
+
+    const resp = await fetch(masterUrl, { headers: requestHeaders });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+
     const body = await resp.text();
-    
+
     // Si no es un master playlist (no tiene #EXT-X-STREAM-INF), devolver la URL original
     if (!body.includes('#EXT-X-STREAM-INF')) {
-      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'direct' };
+      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'direct', allVariants: [] };
     }
-    
+
     // Parsear todas las variantes
     const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
     const variants = [];
-    
+
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
         const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
@@ -748,20 +763,20 @@ const resolveBestHLSVariant = async (masterUrl, targetBandwidth = 0) => {
         const resMatch = lines[i].match(/RESOLUTION=([\dx]+)/);
         const resolution = resMatch ? resMatch[1] : null;
         const variantUrl = lines[i + 1];
-        
+
         if (variantUrl && !variantUrl.startsWith('#')) {
           variants.push({ bandwidth, resolution, url: variantUrl });
         }
       }
     }
-    
+
     if (variants.length === 0) {
-      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'unknown' };
+      return { resolvedUrl: masterUrl, bandwidth: 0, resolution: 'unknown', allVariants: [] };
     }
 
     // Ordenar por bandwidth ascendente
     variants.sort((a, b) => a.bandwidth - b.bandwidth);
-    
+
     let selected;
     if (targetBandwidth > 0) {
       // Seleccionar la variante más alta que no exceda el target
@@ -772,21 +787,21 @@ const resolveBestHLSVariant = async (masterUrl, targetBandwidth = 0) => {
       // Sin target: tomar la más alta
       selected = variants[variants.length - 1];
     }
-    
+
     let bestUrl = selected.url;
-    
+
     // Resolver URL relativa
     if (!bestUrl.startsWith('http')) {
       const base = new URL(masterUrl);
       bestUrl = new URL(bestUrl, base).toString();
     }
-    
+
     const resolution = selected.resolution || `${Math.round(selected.bandwidth / 1000)}kbps`;
-    
+
     // Log de todas las variantes disponibles para diagnóstico
     const variantList = variants.map(v => `${v.resolution || '?'} @ ${Math.round(v.bandwidth / 1000)}kbps`).join(' | ');
     console.log(`HLS variants: [${variantList}] → Selected: ${resolution} @ ${Math.round(selected.bandwidth / 1000)}kbps (target: ${targetBandwidth > 0 ? Math.round(targetBandwidth / 1000) + 'kbps' : 'MAX'})`);
-    
+
     return { resolvedUrl: bestUrl, bandwidth: selected.bandwidth, resolution, allVariants: variants };
   } catch (err) {
     console.error('Error parsing HLS master playlist:', err.message);
