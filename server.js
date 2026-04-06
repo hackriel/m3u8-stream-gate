@@ -1043,9 +1043,10 @@ app.post('/api/emit', async (req, res) => {
     // NO la tasa de frames de salida (esa la controlan -r 29.97 y -vsync cfr).
     // Con -re, FFmpeg acumula drift progresivo en HLS live → segmentos expiran → reloads.
     // Sin -re, FFmpeg procesa al ritmo natural del HLS y se estabiliza al live edge.
-    if (isStableSource) {
+    const usesReFlag = RE_FLAG_PROCESSES.has(String(process_id));
+    if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
-      sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: con -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
+      sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
     } else {
       sendLog(process_id, 'info', `📡 Perfil SIN -re: HLS auto-pacing (fps en logs = velocidad CPU, salida real = ${CFR_OUTPUT_PROCESSES.has(String(process_id)) ? '29.97' : '30'}fps por -r/-vsync cfr)`);
     }
