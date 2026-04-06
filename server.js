@@ -1028,9 +1028,6 @@ app.post('/api/emit', async (req, res) => {
 
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
-    // Procesos sin -re: scrapeados TDMax + Disney 8 (test A/B vs Disney 7 con -re)
-    const noReProcesses = new Set([...Object.keys(CHANNEL_MAP), '10']);
-    const usesNoRe = noReProcesses.has(process_id);
 
     if (isManualProcess || isUnivisionLikeSource) {
       hardenedLiveInputArgs.push(
