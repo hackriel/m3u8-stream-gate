@@ -1265,7 +1265,11 @@ app.post('/api/emit', async (req, res) => {
       '-analyzeduration', analyzeDuration,
       '-probesize', probeSize,
       '-i', inputSourceUrl,
-      '-map', '0:v:0?', '-map', '0:a:0?',
+      // Si hlsProgramIndex >= 0, forzar ese programa HLS específico (720p) dentro del master playlist.
+      // Esto evita que FFmpeg cambie de variante/calidad sin romper la renovación del token CDN.
+      ...(hlsProgramIndex >= 0
+        ? ['-map', `0:p:${hlsProgramIndex}:v?`, '-map', `0:p:${hlsProgramIndex}:a?`]
+        : ['-map', '0:v:0?', '-map', '0:a:0?']),
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-profile:v', 'main',
