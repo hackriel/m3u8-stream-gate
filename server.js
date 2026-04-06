@@ -188,12 +188,12 @@ const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames en running = pro
 const WATCHDOG_START_TIMEOUT = 25000; // 25 segundos en starting sin primer frame = arranque colgado
 const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
 const HLS_INPUT_RESILIENCE_ARGS = [
-  '-rw_timeout', '10000000', // 10 segundos - tope máximo si la conexión se cuelga sin respuesta
+  '-rw_timeout', '5000000', // 5 segundos - reducido de 10s para fallar rápido y no causar stalls de 10s
   '-reconnect', '1',
   '-reconnect_streamed', '1',
   '-reconnect_at_eof', '1',
   '-reconnect_on_http_error', '5xx',
-  '-reconnect_delay_max', '5',
+  '-reconnect_delay_max', '3', // 3s max entre reintentos (antes 5s) para recovery más ágil
 ];
 
 // Watchdog interval: detecta procesos FFmpeg colgados, tanto en arranque como en ejecución
@@ -1027,11 +1027,20 @@ app.post('/api/emit', async (req, res) => {
 
 
     const hardenedLiveInputArgs = [];
+    const isScrapedChannel = !!CHANNEL_MAP[process_id];
     if (isManualProcess || isUnivisionLikeSource) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-max_reload', '1000',
         '-m3u8_hold_counters', '1000'
+      );
+    }
+    // Canales scrapeados TDMax: arrancar 3 segmentos atrás del live edge para tener buffer
+    // y evitar stalls cuando un segmento no está listo al momento exacto de pedirlo
+    if (isScrapedChannel) {
+      hardenedLiveInputArgs.push(
+        '-live_start_index', '-3',
+        '-http_seekable', '0',
       );
     }
     // -re DEBE ir antes de -i (la versión de FFmpeg del VPS no soporta -re como output flag).
@@ -1178,12 +1187,16 @@ app.post('/api/emit', async (req, res) => {
     const outputFps = isCfrOutput ? '29.97' : '30';
     const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
+    // fflags: genpts (generar PTS) + discardcorrupt (descartar frames corruptos en discontinuidades HLS)
+    const fflags = isScrapedChannel ? '+genpts+discardcorrupt' : '+genpts';
+
     ffmpegArgs = [
       ...inputArgs,
       ...hardenedLiveInputArgs,
-      '-fflags', '+genpts',
+      '-fflags', fflags,
       '-analyzeduration', analyzeDuration,
       '-probesize', probeSize,
+      ...(isScrapedChannel ? ['-err_detect', 'ignore_err'] : []), // Ignorar errores de decode en discontinuidades
       '-i', inputSourceUrl,
       '-map', '0:v:0?', '-map', '0:a:0?',
       '-c:v', 'libx264',
@@ -1204,6 +1217,7 @@ app.post('/api/emit', async (req, res) => {
       '-ar', '44100',
       '-max_muxing_queue_size', '1024',
       '-reset_timestamps', '1',
+      '-avoid_negative_ts', 'make_zero', // Normalizar timestamps en discontinuidades HLS (evita saltos de PTS al RTMP)
       '-f', 'flv',
       '-flvflags', 'no_duration_filesize',
       '-rtmp_live', 'live',
