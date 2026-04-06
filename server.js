@@ -1187,12 +1187,16 @@ app.post('/api/emit', async (req, res) => {
     const outputFps = isCfrOutput ? '29.97' : '30';
     const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
+    // fflags: genpts (generar PTS) + discardcorrupt (descartar frames corruptos en discontinuidades HLS)
+    const fflags = isScrapedChannel ? '+genpts+discardcorrupt' : '+genpts';
+
     ffmpegArgs = [
       ...inputArgs,
       ...hardenedLiveInputArgs,
-      '-fflags', '+genpts',
+      '-fflags', fflags,
       '-analyzeduration', analyzeDuration,
       '-probesize', probeSize,
+      ...(isScrapedChannel ? ['-err_detect', 'ignore_err'] : []), // Ignorar errores de decode en discontinuidades
       '-i', inputSourceUrl,
       '-map', '0:v:0?', '-map', '0:a:0?',
       '-c:v', 'libx264',
@@ -1213,6 +1217,7 @@ app.post('/api/emit', async (req, res) => {
       '-ar', '44100',
       '-max_muxing_queue_size', '1024',
       '-reset_timestamps', '1',
+      '-avoid_negative_ts', 'make_zero', // Normalizar timestamps en discontinuidades HLS (evita saltos de PTS al RTMP)
       '-f', 'flv',
       '-flvflags', 'no_duration_filesize',
       '-rtmp_live', 'live',
