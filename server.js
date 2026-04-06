@@ -1051,10 +1051,13 @@ app.post('/api/emit', async (req, res) => {
     //   - Después de minutos, FFmpeg queda atrás del live edge, los segmentos expiran del playlist
     //   - Resultado: reload + salto = la causa raíz de los "reloads de 10 segundos"
     //   - Sin -re, el CFR (29.97fps) + CBR (2000k) ya garantizan salida a velocidad constante
-    if (!isScrapedChannel) {
+    const noReProcesses = new Set([...Object.keys(CHANNEL_MAP), '10']); // Scrapeados + Disney 8 (test sin -re)
+    if (!noReProcesses.has(process_id)) {
       hardenedLiveInputArgs.push('-re');
-    } else {
+    } else if (isScrapedChannel) {
       sendLog(process_id, 'info', `📡 Perfil SCRAPEADO: SIN -re (HLS auto-pacing), discardcorrupt, live_start_index=-3`);
+    } else {
+      sendLog(process_id, 'info', `📡 Perfil MANUAL SIN -re (test): Disney 8 usando HLS auto-pacing para comparar vs Disney 7 con -re`);
     }
     if (isStableSource) {
       sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: con -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
