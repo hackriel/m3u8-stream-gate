@@ -921,13 +921,18 @@ app.post('/api/emit', async (req, res) => {
 
     // Si ya hay un proceso corriendo para este ID, detenerlo primero
     const existingProcess = ffmpegProcesses.get(process_id);
-    manualStopProcesses.delete(process_id); // Limpiar flag de parada manual al iniciar nueva emisión
     if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
       sendLog(process_id, 'warn', `Deteniendo proceso ffmpeg existente para reinicio`);
+      // Marcar como manual temporalmente para que el close handler del VIEJO proceso no dispare recovery
       manualStopProcesses.add(String(process_id));
       manualStopProcesses.add(Number(process_id));
       existingProcess.process.kill('SIGTERM');
+      await waitForProcessDeath(existingProcess.process, 2000);
       ffmpegProcesses.delete(process_id);
+      // CRÍTICO: Limpiar flag de parada manual DESPUÉS de que el viejo proceso murió
+      // para que el NUEVO proceso pueda hacer recovery si se cae
+      manualStopProcesses.delete(String(process_id));
+      manualStopProcesses.delete(Number(process_id));
       
       // Actualizar el registro anterior como finalizado (solo si Supabase está disponible)
       if (supabase) {
