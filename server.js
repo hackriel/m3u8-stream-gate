@@ -765,7 +765,7 @@ const resolveBestHLSVariant = async (masterUrl, options = {}) => {
         const variantUrl = lines[i + 1];
 
         if (variantUrl && !variantUrl.startsWith('#')) {
-          variants.push({ bandwidth, resolution, url: variantUrl });
+          variants.push({ bandwidth, resolution, url: variantUrl, programIndex: variants.length });
         }
       }
     }
