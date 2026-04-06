@@ -2229,6 +2229,8 @@ app.post('/api/emit/stop', async (req, res) => {
       quickRetryState.delete(process_id);
       lastFrameTime.delete(process_id);
       lastProgressLog.delete(process_id);
+      recoveryAttempts.delete(process_id);
+      scrapeSessionCache.delete(process_id);
       
       emissionStatuses.set(process_id, 'idle');
       sendLog(process_id, 'success', `Emisión detenida correctamente`);
