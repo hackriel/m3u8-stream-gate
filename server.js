@@ -1043,9 +1043,19 @@ app.post('/api/emit', async (req, res) => {
         '-http_seekable', '0',
       );
     }
-    // -re DEBE ir antes de -i (la versión de FFmpeg del VPS no soporta -re como output flag).
-    // Para acelerar el arranque, usamos analyzeduration/probesize reducidos.
-    hardenedLiveInputArgs.push('-re');
+    // -re: Solo para canales MANUALES/ESTABLES (0, 5, 10) donde la fuente es directa/estable.
+    // Para canales SCRAPEADOS de TDMax (1, 3, 4, 6), NO usar -re porque:
+    //   - HLS ya se auto-regula (no podés pedir segmentos que no existen en el playlist)
+    //   - -re agrega un throttle ADICIONAL sobre esa regulación natural
+    //   - El encoding toma tiempo de CPU, y con -re se acumula drift progresivo
+    //   - Después de minutos, FFmpeg queda atrás del live edge, los segmentos expiran del playlist
+    //   - Resultado: reload + salto = la causa raíz de los "reloads de 10 segundos"
+    //   - Sin -re, el CFR (29.97fps) + CBR (2000k) ya garantizan salida a velocidad constante
+    if (!isScrapedChannel) {
+      hardenedLiveInputArgs.push('-re');
+    } else {
+      sendLog(process_id, 'info', `📡 Perfil SCRAPEADO: SIN -re (HLS auto-pacing), discardcorrupt, live_start_index=-3`);
+    }
     if (isStableSource) {
       sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: con -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
     }
