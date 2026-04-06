@@ -1028,6 +1028,10 @@ app.post('/api/emit', async (req, res) => {
 
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
+    // Procesos sin -re: scrapeados TDMax + Disney 8 (test A/B vs Disney 7 con -re)
+    const noReProcesses = new Set([...Object.keys(CHANNEL_MAP), '10']);
+    const usesNoRe = noReProcesses.has(process_id);
+
     if (isManualProcess || isUnivisionLikeSource) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
@@ -1035,31 +1039,23 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // Canales scrapeados TDMax: arrancar 3 segmentos atrás del live edge para tener buffer
-    // y evitar stalls cuando un segmento no está listo al momento exacto de pedirlo
-    if (isScrapedChannel) {
+    // Procesos sin -re: arrancar 3 segmentos atrás del live edge para buffer natural
+    if (usesNoRe) {
       hardenedLiveInputArgs.push(
         '-live_start_index', '-3',
-        '-http_seekable', '0',
       );
+      if (!isManualProcess) {
+        hardenedLiveInputArgs.push('-http_seekable', '0');
+      }
     }
-    // -re: Solo para canales MANUALES/ESTABLES (0, 5, 10) donde la fuente es directa/estable.
-    // Para canales SCRAPEADOS de TDMax (1, 3, 4, 6), NO usar -re porque:
-    //   - HLS ya se auto-regula (no podés pedir segmentos que no existen en el playlist)
-    //   - -re agrega un throttle ADICIONAL sobre esa regulación natural
-    //   - El encoding toma tiempo de CPU, y con -re se acumula drift progresivo
-    //   - Después de minutos, FFmpeg queda atrás del live edge, los segmentos expiran del playlist
-    //   - Resultado: reload + salto = la causa raíz de los "reloads de 10 segundos"
-    //   - Sin -re, el CFR (29.97fps) + CBR (2000k) ya garantizan salida a velocidad constante
-    const noReProcesses = new Set([...Object.keys(CHANNEL_MAP), '10']); // Scrapeados + Disney 8 (test sin -re)
-    if (!noReProcesses.has(process_id)) {
+    // -re solo para procesos que lo necesitan (Disney 7 y Canal 6)
+    if (!usesNoRe) {
       hardenedLiveInputArgs.push('-re');
-    } else if (isScrapedChannel) {
-      sendLog(process_id, 'info', `📡 Perfil SCRAPEADO: SIN -re (HLS auto-pacing), discardcorrupt, live_start_index=-3`);
     } else {
-      sendLog(process_id, 'info', `📡 Perfil MANUAL SIN -re (test): Disney 8 usando HLS auto-pacing para comparar vs Disney 7 con -re`);
+      const profileLabel = isScrapedChannel ? 'SCRAPEADO' : 'MANUAL SIN -re (test)';
+      sendLog(process_id, 'info', `📡 Perfil ${profileLabel}: HLS auto-pacing, discardcorrupt, live_start_index=-3`);
     }
-    if (isStableSource) {
+    if (isStableSource && !usesNoRe) {
       sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: con -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
     }
 
