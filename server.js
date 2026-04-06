@@ -1036,12 +1036,15 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
     }
-    // -re OBLIGATORIO para TODOS los procesos: sin él, FFmpeg procesa a máxima velocidad del CPU
-    // (fps=57+) y bombardea el RTMP con frames más rápido que tiempo real, causando fast-forward.
-    // HLS NO se auto-regula lo suficiente porque al arrancar hay varios segmentos disponibles en el playlist.
-    hardenedLiveInputArgs.push('-re');
+    // SIN -re para canales scrapeados: el fps alto en logs es solo velocidad de encoding del CPU,
+    // NO la tasa de frames de salida (esa la controlan -r 29.97 y -vsync cfr).
+    // Con -re, FFmpeg acumula drift progresivo en HLS live → segmentos expiran → reloads.
+    // Sin -re, FFmpeg procesa al ritmo natural del HLS y se estabiliza al live edge.
     if (isStableSource) {
+      hardenedLiveInputArgs.push('-re');
       sendLog(process_id, 'info', `📡 Perfil FUENTE ESTABLE: con -re, analyzeduration=${analyzeDuration}, probesize=${probeSize}, watchdog tolerante`);
+    } else {
+      sendLog(process_id, 'info', `📡 Perfil SIN -re: HLS auto-pacing (fps en logs = velocidad CPU, salida real = ${CFR_OUTPUT_PROCESSES.has(String(process_id)) ? '29.97' : '30'}fps por -r/-vsync cfr)`);
     }
 
     // Recuperar sesión de scraping cacheada (cookies + accessToken) para inyectar a FFmpeg
