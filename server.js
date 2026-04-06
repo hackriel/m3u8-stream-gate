@@ -1189,8 +1189,7 @@ app.post('/api/emit', async (req, res) => {
     const outputFps = isCfrOutput ? '29.97' : '30';
     const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
-    // fflags: genpts + discardcorrupt para todos los procesos sin -re (manejar discontinuidades HLS)
-    const fflags = usesNoRe ? '+genpts+discardcorrupt' : '+genpts';
+    const fflags = '+genpts';
 
     ffmpegArgs = [
       ...inputArgs,
@@ -1198,7 +1197,6 @@ app.post('/api/emit', async (req, res) => {
       '-fflags', fflags,
       '-analyzeduration', analyzeDuration,
       '-probesize', probeSize,
-      ...(usesNoRe ? ['-err_detect', 'ignore_err'] : []), // Ignorar errores de decode en discontinuidades
       '-i', inputSourceUrl,
       '-map', '0:v:0?', '-map', '0:a:0?',
       '-c:v', 'libx264',
