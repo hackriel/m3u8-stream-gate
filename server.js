@@ -1258,11 +1258,10 @@ app.post('/api/emit', async (req, res) => {
     const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
     let hlsProgramIndex = -1; // -1 = sin forzar programa específico
 
-    if (isManualUrlProcess) {
-      // Canales manuales: resolver y pinnear URL hija directamente
-      const preferredBandwidth = isUnivisionLikeSource ? 5000000 : 0;
+    if (isManualUrlProcess && !isUnivisionLikeSource) {
+      // Canales manuales con tokens estables: resolver y pinnear URL hija directamente
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
-        targetBandwidth: preferredBandwidth,
+        targetBandwidth: 0,
         headers: {
           Referer: refererDomain,
           Origin: originDomain,
@@ -1287,7 +1286,9 @@ app.post('/api/emit', async (req, res) => {
       } else {
         sendLog(process_id, 'info', `📺 Fuente: URL directa`);
       }
-    } else if (isScrapedChannel) {
+    } else if (isScrapedChannel || isUnivisionLikeSource) {
+      // Canales scrapeados Y fuentes Univision/TUDN: mantener master playlist vivo
+      // (el CDN rota tokens/sesiones en las URLs hijas, pinnear causa EOF)
       // Canales scrapeados: NO pinnear URL (master se mantiene para renovación de sesión CDN)
       // pero sí identificar el programa 720p para forzarlo con -map
       try {
