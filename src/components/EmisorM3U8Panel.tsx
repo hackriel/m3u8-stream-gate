@@ -955,14 +955,6 @@ export default function EmisorM3U8Panel() {
                   ⏹️ Detener emisión
                 </button>
               )}
-              {process.isEmitiendo && (
-                <button 
-                  onClick={() => dropSignal(processIndex)} 
-                  className="px-4 py-3 rounded-xl bg-orange-600 hover:bg-orange-700 active:scale-[.98] transition-all duration-200 font-medium text-white shadow-lg hover:shadow-xl"
-                >
-                  📡 Botar Señal
-                </button>
-              )}
               <button 
                 onClick={() => onBorrar(processIndex)} 
                 className="px-4 py-3 rounded-xl bg-destructive hover:bg-destructive/90 active:scale-[.98] transition-all duration-200 font-medium text-destructive-foreground shadow-lg hover:shadow-xl"
