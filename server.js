@@ -2431,59 +2431,6 @@ app.post('/api/emit/stop', async (req, res) => {
 });
 
 
-// Endpoint para "Botar Señal": fuerza un cambio de señal en caliente
-// Mata FFmpeg, espera que muera, y dispara auto-recovery como si fuera una caída
-app.post('/api/emit/drop-signal', async (req, res) => {
-  try {
-    const { process_id: rawProcessId } = req.body;
-    const process_id = String(rawProcessId ?? '');
-    
-    if (!process_id) {
-      return res.status(400).json({ success: false, error: 'Falta process_id' });
-    }
-    
-    const channelInfo = CHANNEL_MAP[process_id];
-    
-    // Para procesos sin scraping (Libre=0, Subida=7, etc.), solo matamos FFmpeg
-    // y dejamos que la auto-recuperación lo levante con la misma URL
-    const processName = channelInfo ? channelInfo.channelName : (CHANNEL_CONFIGS_SERVER[process_id] || `Proceso ${process_id}`);
-    
-    sendLog(process_id, 'warn', `📡 BOTAR SEÑAL: Forzando caída de ${processName}...`);
-    
-    // Matar proceso existente y esperar que muera completamente
-    const processData = ffmpegProcesses.get(process_id) ?? ffmpegProcesses.get(Number(process_id));
-    if (processData && processData.process && !processData.process.killed) {
-      sendLog(process_id, 'info', '🔪 Terminando proceso FFmpeg actual...');
-      processData.process.kill('SIGTERM');
-      await waitForProcessDeath(processData.process, 4000);
-      ffmpegProcesses.delete(process_id);
-      emissionStatuses.set(process_id, 'idle');
-      sendLog(process_id, 'info', '✔ Proceso anterior terminado - la auto-recuperación debería activarse...');
-    } else {
-      return res.json({ success: false, error: 'No hay proceso FFmpeg activo para matar' });
-    }
-    
-    // Resetear intentos de recuperación
-    recoveryAttempts.set(process_id, 0);
-    
-    if (channelInfo) {
-      // Procesos con scraping: disparar auto-recovery con scraping
-      res.json({ success: true, message: `Botando señal de ${channelInfo.channelName}...` });
-      setTimeout(() => {
-        autoRecoverChannel(process_id, channelInfo.channelId, channelInfo.channelName);
-      }, 500);
-    } else {
-      // Procesos sin scraping (Libre, Subida): solo respondemos OK
-      // La auto-recuperación del handler 'close' de FFmpeg se encargará
-      res.json({ success: true, message: `Señal botada para ${processName}, esperando auto-recuperación...` });
-    }
-    
-  } catch (error) {
-    sendLog(req.body?.process_id || '?', 'error', `Error en drop-signal: ${error.message}`);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 // Nuevo endpoint para eliminar completamente un proceso específico de la base de datos
 app.delete('/api/emit/:process_id', async (req, res) => {
   try {
