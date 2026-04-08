@@ -233,8 +233,15 @@ setInterval(() => {
     const isScrapedProcess = !!CHANNEL_MAP[String(processId)];
 
     // Caso 1: proceso pegado arrancando y nunca produjo el primer frame
-    // Fuentes estables (Canal 6) tienen más tolerancia porque no usan -re y pueden tardar más
-    const startTimeout = STABLE_SOURCE_PROCESSES.has(String(processId))
+    // Univision necesita hasta 90s porque su CDN es lento con IPs de datacenter
+    const isUnivisionProcess = processData.source_m3u8 && (
+      processData.source_m3u8.includes('univision') || 
+      processData.source_m3u8.includes('tudn') || 
+      processData.source_m3u8.includes('vix.com')
+    );
+    const startTimeout = isUnivisionProcess
+      ? 90000  // 90s para Univision (CDN lento con datacenter IPs)
+      : STABLE_SOURCE_PROCESSES.has(String(processId))
       ? 45000
       : isScrapedProcess
       ? SCRAPED_WATCHDOG_START_TIMEOUT
