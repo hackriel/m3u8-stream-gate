@@ -2108,7 +2108,7 @@ app.post('/api/emit', async (req, res) => {
               sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
               autoRecoveryInProgress.set(String(process_id), false);
             }
-          }, 3000); // 3s inicial para liberar socket RTMP
+          });
         }
         } // end circuit breaker else
       }
