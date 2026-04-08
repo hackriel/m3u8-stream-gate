@@ -129,10 +129,81 @@ app.use(express.static(path.join(__dirname, 'dist')));
 // Variables globales para manejo de múltiples procesos ffmpeg
 const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTime, target_rtmp }>
 const emissionStatuses = new Map(); // Map<processId, status>
-const autoRecoveryInProgress = new Map(); // Map<processId, boolean>
+const autoRecoveryInProgress = new Map(); // Map<processId(string), boolean>
 const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hacer auto-recovery)
 const nightRestStoppedProcesses = new Set(); // Procesos apagados por descanso nocturno
 const detectedErrors = new Map(); // Map<processId, { type, reason }> — último error detectado por stderr
+
+// === CIRCUIT BREAKER: evita loops infinitos de recovery que saturan el servidor ===
+// Registra timestamps de cada fallo para detectar "tormenta de caídas"
+const failureTimestamps = new Map(); // Map<processId(string), number[]>
+const CIRCUIT_BREAKER_WINDOW_MS = 10 * 60 * 1000; // 10 minutos
+const CIRCUIT_BREAKER_MAX_FAILURES = 6; // máx 6 caídas en 10 min → detener
+
+const isCircuitBroken = (processId) => {
+  const key = String(processId);
+  const timestamps = failureTimestamps.get(key) || [];
+  const now = Date.now();
+  // Limpiar timestamps fuera de la ventana
+  const recent = timestamps.filter(t => now - t < CIRCUIT_BREAKER_WINDOW_MS);
+  failureTimestamps.set(key, recent);
+  return recent.length >= CIRCUIT_BREAKER_MAX_FAILURES;
+};
+
+const recordFailure = (processId) => {
+  const key = String(processId);
+  const timestamps = failureTimestamps.get(key) || [];
+  timestamps.push(Date.now());
+  failureTimestamps.set(key, timestamps);
+};
+
+const resetCircuitBreaker = (processId) => {
+  failureTimestamps.delete(String(processId));
+};
+
+// === CONCURRENCY LIMITER: máx 2 recoveries simultáneos para no saturar CPU/red ===
+let activeRecoveryCount = 0;
+const MAX_CONCURRENT_RECOVERIES = 2;
+const recoveryQueue = []; // Queue<{ fn: () => Promise<void>, processId: string }>
+
+const enqueueRecovery = (processId, fn) => {
+  const key = String(processId);
+  // Si ya hay un recovery encolado para este proceso, ignorar
+  if (recoveryQueue.some(item => item.processId === key)) {
+    sendLog(processId, 'warn', '⏳ Recovery ya encolado, ignorando duplicado');
+    return;
+  }
+  if (activeRecoveryCount < MAX_CONCURRENT_RECOVERIES) {
+    activeRecoveryCount++;
+    fn().catch(err => {
+      console.error(`Recovery error (process ${key}):`, err.message);
+    }).finally(() => {
+      activeRecoveryCount--;
+      processRecoveryQueue();
+    });
+  } else {
+    sendLog(processId, 'info', `⏳ Recovery encolado (${activeRecoveryCount} activos, esperando turno...)`);
+    recoveryQueue.push({ processId: key, fn });
+  }
+};
+
+const processRecoveryQueue = () => {
+  while (recoveryQueue.length > 0 && activeRecoveryCount < MAX_CONCURRENT_RECOVERIES) {
+    const next = recoveryQueue.shift();
+    // Verificar que no se haya cancelado manualmente mientras esperaba
+    if (manualStopProcesses.has(next.processId) || manualStopProcesses.has(Number(next.processId))) {
+      sendLog(next.processId, 'info', '🛑 Recovery encolado cancelado: parada manual durante espera en cola');
+      continue;
+    }
+    activeRecoveryCount++;
+    next.fn().catch(err => {
+      console.error(`Queued recovery error (process ${next.processId}):`, err.message);
+    }).finally(() => {
+      activeRecoveryCount--;
+      processRecoveryQueue();
+    });
+  }
+};
 
 
 // FUTV Auto-recovery: obtener nueva URL y reiniciar emisión
