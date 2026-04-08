@@ -1308,13 +1308,38 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // === Estrategia de selección de variante HLS ===
-    // MANUALES (Disney, Canal 6, Repretel): pinnear URL hija directa (tokens largos/inexistentes)
+    // MANUALES (Disney): pinnear URL hija directa (tokens largos/inexistentes)
+    // MEDIATIQUESTREAM (Canal 6): program mapping (tokens expiran, master playlist debe vivir)
     // SCRAPEADOS (TDMax): mantener master playlist vivo (token de 1min necesita renovación del CDN)
     //   pero forzar el programa 720p con -map 0:p:N para evitar cambios de calidad
     const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
     let hlsProgramIndex = -1; // -1 = sin forzar programa específico
 
-    if (isManualUrlProcess && !isUnivisionLikeSource) {
+    if (isMediatiqueSource) {
+      // Canal 6 / Mediatiquestream: usar program mapping como canales scrapeados.
+      // Mantener master playlist vivo para que el CDN refresque tokens de segmentos.
+      try {
+        const { bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
+          targetBandwidth: 0,
+          headers: {
+            Referer: refererDomain,
+            Origin: originDomain,
+            ...(authorizationValue ? { Authorization: authorizationValue } : {}),
+          },
+          cookies: sessionCookies,
+        });
+
+        const validVariants = (allVariants || []).filter(v => v.bandwidth > 0 && v.resolution);
+        if (validVariants.length > 0) {
+          const target720 = validVariants.find(v => v.resolution && v.resolution.includes('720'));
+          const best = target720 || validVariants[validVariants.length - 1];
+          hlsProgramIndex = best.programIndex;
+          sendLog(process_id, 'success', `📺 Programa HLS fijado → p:${hlsProgramIndex} (${best.resolution} @ ${Math.round(best.bandwidth / 1000)}kbps) [master vivo, program mapping]`);
+        }
+      } catch (err) {
+        sendLog(process_id, 'warn', `⚠️ No se pudo analizar master HLS: ${err.message} — FFmpeg elegirá automáticamente`);
+      }
+    } else if (isManualUrlProcess && !isUnivisionLikeSource) {
       // Canales manuales con tokens estables: resolver y pinnear URL hija directamente
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
         targetBandwidth: 0,
