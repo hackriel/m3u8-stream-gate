@@ -1107,6 +1107,7 @@ app.post('/api/emit', async (req, res) => {
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
     let isUnivisionLikeSource = false;
+    let isMediatiqueSource = false;
     try {
       const sourceUrl = new URL(effectiveSourceM3u8);
       const hostname = sourceUrl.hostname.toLowerCase();
