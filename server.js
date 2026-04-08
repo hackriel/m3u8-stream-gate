@@ -1127,7 +1127,16 @@ app.post('/api/emit', async (req, res) => {
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
 
-    if (isManualProcess || isUnivisionLikeSource || isScrapedChannel) {
+    if (isUnivisionLikeSource) {
+      // Univision: minimal HLS flags, let the HLS demuxer handle everything internally.
+      // -http_seekable 0 prevents byte-offset resume which Univision CDN rejects.
+      // -live_start_index -3 starts from recent segments (avoids downloading old expired ones).
+      // NO -max_reload/-m3u8_hold_counters: these cause extra requests that trigger CDN blocking.
+      hardenedLiveInputArgs.push(
+        '-http_seekable', '0',
+        '-live_start_index', '-3'
+      );
+    } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-max_reload', '1000',
