@@ -1180,16 +1180,30 @@ app.post('/api/emit', async (req, res) => {
     // Para procesos manuales con fuentes estables (Canal 6, Disney), usar args de resiliencia reforzados
     // reconnect_delay_max=15 da a FFmpeg hasta ~30s de reintentos internos (0+1+3+5+5+5+5=24s)
     // antes de salir, cubriendo caídas transitorias del CDN sin necesidad de recovery externo
-    const effectiveResilienceArgs = isManualProcess
-      ? [
-          '-rw_timeout', '15000000',   // 15s (más tolerante que los 10s globales)
-          '-reconnect', '1',
-          '-reconnect_streamed', '1',
-          '-reconnect_at_eof', '1',
-          '-reconnect_on_http_error', '4xx,5xx',  // Cubrir 403/404 transitorios del CDN
-          '-reconnect_delay_max', '15',            // 15s max entre reintentos (antes 5s, muy agresivo)
-        ]
-      : HLS_INPUT_RESILIENCE_ARGS;
+    // IMPORTANTE: Univision/TUDN NO debe usar -reconnect_at_eof ni -reconnect_streamed
+    // porque su CDN rechaza reconexiones HTTP a byte-offset, causando un loop infinito de EOF.
+    // El demuxer HLS interno de FFmpeg ya maneja la rotación de segmentos correctamente.
+    let effectiveResilienceArgs;
+    if (isUnivisionLikeSource) {
+      effectiveResilienceArgs = [
+        '-rw_timeout', '20000000',   // 20s (dar más tiempo al CDN de Univision)
+        '-reconnect', '1',
+        '-reconnect_on_http_error', '4xx,5xx',
+        '-reconnect_delay_max', '5',
+      ];
+      sendLog(process_id, 'info', `🔧 Univision: sin reconnect_at_eof/reconnect_streamed (evita loop EOF)`);
+    } else if (isManualProcess) {
+      effectiveResilienceArgs = [
+        '-rw_timeout', '15000000',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_on_http_error', '4xx,5xx',
+        '-reconnect_delay_max', '15',
+      ];
+    } else {
+      effectiveResilienceArgs = HLS_INPUT_RESILIENCE_ARGS;
+    }
 
     const inputArgs = [
       ...effectiveResilienceArgs,
