@@ -2107,6 +2107,7 @@ app.post('/api/emit', async (req, res) => {
             }
           }, 3000); // 3s inicial para liberar socket RTMP
         }
+        } // end circuit breaker else
       }
     });
 
