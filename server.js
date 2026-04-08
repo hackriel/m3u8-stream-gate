@@ -1385,19 +1385,21 @@ app.post('/api/emit', async (req, res) => {
     const outputFps = isCfrOutput ? '29.97' : '30';
     const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
-    const fflags = '+genpts';
+    const fflags = isUnivisionLikeSource ? '+genpts+discardcorrupt' : '+genpts';
 
     ffmpegArgs = [
       ...inputArgs,
       ...hardenedLiveInputArgs,
       '-fflags', fflags,
-      '-analyzeduration', analyzeDuration,
-      '-probesize', probeSize,
+      '-analyzeduration', isUnivisionLikeSource ? '10000000' : analyzeDuration,  // 10s para Univision (5 programas + subtítulos)
+      '-probesize', isUnivisionLikeSource ? '5000000' : probeSize,               // 5MB para Univision
       '-i', inputSourceUrl,
-      // Si hlsProgramIndex >= 0, mapear el programa HLS completo.
-      // En master playlists como Univision/TUDN, usar :v/:a sobre p:N puede dejar
-      // a FFmpeg sin streams seleccionados aunque el programa exista.
-      ...(hlsProgramIndex >= 0
+      // Univision: auto-selección + skip subtítulos EIA-608
+      // Scrapeados: map por programa HLS
+      // Otros: map genérico video+audio
+      ...(isUnivisionLikeSource
+        ? ['-map', '0:v:0?', '-map', '0:a:0?', '-sn']  // -sn = skip subtitles
+        : hlsProgramIndex >= 0
         ? ['-map', `0:p:${hlsProgramIndex}`]
         : ['-map', '0:v:0?', '-map', '0:a:0?']),
       '-c:v', 'libx264',
