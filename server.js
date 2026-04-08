@@ -1194,13 +1194,14 @@ app.post('/api/emit', async (req, res) => {
     // El demuxer HLS interno de FFmpeg ya maneja la rotación de segmentos correctamente.
     let effectiveResilienceArgs;
     if (isUnivisionLikeSource) {
+      // Univision CDN bloquea reconexiones HTTP a byte-offset y detecta datacenter IPs.
+      // Estrategia: CERO flags de reconnect HTTP. Dejar que el demuxer HLS interno
+      // maneje la rotación de segmentos (es lo que VLC hace y funciona).
+      // Solo rw_timeout para no colgar indefinidamente.
       effectiveResilienceArgs = [
-        '-rw_timeout', '20000000',   // 20s (dar más tiempo al CDN de Univision)
-        '-reconnect', '1',
-        '-reconnect_on_http_error', '4xx,5xx',
-        '-reconnect_delay_max', '5',
+        '-rw_timeout', '30000000',   // 30s timeout generoso
       ];
-      sendLog(process_id, 'info', `🔧 Univision: sin reconnect_at_eof/reconnect_streamed (evita loop EOF)`);
+      sendLog(process_id, 'info', `🔧 Univision: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
@@ -1214,10 +1215,26 @@ app.post('/api/emit', async (req, res) => {
       effectiveResilienceArgs = HLS_INPUT_RESILIENCE_ARGS;
     }
 
+    // Headers: Univision necesita headers Chrome completos para evadir detección de bots
+    const univisionExtraHeaders = isUnivisionLikeSource ? [
+      'Accept: */*',
+      'Accept-Language: en-US,en;q=0.9',
+      'Sec-Fetch-Dest: empty',
+      'Sec-Fetch-Mode: cors',
+      'Sec-Fetch-Site: cross-site',
+      'Connection: keep-alive',
+    ].join('\r\n') + '\r\n' : '';
+
+    const combinedHeaders = [
+      authorizationHeader,
+      `Referer: ${refererDomain}`,
+      `Origin: ${originDomain}`,
+    ].filter(Boolean).join('\r\n') + '\r\n' + univisionExtraHeaders;
+
     const inputArgs = [
       ...effectiveResilienceArgs,
       ...extraFfmpegInputArgs,
-      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
       '-headers', combinedHeaders,
     ];
 
