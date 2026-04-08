@@ -1188,11 +1188,6 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
-    const combinedHeaders = [
-      authorizationHeader,
-      `Referer: ${refererDomain}`,
-      `Origin: ${originDomain}`,
-    ].filter(Boolean).join('\r\n') + '\r\n';
 
     // Para procesos manuales con fuentes estables (Canal 6, Disney), usar args de resiliencia reforzados
     // reconnect_delay_max=15 da a FFmpeg hasta ~30s de reintentos internos (0+1+3+5+5+5+5=24s)
