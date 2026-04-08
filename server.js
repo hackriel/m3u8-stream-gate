@@ -1941,7 +1941,8 @@ app.post('/api/emit', async (req, res) => {
           }
           
           // Esperar 3s inicial para liberar socket RTMP
-          setTimeout(async () => {
+          enqueueRecovery(process_id, async () => {
+            await sleep(3000);
             try {
               if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
                 sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual detectada`);
