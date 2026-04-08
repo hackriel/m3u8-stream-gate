@@ -1207,6 +1207,17 @@ app.post('/api/emit', async (req, res) => {
         '-rw_timeout', '30000000',   // 30s timeout generoso
       ];
       sendLog(process_id, 'info', `🔧 Univision: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
+    } else if (isMediatiqueSource) {
+      // Mediatiquestream (Canal 6): tokens expiran, reconnect_at_eof causa loop infinito en 401.
+      // Mantener reconnect básico para micro-cortes, pero sin reconnect_at_eof.
+      effectiveResilienceArgs = [
+        '-rw_timeout', '15000000',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_on_http_error', '5xx',
+        '-reconnect_delay_max', '10',
+      ];
+      sendLog(process_id, 'info', `🔧 Mediatiquestream: reconnect sin reconnect_at_eof (evita loop 401)`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
