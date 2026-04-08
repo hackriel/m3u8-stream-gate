@@ -2522,28 +2522,27 @@ app.post('/api/emit/stop', async (req, res) => {
       // Guardar referencia antes de borrar del mapa
       const procRef = processData.process;
       
-      // Intentar terminar graciosamente
+      // Intentar terminar graciosamente, luego esperar muerte real
       procRef.kill('SIGTERM');
       
-      // Si no termina en 3 segundos, forzar terminación con SIGKILL
-      setTimeout(() => {
-        if (procRef && !procRef.killed) {
-          sendLog(process_id, 'warn', `Forzando terminación de ffmpeg con SIGKILL`);
-          procRef.kill('SIGKILL');
-        }
-      }, 3000);
+      // Esperar hasta 5s a que muera. Si no, SIGKILL.
+      await waitForProcessDeath(procRef, 3000);
       
-      // Además, matar por PID directamente como último recurso
+      if (!procRef.killed) {
+        sendLog(process_id, 'warn', `Forzando terminación de ffmpeg con SIGKILL`);
+        procRef.kill('SIGKILL');
+        await waitForProcessDeath(procRef, 2000);
+      }
+      
+      // Último recurso: kill -9 por PID
       if (procRef.pid) {
-        setTimeout(() => {
-          try {
-            process.kill(procRef.pid, 0); // Verificar si sigue vivo
-            sendLog(process_id, 'warn', `⚠️ Proceso PID ${procRef.pid} sigue vivo, matando con kill -9`);
-            execSync(`kill -9 ${procRef.pid}`, { timeout: 2000 });
-          } catch (e) {
-            // El proceso ya murió, ok
-          }
-        }, 5000);
+        try {
+          process.kill(procRef.pid, 0); // Verificar si sigue vivo
+          sendLog(process_id, 'warn', `⚠️ Proceso PID ${procRef.pid} sigue vivo, matando con kill -9`);
+          execSync(`kill -9 ${procRef.pid}`, { timeout: 2000 });
+        } catch (e) {
+          // El proceso ya murió, ok
+        }
       }
       
       ffmpegProcesses.delete(process_id);
@@ -2554,6 +2553,7 @@ app.post('/api/emit/stop', async (req, res) => {
       lastProgressLog.delete(process_id);
       recoveryAttempts.delete(process_id);
       scrapeSessionCache.delete(process_id);
+      resetCircuitBreaker(process_id);
       
       emissionStatuses.set(process_id, 'idle');
       sendLog(process_id, 'success', `Emisión detenida correctamente`);
