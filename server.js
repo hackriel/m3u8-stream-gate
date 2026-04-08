@@ -1326,10 +1326,16 @@ app.post('/api/emit', async (req, res) => {
       } else {
         sendLog(process_id, 'info', `📺 Fuente: URL directa`);
       }
-    } else if (isScrapedChannel || isUnivisionLikeSource) {
-      // Canales scrapeados Y fuentes Univision/TUDN: mantener master playlist vivo
-      // (el CDN rota tokens/sesiones en las URLs hijas, pinnear causa EOF)
-      // Canales scrapeados: NO pinnear URL (master se mantiene para renovación de sesión CDN)
+    } else if (isUnivisionLikeSource) {
+      // Univision/TUDN: NO usar -map 0:p:N porque el manifiesto tiene programas con
+      // subtítulos EIA-608 que confunden a FFmpeg al mapear por programa.
+      // Estrategia: dejar FFmpeg auto-seleccionar (elige el mejor stream automáticamente)
+      // y filtrar solo video+audio con -map genéricos. La escala -vf scale:-2:720 ya 
+      // normaliza la resolución de salida.
+      sendLog(process_id, 'info', `📺 Univision: auto-selección FFmpeg (sin -map p:N, evita conflicto subtítulos)`);
+      // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
+    } else if (isScrapedChannel) {
+      // Canales scrapeados: mantener master playlist vivo (token de 1min necesita renovación del CDN)
       // pero sí identificar el programa 720p para forzarlo con -map
       try {
         const { bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
@@ -1342,16 +1348,13 @@ app.post('/api/emit', async (req, res) => {
           cookies: sessionCookies,
         });
 
-        // Buscar la variante 720p (o la de mayor bandwidth con resolución válida)
         const validVariants = (allVariants || []).filter(v => v.bandwidth > 0 && v.resolution);
         if (validVariants.length > 0) {
-          // Preferir 720p explícito, sino la de mayor bandwidth válida
           const target720 = validVariants.find(v => v.resolution && v.resolution.includes('720'));
           const best = target720 || validVariants[validVariants.length - 1];
           hlsProgramIndex = best.programIndex;
           sendLog(process_id, 'success', `📺 Programa HLS fijado → p:${hlsProgramIndex} (${best.resolution} @ ${Math.round(best.bandwidth / 1000)}kbps) [master vivo]`);
         } else if (allVariants && allVariants.length > 0) {
-          // Todas las variantes sin resolución válida — usar la primera con mayor bandwidth
           const sorted = [...allVariants].filter(v => v.bandwidth > 0).sort((a,b) => b.bandwidth - a.bandwidth);
           if (sorted.length > 0) {
             hlsProgramIndex = sorted[0].programIndex;
