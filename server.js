@@ -1783,6 +1783,20 @@ app.post('/api/emit', async (req, res) => {
         if (isCleanExit) {
           sendLog(process_id, 'warn', `⚠️ FFmpeg salió con código 0 (fuente expirada o EOF) - Intentando auto-recovery...`);
         }
+
+        // === CIRCUIT BREAKER: registrar fallo y verificar si estamos en tormenta ===
+        recordFailure(process_id);
+        if (isCircuitBroken(process_id)) {
+          sendLog(process_id, 'error', `🔴 CIRCUIT BREAKER: ${CIRCUIT_BREAKER_MAX_FAILURES}+ caídas en ${CIRCUIT_BREAKER_WINDOW_MS / 60000} min. Recovery DETENIDO para evitar saturación del servidor.`);
+          if (supabase) {
+            await supabase.from('emission_processes').update({
+              is_active: false, is_emitting: false, emit_status: 'error',
+              failure_reason: 'circuit_breaker',
+              failure_details: `Demasiadas caídas consecutivas (${CIRCUIT_BREAKER_MAX_FAILURES} en ${CIRCUIT_BREAKER_WINDOW_MS / 60000} min). Reiniciar manualmente.`
+            }).eq('id', parseInt(process_id));
+          }
+          // No hacer recovery, dejar el proceso muerto
+        } else {
         
         // MEJORA #2: Retry con misma URL antes de recovery completo
         // Para canales scrapeados (1-6, 8, 9), intentar primero con la misma URL
