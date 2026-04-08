@@ -1054,6 +1054,7 @@ app.post('/api/emit', async (req, res) => {
       manualStopProcesses.delete(process_id);
       manualStopProcesses.delete(numericId);
       nightRestStoppedProcesses.delete(process_id);
+      resetCircuitBreaker(process_id);
     }
     
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
