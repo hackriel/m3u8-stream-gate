@@ -129,10 +129,81 @@ app.use(express.static(path.join(__dirname, 'dist')));
 // Variables globales para manejo de múltiples procesos ffmpeg
 const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTime, target_rtmp }>
 const emissionStatuses = new Map(); // Map<processId, status>
-const autoRecoveryInProgress = new Map(); // Map<processId, boolean>
+const autoRecoveryInProgress = new Map(); // Map<processId(string), boolean>
 const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hacer auto-recovery)
 const nightRestStoppedProcesses = new Set(); // Procesos apagados por descanso nocturno
 const detectedErrors = new Map(); // Map<processId, { type, reason }> — último error detectado por stderr
+
+// === CIRCUIT BREAKER: evita loops infinitos de recovery que saturan el servidor ===
+// Registra timestamps de cada fallo para detectar "tormenta de caídas"
+const failureTimestamps = new Map(); // Map<processId(string), number[]>
+const CIRCUIT_BREAKER_WINDOW_MS = 10 * 60 * 1000; // 10 minutos
+const CIRCUIT_BREAKER_MAX_FAILURES = 6; // máx 6 caídas en 10 min → detener
+
+const isCircuitBroken = (processId) => {
+  const key = String(processId);
+  const timestamps = failureTimestamps.get(key) || [];
+  const now = Date.now();
+  // Limpiar timestamps fuera de la ventana
+  const recent = timestamps.filter(t => now - t < CIRCUIT_BREAKER_WINDOW_MS);
+  failureTimestamps.set(key, recent);
+  return recent.length >= CIRCUIT_BREAKER_MAX_FAILURES;
+};
+
+const recordFailure = (processId) => {
+  const key = String(processId);
+  const timestamps = failureTimestamps.get(key) || [];
+  timestamps.push(Date.now());
+  failureTimestamps.set(key, timestamps);
+};
+
+const resetCircuitBreaker = (processId) => {
+  failureTimestamps.delete(String(processId));
+};
+
+// === CONCURRENCY LIMITER: máx 2 recoveries simultáneos para no saturar CPU/red ===
+let activeRecoveryCount = 0;
+const MAX_CONCURRENT_RECOVERIES = 2;
+const recoveryQueue = []; // Queue<{ fn: () => Promise<void>, processId: string }>
+
+const enqueueRecovery = (processId, fn) => {
+  const key = String(processId);
+  // Si ya hay un recovery encolado para este proceso, ignorar
+  if (recoveryQueue.some(item => item.processId === key)) {
+    sendLog(processId, 'warn', '⏳ Recovery ya encolado, ignorando duplicado');
+    return;
+  }
+  if (activeRecoveryCount < MAX_CONCURRENT_RECOVERIES) {
+    activeRecoveryCount++;
+    fn().catch(err => {
+      console.error(`Recovery error (process ${key}):`, err.message);
+    }).finally(() => {
+      activeRecoveryCount--;
+      processRecoveryQueue();
+    });
+  } else {
+    sendLog(processId, 'info', `⏳ Recovery encolado (${activeRecoveryCount} activos, esperando turno...)`);
+    recoveryQueue.push({ processId: key, fn });
+  }
+};
+
+const processRecoveryQueue = () => {
+  while (recoveryQueue.length > 0 && activeRecoveryCount < MAX_CONCURRENT_RECOVERIES) {
+    const next = recoveryQueue.shift();
+    // Verificar que no se haya cancelado manualmente mientras esperaba
+    if (manualStopProcesses.has(next.processId) || manualStopProcesses.has(Number(next.processId))) {
+      sendLog(next.processId, 'info', '🛑 Recovery encolado cancelado: parada manual durante espera en cola');
+      continue;
+    }
+    activeRecoveryCount++;
+    next.fn().catch(err => {
+      console.error(`Queued recovery error (process ${next.processId}):`, err.message);
+    }).finally(() => {
+      activeRecoveryCount--;
+      processRecoveryQueue();
+    });
+  }
+};
 
 
 // FUTV Auto-recovery: obtener nueva URL y reiniciar emisión
@@ -983,6 +1054,7 @@ app.post('/api/emit', async (req, res) => {
       manualStopProcesses.delete(process_id);
       manualStopProcesses.delete(numericId);
       nightRestStoppedProcesses.delete(process_id);
+      resetCircuitBreaker(process_id);
     }
     
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
@@ -1712,6 +1784,20 @@ app.post('/api/emit', async (req, res) => {
         if (isCleanExit) {
           sendLog(process_id, 'warn', `⚠️ FFmpeg salió con código 0 (fuente expirada o EOF) - Intentando auto-recovery...`);
         }
+
+        // === CIRCUIT BREAKER: registrar fallo y verificar si estamos en tormenta ===
+        recordFailure(process_id);
+        if (isCircuitBroken(process_id)) {
+          sendLog(process_id, 'error', `🔴 CIRCUIT BREAKER: ${CIRCUIT_BREAKER_MAX_FAILURES}+ caídas en ${CIRCUIT_BREAKER_WINDOW_MS / 60000} min. Recovery DETENIDO para evitar saturación del servidor.`);
+          if (supabase) {
+            await supabase.from('emission_processes').update({
+              is_active: false, is_emitting: false, emit_status: 'error',
+              failure_reason: 'circuit_breaker',
+              failure_details: `Demasiadas caídas consecutivas (${CIRCUIT_BREAKER_MAX_FAILURES} en ${CIRCUIT_BREAKER_WINDOW_MS / 60000} min). Reiniciar manualmente.`
+            }).eq('id', parseInt(process_id));
+          }
+          // No hacer recovery, dejar el proceso muerto
+        } else {
         
         // MEJORA #2: Retry con misma URL antes de recovery completo
         // Para canales scrapeados (1-6, 8, 9), intentar primero con la misma URL
@@ -1824,7 +1910,8 @@ app.post('/api/emit', async (req, res) => {
           } else {
             sendLog(process_id, 'warn', `🔄 ${channelName} caído (código ${code}) - Iniciando recovery completo...`);
           }
-          setTimeout(() => {
+          enqueueRecovery(process_id, async () => {
+            await sleep(500);
             // Verificar si el usuario detuvo manualmente mientras esperábamos
             if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
               sendLog(process_id, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
@@ -1832,8 +1919,8 @@ app.post('/api/emit', async (req, res) => {
               manualStopProcesses.delete(Number(process_id));
               return;
             }
-            autoRecoverChannel(process_id, channelId, channelName);
-          }, 500);
+            await autoRecoverChannel(process_id, channelId, channelName);
+          });
         } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
           // Procesos manuales (Disney 7, Disney 8, Canal 6): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
@@ -1854,7 +1941,8 @@ app.post('/api/emit', async (req, res) => {
           }
           
           // Esperar 3s inicial para liberar socket RTMP
-          setTimeout(async () => {
+          enqueueRecovery(process_id, async () => {
+            await sleep(3000);
             try {
               if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
                 sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual detectada`);
@@ -2020,8 +2108,9 @@ app.post('/api/emit', async (req, res) => {
               sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
               autoRecoveryInProgress.set(String(process_id), false);
             }
-          }, 3000); // 3s inicial para liberar socket RTMP
+          });
         }
+        } // end circuit breaker else
       }
     });
 
@@ -2435,28 +2524,27 @@ app.post('/api/emit/stop', async (req, res) => {
       // Guardar referencia antes de borrar del mapa
       const procRef = processData.process;
       
-      // Intentar terminar graciosamente
+      // Intentar terminar graciosamente, luego esperar muerte real
       procRef.kill('SIGTERM');
       
-      // Si no termina en 3 segundos, forzar terminación con SIGKILL
-      setTimeout(() => {
-        if (procRef && !procRef.killed) {
-          sendLog(process_id, 'warn', `Forzando terminación de ffmpeg con SIGKILL`);
-          procRef.kill('SIGKILL');
-        }
-      }, 3000);
+      // Esperar hasta 5s a que muera. Si no, SIGKILL.
+      await waitForProcessDeath(procRef, 3000);
       
-      // Además, matar por PID directamente como último recurso
+      if (!procRef.killed) {
+        sendLog(process_id, 'warn', `Forzando terminación de ffmpeg con SIGKILL`);
+        procRef.kill('SIGKILL');
+        await waitForProcessDeath(procRef, 2000);
+      }
+      
+      // Último recurso: kill -9 por PID
       if (procRef.pid) {
-        setTimeout(() => {
-          try {
-            process.kill(procRef.pid, 0); // Verificar si sigue vivo
-            sendLog(process_id, 'warn', `⚠️ Proceso PID ${procRef.pid} sigue vivo, matando con kill -9`);
-            execSync(`kill -9 ${procRef.pid}`, { timeout: 2000 });
-          } catch (e) {
-            // El proceso ya murió, ok
-          }
-        }, 5000);
+        try {
+          process.kill(procRef.pid, 0); // Verificar si sigue vivo
+          sendLog(process_id, 'warn', `⚠️ Proceso PID ${procRef.pid} sigue vivo, matando con kill -9`);
+          execSync(`kill -9 ${procRef.pid}`, { timeout: 2000 });
+        } catch (e) {
+          // El proceso ya murió, ok
+        }
       }
       
       ffmpegProcesses.delete(process_id);
@@ -2467,6 +2555,7 @@ app.post('/api/emit/stop', async (req, res) => {
       lastProgressLog.delete(process_id);
       recoveryAttempts.delete(process_id);
       scrapeSessionCache.delete(process_id);
+      resetCircuitBreaker(process_id);
       
       emissionStatuses.set(process_id, 'idle');
       sendLog(process_id, 'success', `Emisión detenida correctamente`);
