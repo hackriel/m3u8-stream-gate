@@ -1910,7 +1910,8 @@ app.post('/api/emit', async (req, res) => {
           } else {
             sendLog(process_id, 'warn', `🔄 ${channelName} caído (código ${code}) - Iniciando recovery completo...`);
           }
-          setTimeout(() => {
+          enqueueRecovery(process_id, async () => {
+            await sleep(500);
             // Verificar si el usuario detuvo manualmente mientras esperábamos
             if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
               sendLog(process_id, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
@@ -1918,8 +1919,8 @@ app.post('/api/emit', async (req, res) => {
               manualStopProcesses.delete(Number(process_id));
               return;
             }
-            autoRecoverChannel(process_id, channelId, channelName);
-          }, 500);
+            await autoRecoverChannel(process_id, channelId, channelName);
+          });
         } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
           // Procesos manuales (Disney 7, Disney 8, Canal 6): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
