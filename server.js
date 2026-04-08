@@ -1393,7 +1393,7 @@ app.post('/api/emit', async (req, res) => {
       // Scrapeados: map por programa HLS
       // Otros: map genérico video+audio
       ...(isUnivisionLikeSource
-        ? ['-map', '0:v:0?', '-map', '0:a:0?', '-sn']  // -sn = skip subtitles
+        ? ['-map', '0:v:3?', '-map', '0:a:3?', '-sn']  // Stream #0:10 (720p Program 3) + Audio #0:9
         : hlsProgramIndex >= 0
         ? ['-map', `0:p:${hlsProgramIndex}`]
         : ['-map', '0:v:0?', '-map', '0:a:0?']),
