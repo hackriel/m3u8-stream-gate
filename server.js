@@ -233,8 +233,15 @@ setInterval(() => {
     const isScrapedProcess = !!CHANNEL_MAP[String(processId)];
 
     // Caso 1: proceso pegado arrancando y nunca produjo el primer frame
-    // Fuentes estables (Canal 6) tienen más tolerancia porque no usan -re y pueden tardar más
-    const startTimeout = STABLE_SOURCE_PROCESSES.has(String(processId))
+    // Univision necesita hasta 90s porque su CDN es lento con IPs de datacenter
+    const isUnivisionProcess = processData.source_m3u8 && (
+      processData.source_m3u8.includes('univision') || 
+      processData.source_m3u8.includes('tudn') || 
+      processData.source_m3u8.includes('vix.com')
+    );
+    const startTimeout = isUnivisionProcess
+      ? 90000  // 90s para Univision (CDN lento con datacenter IPs)
+      : STABLE_SOURCE_PROCESSES.has(String(processId))
       ? 45000
       : isScrapedProcess
       ? SCRAPED_WATCHDOG_START_TIMEOUT
@@ -1091,8 +1098,9 @@ app.post('/api/emit', async (req, res) => {
     // Fuentes estables (Canal 6) siempre usan valores altos para enganchar limpiamente.
     const isRecovery = Boolean(is_recovery);
     const isStableSource = STABLE_SOURCE_PROCESSES.has(String(process_id));
-    const analyzeDuration = isStableSource ? '3000000' : (isRecovery ? '1500000' : '3000000');  // 3s estable / 1.5s recovery / 3s normal
-    const probeSize      = isStableSource ? '2000000' : (isRecovery ? '500000'  : '1500000');   // 2MB estable / 500KB recovery / 1.5MB normal
+    // Univision tiene 5 programas + subtítulos EIA-608 = manifiesto pesado, necesita más análisis
+    const analyzeDuration = isStableSource ? '3000000' : (isRecovery ? '1500000' : '3000000');
+    const probeSize      = isStableSource ? '2000000' : (isRecovery ? '500000'  : '1500000');
 
     // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
     const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id));
@@ -1127,7 +1135,16 @@ app.post('/api/emit', async (req, res) => {
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
 
-    if (isManualProcess || isUnivisionLikeSource || isScrapedChannel) {
+    if (isUnivisionLikeSource) {
+      // Univision: minimal HLS flags, let the HLS demuxer handle everything internally.
+      // -http_seekable 0 prevents byte-offset resume which Univision CDN rejects.
+      // -live_start_index -3 starts from recent segments (avoids downloading old expired ones).
+      // NO -max_reload/-m3u8_hold_counters: these cause extra requests that trigger CDN blocking.
+      hardenedLiveInputArgs.push(
+        '-http_seekable', '0',
+        '-live_start_index', '-3'
+      );
+    } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-max_reload', '1000',
@@ -1185,13 +1202,14 @@ app.post('/api/emit', async (req, res) => {
     // El demuxer HLS interno de FFmpeg ya maneja la rotación de segmentos correctamente.
     let effectiveResilienceArgs;
     if (isUnivisionLikeSource) {
+      // Univision CDN bloquea reconexiones HTTP a byte-offset y detecta datacenter IPs.
+      // Estrategia: CERO flags de reconnect HTTP. Dejar que el demuxer HLS interno
+      // maneje la rotación de segmentos (es lo que VLC hace y funciona).
+      // Solo rw_timeout para no colgar indefinidamente.
       effectiveResilienceArgs = [
-        '-rw_timeout', '20000000',   // 20s (dar más tiempo al CDN de Univision)
-        '-reconnect', '1',
-        '-reconnect_on_http_error', '4xx,5xx',
-        '-reconnect_delay_max', '5',
+        '-rw_timeout', '30000000',   // 30s timeout generoso
       ];
-      sendLog(process_id, 'info', `🔧 Univision: sin reconnect_at_eof/reconnect_streamed (evita loop EOF)`);
+      sendLog(process_id, 'info', `🔧 Univision: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
@@ -1205,10 +1223,26 @@ app.post('/api/emit', async (req, res) => {
       effectiveResilienceArgs = HLS_INPUT_RESILIENCE_ARGS;
     }
 
+    // Headers: Univision necesita headers Chrome completos para evadir detección de bots
+    const univisionExtraHeaders = isUnivisionLikeSource ? [
+      'Accept: */*',
+      'Accept-Language: en-US,en;q=0.9',
+      'Sec-Fetch-Dest: empty',
+      'Sec-Fetch-Mode: cors',
+      'Sec-Fetch-Site: cross-site',
+      'Connection: keep-alive',
+    ].join('\r\n') + '\r\n' : '';
+
+    const combinedHeaders = [
+      authorizationHeader,
+      `Referer: ${refererDomain}`,
+      `Origin: ${originDomain}`,
+    ].filter(Boolean).join('\r\n') + '\r\n' + univisionExtraHeaders;
+
     const inputArgs = [
       ...effectiveResilienceArgs,
       ...extraFfmpegInputArgs,
-      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
       '-headers', combinedHeaders,
     ];
 
@@ -1300,10 +1334,16 @@ app.post('/api/emit', async (req, res) => {
       } else {
         sendLog(process_id, 'info', `📺 Fuente: URL directa`);
       }
-    } else if (isScrapedChannel || isUnivisionLikeSource) {
-      // Canales scrapeados Y fuentes Univision/TUDN: mantener master playlist vivo
-      // (el CDN rota tokens/sesiones en las URLs hijas, pinnear causa EOF)
-      // Canales scrapeados: NO pinnear URL (master se mantiene para renovación de sesión CDN)
+    } else if (isUnivisionLikeSource) {
+      // Univision/TUDN: NO usar -map 0:p:N porque el manifiesto tiene programas con
+      // subtítulos EIA-608 que confunden a FFmpeg al mapear por programa.
+      // Estrategia: dejar FFmpeg auto-seleccionar (elige el mejor stream automáticamente)
+      // y filtrar solo video+audio con -map genéricos. La escala -vf scale:-2:720 ya 
+      // normaliza la resolución de salida.
+      sendLog(process_id, 'info', `📺 Univision: auto-selección FFmpeg (sin -map p:N, evita conflicto subtítulos)`);
+      // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
+    } else if (isScrapedChannel) {
+      // Canales scrapeados: mantener master playlist vivo (token de 1min necesita renovación del CDN)
       // pero sí identificar el programa 720p para forzarlo con -map
       try {
         const { bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
@@ -1316,16 +1356,13 @@ app.post('/api/emit', async (req, res) => {
           cookies: sessionCookies,
         });
 
-        // Buscar la variante 720p (o la de mayor bandwidth con resolución válida)
         const validVariants = (allVariants || []).filter(v => v.bandwidth > 0 && v.resolution);
         if (validVariants.length > 0) {
-          // Preferir 720p explícito, sino la de mayor bandwidth válida
           const target720 = validVariants.find(v => v.resolution && v.resolution.includes('720'));
           const best = target720 || validVariants[validVariants.length - 1];
           hlsProgramIndex = best.programIndex;
           sendLog(process_id, 'success', `📺 Programa HLS fijado → p:${hlsProgramIndex} (${best.resolution} @ ${Math.round(best.bandwidth / 1000)}kbps) [master vivo]`);
         } else if (allVariants && allVariants.length > 0) {
-          // Todas las variantes sin resolución válida — usar la primera con mayor bandwidth
           const sorted = [...allVariants].filter(v => v.bandwidth > 0).sort((a,b) => b.bandwidth - a.bandwidth);
           if (sorted.length > 0) {
             hlsProgramIndex = sorted[0].programIndex;
@@ -1348,19 +1385,21 @@ app.post('/api/emit', async (req, res) => {
     const outputFps = isCfrOutput ? '29.97' : '30';
     const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
-    const fflags = '+genpts';
+    const fflags = isUnivisionLikeSource ? '+genpts+discardcorrupt' : '+genpts';
 
     ffmpegArgs = [
       ...inputArgs,
       ...hardenedLiveInputArgs,
       '-fflags', fflags,
-      '-analyzeduration', analyzeDuration,
-      '-probesize', probeSize,
+      '-analyzeduration', isUnivisionLikeSource ? '10000000' : analyzeDuration,  // 10s para Univision (5 programas + subtítulos)
+      '-probesize', isUnivisionLikeSource ? '5000000' : probeSize,               // 5MB para Univision
       '-i', inputSourceUrl,
-      // Si hlsProgramIndex >= 0, mapear el programa HLS completo.
-      // En master playlists como Univision/TUDN, usar :v/:a sobre p:N puede dejar
-      // a FFmpeg sin streams seleccionados aunque el programa exista.
-      ...(hlsProgramIndex >= 0
+      // Univision: auto-selección + skip subtítulos EIA-608
+      // Scrapeados: map por programa HLS
+      // Otros: map genérico video+audio
+      ...(isUnivisionLikeSource
+        ? ['-map', '0:v:0?', '-map', '0:a:0?', '-sn']  // -sn = skip subtitles
+        : hlsProgramIndex >= 0
         ? ['-map', `0:p:${hlsProgramIndex}`]
         : ['-map', '0:v:0?', '-map', '0:a:0?']),
       '-c:v', 'libx264',
