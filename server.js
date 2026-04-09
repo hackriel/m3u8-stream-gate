@@ -2002,34 +2002,8 @@ app.post('/api/emit', async (req, res) => {
                   return;
                 }
                 
-                if (!primaryResult.ready && backupUrl) {
-                  sendLog(procId, 'warn', `⚠️ ${procLabel}: URL principal no responde, probando URL de respaldo...`);
-                  const backupResult = await checkUrlHealth(backupUrl, 'URL respaldo');
-                  
-                  if (backupResult.cancelled) {
-                    sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual durante health-check`);
-                    manualStopProcesses.delete(String(process_id));
-                    manualStopProcesses.delete(Number(process_id));
-                    autoRecoveryInProgress.set(String(process_id), false);
-                    return;
-                  }
-                  
-                  if (backupResult.ready) {
-                    finalUrl = backupUrl;
-                    sendLog(procId, 'success', `🔀 ${procLabel}: Usando URL de respaldo para recovery`);
-                  } else {
-                    sendLog(procId, 'error', `❌ ${procLabel}: Ni URL principal ni respaldo respondieron. Recovery detenido.`);
-                    autoRecoveryInProgress.set(String(process_id), false);
-                    await supabase.from('emission_processes').update({
-                      is_active: false, is_emitting: false, emit_status: 'error',
-                      ended_at: new Date().toISOString(),
-                      failure_reason: 'cdn_unavailable',
-                      failure_details: 'Ambas URLs (principal y respaldo) no respondieron'
-                    }).eq('id', procId);
-                    return;
-                  }
-                } else if (!primaryResult.ready) {
-                  sendLog(procId, 'error', `❌ ${procLabel}: CDN no respondió y no hay URL de respaldo. Recovery detenido.`);
+                if (!primaryResult.ready) {
+                  sendLog(procId, 'error', `❌ ${procLabel}: CDN no respondió. Recovery detenido.`);
                   autoRecoveryInProgress.set(String(process_id), false);
                   await supabase.from('emission_processes').update({
                     is_active: false, is_emitting: false, emit_status: 'error',
