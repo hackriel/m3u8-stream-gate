@@ -1933,12 +1933,11 @@ app.post('/api/emit', async (req, res) => {
               
               const { data: procData } = await supabase
                 .from('emission_processes')
-                .select('m3u8, rtmp, m3u8_backup')
+                .select('m3u8, rtmp')
                 .eq('id', procId)
                 .single();
               
               const sourceUrl = procData?.m3u8;
-              const backupUrl = procData?.m3u8_backup || '';
               const targetRtmp = procData?.rtmp;
               
               if (!sourceUrl || !targetRtmp) {
