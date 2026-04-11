@@ -1493,14 +1493,14 @@ app.post('/api/emit', async (req, res) => {
     const outputFps = isCfrOutput ? '29.97' : '30';
     const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
-    const fflags = isUnivisionLikeSource ? '+genpts+discardcorrupt' : '+genpts';
+    const fflags = (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
 
     ffmpegArgs = [
       ...inputArgs,
       ...hardenedLiveInputArgs,
       '-fflags', fflags,
-      '-analyzeduration', isUnivisionLikeSource ? '10000000' : analyzeDuration,  // 10s para Univision (5 programas + subtítulos)
-      '-probesize', isUnivisionLikeSource ? '5000000' : probeSize,               // 5MB para Univision
+      '-analyzeduration', (isUnivisionLikeSource || isAkamaiSource) ? '10000000' : analyzeDuration,  // 10s para VLC-like profiles
+      '-probesize', (isUnivisionLikeSource || isAkamaiSource) ? '5000000' : probeSize,               // 5MB para VLC-like profiles
       '-i', inputSourceUrl,
       // Univision: auto-selección + skip subtítulos EIA-608
       // Scrapeados: map por programa HLS
