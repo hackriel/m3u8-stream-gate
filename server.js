@@ -1410,7 +1410,7 @@ app.post('/api/emit', async (req, res) => {
       } catch (err) {
         sendLog(process_id, 'warn', `⚠️ No se pudo analizar master HLS: ${err.message} — FFmpeg elegirá automáticamente`);
       }
-    } else if (isManualUrlProcess && !isUnivisionLikeSource) {
+    } else if (isManualUrlProcess && !isUnivisionLikeSource && !isAkamaiSource) {
       // Canales manuales con tokens estables: resolver y pinnear URL hija directamente
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
         targetBandwidth: 0,
