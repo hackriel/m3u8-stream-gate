@@ -1302,6 +1302,17 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_delay_max', '10',
       ];
       sendLog(process_id, 'info', `🔧 Mediatiquestream: reconnect sin reconnect_at_eof (evita loop 401)`);
+    } else if (isAkamaiSource) {
+      // Akamai CDN: acepta reconnect normal, usar perfil completo con reconnect_at_eof
+      effectiveResilienceArgs = [
+        '-rw_timeout', '15000000',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_on_http_error', '4xx,5xx',
+        '-reconnect_delay_max', '15',
+      ];
+      sendLog(process_id, 'info', `🔧 Akamai CDN: reconnect completo con reconnect_at_eof`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
