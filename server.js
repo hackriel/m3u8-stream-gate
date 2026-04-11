@@ -1180,6 +1180,7 @@ app.post('/api/emit', async (req, res) => {
     let originDomain = 'https://www.tdmax.com';
     let isUnivisionLikeSource = false;
     let isMediatiqueSource = false;
+    let isAkamaiSource = false;
     try {
       const sourceUrl = new URL(effectiveSourceM3u8);
       const hostname = sourceUrl.hostname.toLowerCase();
@@ -1200,6 +1201,10 @@ app.post('/api/emit', async (req, res) => {
         isUnivisionLikeSource = true;
         refererDomain = 'https://www.tudn.com/';
         originDomain = 'https://www.tudn.com';
+      } else if (hostname.includes('akamaized.net') || hostname.includes('akamai.net')) {
+        isAkamaiSource = true;
+        refererDomain = 'https://www.redbull.com/';
+        originDomain = 'https://www.redbull.com';
       }
     } catch (_) {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
