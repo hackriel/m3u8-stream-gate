@@ -1303,16 +1303,15 @@ app.post('/api/emit', async (req, res) => {
       ];
       sendLog(process_id, 'info', `🔧 Mediatiquestream: reconnect sin reconnect_at_eof (evita loop 401)`);
     } else if (isAkamaiSource) {
-      // Akamai CDN: acepta reconnect normal, usar perfil completo con reconnect_at_eof
+      // Akamai CDN: modo VLC-like (igual que Disney 7/Univision).
+      // reconnect_at_eof y reconnect_streamed causan reconexiones HTTP a byte-offset
+      // que interrumpen el demuxer HLS interno, provocando reloads en el reproductor.
+      // Estrategia: CERO flags de reconnect HTTP. Solo rw_timeout generoso.
+      // El demuxer HLS interno de FFmpeg maneja la rotación de segmentos correctamente.
       effectiveResilienceArgs = [
-        '-rw_timeout', '15000000',
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_at_eof', '1',
-        '-reconnect_on_http_error', '4xx,5xx',
-        '-reconnect_delay_max', '15',
+        '-rw_timeout', '30000000',   // 30s timeout generoso (como Disney 7)
       ];
-      sendLog(process_id, 'info', `🔧 Akamai CDN: reconnect completo con reconnect_at_eof`);
+      sendLog(process_id, 'info', `🔧 Akamai CDN: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
