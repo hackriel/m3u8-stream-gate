@@ -1180,6 +1180,7 @@ app.post('/api/emit', async (req, res) => {
     let originDomain = 'https://www.tdmax.com';
     let isUnivisionLikeSource = false;
     let isMediatiqueSource = false;
+    let isAkamaiSource = false;
     try {
       const sourceUrl = new URL(effectiveSourceM3u8);
       const hostname = sourceUrl.hostname.toLowerCase();
@@ -1200,6 +1201,10 @@ app.post('/api/emit', async (req, res) => {
         isUnivisionLikeSource = true;
         refererDomain = 'https://www.tudn.com/';
         originDomain = 'https://www.tudn.com';
+      } else if (hostname.includes('akamaized.net') || hostname.includes('akamai.net')) {
+        isAkamaiSource = true;
+        refererDomain = 'https://www.redbull.com/';
+        originDomain = 'https://www.redbull.com';
       }
     } catch (_) {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
@@ -1211,13 +1216,20 @@ app.post('/api/emit', async (req, res) => {
 
     if (isUnivisionLikeSource) {
       // Univision: minimal HLS flags, let the HLS demuxer handle everything internally.
-      // -http_seekable 0 prevents byte-offset resume which Univision CDN rejects.
-      // -live_start_index -3 starts from recent segments (avoids downloading old expired ones).
-      // NO -max_reload/-m3u8_hold_counters: these cause extra requests that trigger CDN blocking.
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-live_start_index', '-3'
       );
+    } else if (isAkamaiSource) {
+      // Akamai CDN: VLC-like approach - reconnect básico + tolerancia alta.
+      // Akamai acepta reconnect HTTP normal (no bloquea como Univision).
+      hardenedLiveInputArgs.push(
+        '-http_seekable', '0',
+        '-live_start_index', '-3',
+        '-max_reload', '1000',
+        '-m3u8_hold_counters', '1000'
+      );
+      sendLog(process_id, 'info', `🔧 Akamai CDN: modo resiliente con reconnect + hold counters`);
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
@@ -1290,6 +1302,17 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_delay_max', '10',
       ];
       sendLog(process_id, 'info', `🔧 Mediatiquestream: reconnect sin reconnect_at_eof (evita loop 401)`);
+    } else if (isAkamaiSource) {
+      // Akamai CDN: acepta reconnect normal, usar perfil completo con reconnect_at_eof
+      effectiveResilienceArgs = [
+        '-rw_timeout', '15000000',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_on_http_error', '4xx,5xx',
+        '-reconnect_delay_max', '15',
+      ];
+      sendLog(process_id, 'info', `🔧 Akamai CDN: reconnect completo con reconnect_at_eof`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
@@ -1387,7 +1410,7 @@ app.post('/api/emit', async (req, res) => {
       } catch (err) {
         sendLog(process_id, 'warn', `⚠️ No se pudo analizar master HLS: ${err.message} — FFmpeg elegirá automáticamente`);
       }
-    } else if (isManualUrlProcess && !isUnivisionLikeSource) {
+    } else if (isManualUrlProcess && !isUnivisionLikeSource && !isAkamaiSource) {
       // Canales manuales con tokens estables: resolver y pinnear URL hija directamente
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
         targetBandwidth: 0,
@@ -1422,6 +1445,11 @@ app.post('/api/emit', async (req, res) => {
       // y filtrar solo video+audio con -map genéricos. La escala -vf scale:-2:720 ya 
       // normaliza la resolución de salida.
       sendLog(process_id, 'info', `📺 Univision: auto-selección FFmpeg (sin -map p:N, evita conflicto subtítulos)`);
+      // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
+    } else if (isAkamaiSource) {
+      // Akamai CDN (Red Bull, etc.): la URL ya es una variante específica (master_6660.m3u8)
+      // Pasar directo a FFmpeg sin resolución de variantes. Usar map genérico video+audio.
+      sendLog(process_id, 'info', `📺 Akamai: URL directa sin resolución de variante`);
       // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
     } else if (isScrapedChannel) {
       // Canales scrapeados: mantener master playlist vivo (token de 1min necesita renovación del CDN)
