@@ -1446,6 +1446,11 @@ app.post('/api/emit', async (req, res) => {
       // normaliza la resolución de salida.
       sendLog(process_id, 'info', `📺 Univision: auto-selección FFmpeg (sin -map p:N, evita conflicto subtítulos)`);
       // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
+    } else if (isAkamaiSource) {
+      // Akamai CDN (Red Bull, etc.): la URL ya es una variante específica (master_6660.m3u8)
+      // Pasar directo a FFmpeg sin resolución de variantes. Usar map genérico video+audio.
+      sendLog(process_id, 'info', `📺 Akamai: URL directa sin resolución de variante`);
+      // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
     } else if (isScrapedChannel) {
       // Canales scrapeados: mantener master playlist vivo (token de 1min necesita renovación del CDN)
       // pero sí identificar el programa 720p para forzarlo con -map
