@@ -514,6 +514,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
     const lbResp = await fetch(lbUrl, {
       headers: lbHeaders,
       signal: AbortSignal.timeout(15000),
+      ...fetchOpts,
     });
     
     if (!lbResp.ok) {
