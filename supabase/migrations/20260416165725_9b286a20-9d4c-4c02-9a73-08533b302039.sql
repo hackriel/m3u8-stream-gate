@@ -1,0 +1,2 @@
+ALTER TABLE emission_processes DROP CONSTRAINT emission_processes_emit_status_check;
+ALTER TABLE emission_processes ADD CONSTRAINT emission_processes_emit_status_check CHECK (emit_status = ANY (ARRAY['idle', 'starting', 'running', 'stopping', 'stopped', 'error', 'waiting_cdn']));
