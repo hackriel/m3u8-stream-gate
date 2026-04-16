@@ -1122,7 +1122,8 @@ app.post('/api/local-scrape', async (req, res) => {
     }
     
     const channelName = CHANNEL_MAP[process_id]?.channelName || `Canal ${channel_id.substring(0, 8)}`;
-    const result = await scrapeStreamUrlLocal(channel_id, channelName);
+    const useProxy = PROXY_PROCESSES.has(String(process_id));
+    const result = await scrapeStreamUrlLocal(channel_id, channelName, { useProxy });
     
     if (!result.url) {
       return res.json({ success: false, error: result.error || 'No se obtuvo URL' });
