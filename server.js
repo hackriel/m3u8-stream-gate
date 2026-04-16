@@ -1716,8 +1716,8 @@ app.post('/api/emit', async (req, res) => {
       ...inputArgs,
       ...hardenedLiveInputArgs,
       '-fflags', fflags,
-      '-analyzeduration', (isUnivisionLikeSource || isAkamaiSource) ? '10000000' : analyzeDuration,  // 10s para VLC-like profiles
-      '-probesize', (isUnivisionLikeSource || isAkamaiSource) ? '5000000' : probeSize,               // 5MB para VLC-like profiles
+      '-analyzeduration', (isUnivisionLikeSource || isAkamaiSource || isProxyScrapedSource) ? '10000000' : analyzeDuration,  // 10s para VLC-like profiles + proxy
+      '-probesize', (isUnivisionLikeSource || isAkamaiSource || isProxyScrapedSource) ? '5000000' : probeSize,               // 5MB para VLC-like profiles + proxy
       '-i', inputSourceUrl,
       // Univision: auto-selección + skip subtítulos EIA-608
       // Scrapeados: map por programa HLS
