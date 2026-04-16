@@ -1236,6 +1236,27 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
+    // ── Refresco de token JIT para procesos con proxy (Tigo: wmsAuthSign dura 60s) ──
+    // El token de Teletica/Tigo expira en 1 minuto, así que SIEMPRE re-scrapeamos
+    // vía Pi5 justo antes de spawn de FFmpeg para garantizar token fresco.
+    if (PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
+      const { channelId, channelName } = CHANNEL_MAP[process_id];
+      sendLog(process_id, 'info', `🔄 Refrescando URL via Pi5 (token de 60s)...`);
+      const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
+      if (fresh.url) {
+        effectiveSourceM3u8 = fresh.url;
+        scrapeSessionCache.set(process_id, {
+          cookies: fresh.cookies || null,
+          accessToken: fresh.accessToken || null,
+          timestamp: Date.now(),
+        });
+        sendLog(process_id, 'success', `✅ URL fresca obtenida via Pi5 para ${channelName}`);
+      } else {
+        sendLog(process_id, 'error', `❌ No se pudo refrescar URL via Pi5: ${fresh.error || 'desconocido'}`);
+        return res.status(502).json({ error: `Refresco de URL falló: ${fresh.error || 'sin URL'}` });
+      }
+    }
+
     rememberStreamState(process_id, { source_m3u8: effectiveSourceM3u8, target_rtmp });
 
     // (Tigo processes removed — dead code cleaned up)
@@ -2076,8 +2097,26 @@ app.post('/api/emit', async (req, res) => {
               }
               
               if (retrySourceUrl && retryTargetRtmp) {
+                // Para procesos con proxy (Tigo): re-scrapear URL vía Pi5 antes de reintentar,
+                // porque el token wmsAuthSign expira en 60s y la URL vieja ya está muerta.
+                if (PROXY_PROCESSES.has(String(process_id)) && CHANNEL_MAP[String(process_id)]) {
+                  const { channelId, channelName } = CHANNEL_MAP[String(process_id)];
+                  sendLog(process_id, 'info', `🔄 RETRY: refrescando URL via Pi5 (token expirado)...`);
+                  const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
+                  if (fresh.url) {
+                    retrySourceUrl = fresh.url;
+                    scrapeSessionCache.set(String(process_id), {
+                      cookies: fresh.cookies || null,
+                      accessToken: fresh.accessToken || null,
+                      timestamp: Date.now(),
+                    });
+                    sendLog(process_id, 'success', `✅ RETRY: URL fresca obtenida via Pi5`);
+                  } else {
+                    sendLog(process_id, 'warn', `⚠️ RETRY: scraping via Pi5 falló (${fresh.error || 'sin URL'}), usando URL guardada`);
+                  }
+                }
                 rememberStreamState(process_id, { source_m3u8: retrySourceUrl, target_rtmp: retryTargetRtmp });
-                // Reiniciar con misma URL
+                // Reiniciar con misma URL (o fresca si es proxy)
                 const emitUrl = `http://localhost:${PORT}/api/emit`;
                 const emitResp = await fetch(emitUrl, {
                   method: 'POST',
