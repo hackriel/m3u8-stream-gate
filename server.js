@@ -477,6 +477,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
         username: email.toLowerCase(),
         password: password,
       }),
+      ...fetchOpts,
     });
     
     // Capturar todas las cookies del login
