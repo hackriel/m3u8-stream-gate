@@ -1103,8 +1103,8 @@ app.post('/api/emit', async (req, res) => {
 
     // (Tigo processes removed — dead code cleaned up)
 
-    // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP
-    const conflictingProcessId = checkRTMPConflict(target_rtmp, process_id);
+    // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP (skip para HLS output)
+    const conflictingProcessId = isHlsOutput ? null : checkRTMPConflict(target_rtmp, process_id);
     if (conflictingProcessId) {
       const conflictingProcess = ffmpegProcesses.get(conflictingProcessId);
       sendLog(process_id, 'error', `⚠️ CONFLICTO: El destino RTMP ya está en uso por Proceso ${conflictingProcessId}`);
