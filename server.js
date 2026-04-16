@@ -1400,6 +1400,14 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
+    const isTeleticaSource = (() => {
+      try {
+        return new URL(effectiveSourceM3u8).hostname.toLowerCase().includes('teletica.com');
+      } catch {
+        return false;
+      }
+    })();
+    const isProxyScrapedSource = PROXY_PROCESSES.has(String(process_id)) && isTeleticaSource;
 
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
@@ -1502,6 +1510,15 @@ app.post('/api/emit', async (req, res) => {
         '-rw_timeout', '30000000',   // 30s timeout generoso (como Disney 7)
       ];
       sendLog(process_id, 'info', `🔧 Akamai CDN: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
+    } else if (isProxyScrapedSource) {
+      // Tigo/Teletica via Pi5: el token ya viene fresco del scraper, pero
+      // reconnect_streamed/reconnect_at_eof rompen el demuxer HLS y provocan
+      // loops de EOF/byte-offset (similar a VLC vs FFmpeg en otros CDNs).
+      // Estrategia: dejar SOLO al demuxer HLS recargar playlists/segmentos.
+      effectiveResilienceArgs = [
+        '-rw_timeout', '30000000',
+      ];
+      sendLog(process_id, 'info', `🔧 Tigo/Teletica via Pi5: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
