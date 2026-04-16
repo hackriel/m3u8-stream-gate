@@ -1428,6 +1428,16 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
       sendLog(process_id, 'info', `🔧 Akamai CDN: modo resiliente con reconnect + hold counters`);
+    } else if (isProxyScrapedSource) {
+      // Tigo via Pi5 SOCKS5: el proxy residencial introduce jitter de red.
+      // Aumentar tolerancia HLS al máximo y arrancar 3 segmentos atrás
+      // para tener buffer de seguridad ante micro-pausas del proxy.
+      hardenedLiveInputArgs.push(
+        '-http_seekable', '0',
+        '-live_start_index', '-3',
+        '-max_reload', '1000',
+        '-m3u8_hold_counters', '1000'
+      );
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
