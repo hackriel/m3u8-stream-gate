@@ -2780,7 +2780,7 @@ app.get('/api/status', (req, res) => {
   } else {
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i <= 10; i++) {
+    for (let i = 0; i <= 11; i++) {
       const id = i.toString();
       const processData = ffmpegProcesses.get(id);
       allStatuses[id] = {
@@ -3060,6 +3060,7 @@ setInterval(async () => {
 const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
+  '11': 'FUTV URL',
 };
 
 // Endpoint para toggle night_rest
