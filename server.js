@@ -266,6 +266,59 @@ const PROXY_PROCESSES = new Set(['12']);
 // Config dinámica generada en /tmp para no chocar con instalación global
 const PROXYCHAINS_CONF_PATH = '/tmp/proxychains-tigo.conf';
 
+// Cache del dispatcher SOCKS5 para reutilizar conexiones (undici)
+let _proxyDispatcher = null;
+const getProxyDispatcher = () => {
+  if (_proxyDispatcher) return _proxyDispatcher;
+  const agent = new SocksProxyAgent(TIGO_PROXY_URL);
+  // Usamos undici Agent con connect personalizado vía SocksProxyAgent
+  _proxyDispatcher = new Agent({
+    connect: { socket: agent },
+    connectTimeout: 15000,
+  });
+  // Fallback simple: si Agent no acepta socket personalizado, usar undici con socksDispatcher manual.
+  // En la práctica más confiable: exportar un dispatcher dedicado.
+  return _proxyDispatcher;
+};
+
+// Genera /tmp/proxychains-tigo.conf apuntando a TIGO_PROXY_URL.
+// proxychains4 no entiende el esquema URL, así que parseamos host/puerto.
+// Soporta socks5/socks5h (DNS remoto cuando es socks5h).
+const ensureProxychainsConf = () => {
+  try {
+    const u = new URL(TIGO_PROXY_URL);
+    const proto = u.protocol.replace(':', '').toLowerCase(); // socks5 / socks5h
+    const remoteDns = proto === 'socks5h';
+    const conf = [
+      'strict_chain',
+      remoteDns ? 'proxy_dns' : '# proxy_dns disabled (use socks5h to enable)',
+      'tcp_read_time_out 15000',
+      'tcp_connect_time_out 8000',
+      '[ProxyList]',
+      `socks5 ${u.hostname} ${u.port || 1080}${u.username ? ` ${u.username} ${u.password || ''}` : ''}`,
+      '',
+    ].join('\n');
+    fs.writeFileSync(PROXYCHAINS_CONF_PATH, conf, 'utf8');
+    return PROXYCHAINS_CONF_PATH;
+  } catch (err) {
+    console.error('[proxychains] Error escribiendo config:', err.message);
+    return null;
+  }
+};
+
+// Detecta si proxychains4 está instalado
+let _proxychainsAvailable = null;
+const isProxychainsAvailable = () => {
+  if (_proxychainsAvailable !== null) return _proxychainsAvailable;
+  try {
+    execSync('which proxychains4', { stdio: 'ignore' });
+    _proxychainsAvailable = true;
+  } catch {
+    _proxychainsAvailable = false;
+  }
+  return _proxychainsAvailable;
+};
+
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
 // Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
