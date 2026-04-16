@@ -743,7 +743,7 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         source_m3u8: newUrl,
-        target_rtmp: targetRtmp,
+        target_rtmp: targetRtmp || 'hls-local',
         process_id: process_id,
         is_recovery: true
       })
