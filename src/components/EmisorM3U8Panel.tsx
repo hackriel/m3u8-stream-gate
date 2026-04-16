@@ -896,8 +896,11 @@ export default function EmisorM3U8Panel() {
                 {/* Backup URL field removed - Canal 6 now uses single URL */}
               </>
             )}
-            {HLS_OUTPUT_PROCESSES.has(processIndex) ? (
-              // HLS Output: mostrar URL generada en vez de input RTMP
+            {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
+              const hlsSlugs: Record<number, string> = { [FUTV_URL_INDEX]: 'futv', [TIGO_URL_INDEX]: 'Tigo' };
+              const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
+              const hlsUrl = `${window.location.protocol}//${window.location.host}/live/${hlsSlug}/playlist.m3u8`;
+              return (
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
                 <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
@@ -906,11 +909,11 @@ export default function EmisorM3U8Panel() {
                       <p className="text-xs text-muted-foreground">Tu URL estable para XUI:</p>
                       <div className="flex items-center gap-2">
                         <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
-                          {`${window.location.protocol}//${window.location.host}/live/futv/playlist.m3u8`}
+                          {hlsUrl}
                         </code>
                         <button
                           onClick={() => {
-                            navigator.clipboard.writeText(`${window.location.protocol}//${window.location.host}/live/futv/playlist.m3u8`);
+                            navigator.clipboard.writeText(hlsUrl);
                             toast.success('URL copiada al portapapeles');
                           }}
                           className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
@@ -924,12 +927,13 @@ export default function EmisorM3U8Panel() {
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      La URL se generará al iniciar la emisión. Primero obtén la señal FUTV y presiona "Emitir HLS".
+                      La URL se generará al iniciar la emisión. Primero obtén la señal y presiona "Emitir HLS".
                     </p>
                   )}
                 </div>
               </>
-            ) : (
+              );
+            })() : (
               // RTMP normal
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
