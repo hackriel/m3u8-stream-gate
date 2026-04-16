@@ -9,6 +9,9 @@ import multer from 'multer';
 import fs from 'fs';
 import os from 'os';
 import { createClient } from '@supabase/supabase-js';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+import { Agent, fetch as undiciFetch } from 'undici';
+
 
 // Configurar cliente de Supabase (opcional, solo si hay variables de entorno)
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -242,12 +245,83 @@ const CHANNEL_MAP = {
   
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
   '11': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV URL' },
+  '12': { channelId: '664237788f085ac1f2a15f81', channelName: 'TIGO URL' },
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
 const HLS_OUTPUT_PROCESSES = new Set(['11', '12']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo' };
+
+// ───────────────────────────────────────────────────────────────────────
+// PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
+// El proxy enruta tanto el scraping (login/token TDMax) como el consumo
+// FFmpeg (manifiesto + segmentos HLS) por la IP residencial CR para
+// evitar el geobloqueo y la validación de IP del CDN de Tigo.
+// ───────────────────────────────────────────────────────────────────────
+const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://200.91.131.146:1080';
+// IDs de proceso que deben enrutar TODO su tráfico (scraping + FFmpeg) por el proxy
+const PROXY_PROCESSES = new Set(['12']);
+// Comando proxychains4 (instalable con: apt install -y proxychains4)
+// Config dinámica generada en /tmp para no chocar con instalación global
+const PROXYCHAINS_CONF_PATH = '/tmp/proxychains-tigo.conf';
+
+// Cache del dispatcher SOCKS5 para reutilizar conexiones (undici).
+// undici acepta una función `connect` personalizada que devuelve un socket;
+// SocksProxyAgent.createConnection abre un socket SOCKS5 hacia el host destino.
+let _proxyDispatcher = null;
+const getProxyDispatcher = () => {
+  if (_proxyDispatcher) return _proxyDispatcher;
+  const socksAgent = new SocksProxyAgent(TIGO_PROXY_URL);
+  _proxyDispatcher = new Agent({
+    connect: (opts, cb) => {
+      socksAgent.createConnection(
+        { host: opts.hostname, port: Number(opts.port), ...opts },
+        cb
+      );
+    },
+    connectTimeout: 15000,
+  });
+  return _proxyDispatcher;
+};
+
+// Genera /tmp/proxychains-tigo.conf apuntando a TIGO_PROXY_URL.
+// proxychains4 no entiende el esquema URL, así que parseamos host/puerto.
+// Soporta socks5/socks5h (DNS remoto cuando es socks5h).
+const ensureProxychainsConf = () => {
+  try {
+    const u = new URL(TIGO_PROXY_URL);
+    const proto = u.protocol.replace(':', '').toLowerCase(); // socks5 / socks5h
+    const remoteDns = proto === 'socks5h';
+    const conf = [
+      'strict_chain',
+      remoteDns ? 'proxy_dns' : '# proxy_dns disabled (use socks5h to enable)',
+      'tcp_read_time_out 15000',
+      'tcp_connect_time_out 8000',
+      '[ProxyList]',
+      `socks5 ${u.hostname} ${u.port || 1080}${u.username ? ` ${u.username} ${u.password || ''}` : ''}`,
+      '',
+    ].join('\n');
+    fs.writeFileSync(PROXYCHAINS_CONF_PATH, conf, 'utf8');
+    return PROXYCHAINS_CONF_PATH;
+  } catch (err) {
+    console.error('[proxychains] Error escribiendo config:', err.message);
+    return null;
+  }
+};
+
+// Detecta si proxychains4 está instalado
+let _proxychainsAvailable = null;
+const isProxychainsAvailable = () => {
+  if (_proxychainsAvailable !== null) return _proxychainsAvailable;
+  try {
+    execSync('which proxychains4', { stdio: 'ignore' });
+    _proxychainsAvailable = true;
+  } catch {
+    _proxychainsAvailable = false;
+  }
+  return _proxychainsAvailable;
+};
 
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
@@ -430,9 +504,13 @@ const STREANN_RESELLER_ID = '61316705e4b0295f87dae396';
 const STREANN_BASE_URL = 'https://cf.streann.tech';
 
 // Scraping LOCAL (directo desde el VPS) — el token se genera con la IP del VPS
-// así el CDN valida correctamente la IP que hace el request de video
-const scrapeStreamUrlLocal = async (channelId, channelName) => {
-  sendLog('system', 'info', `🔄 Scraping LOCAL ${channelName}: obteniendo URL desde VPS...`);
+// así el CDN valida correctamente la IP que hace el request de video.
+// Si useProxy=true, todo el tráfico (login + token) sale por el SOCKS5 del Pi 5
+// para que el token quede vinculado a la IP residencial CR (caso Tigo).
+const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false } = {}) => {
+  const tag = useProxy ? 'LOCAL via Pi5 (CR)' : 'LOCAL';
+  sendLog('system', 'info', `🔄 Scraping ${tag} ${channelName}: obteniendo URL...`);
+  const fetchOpts = useProxy ? { dispatcher: getProxyDispatcher() } : {};
   
   const email = process.env.TDMAX_EMAIL;
   const password = process.env.TDMAX_PASSWORD;
@@ -456,6 +534,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
         username: email.toLowerCase(),
         password: password,
       }),
+      ...fetchOpts,
     });
     
     // Capturar todas las cookies del login
@@ -492,6 +571,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName) => {
     const lbResp = await fetch(lbUrl, {
       headers: lbHeaders,
       signal: AbortSignal.timeout(15000),
+      ...fetchOpts,
     });
     
     if (!lbResp.ok) {
@@ -553,25 +633,27 @@ const scrapeStreamUrlRemote = async (channelId, channelName) => {
 };
 
 // Obtiene stream URL: primero intenta LOCAL (mismo IP), luego REMOTO (Edge Function)
-const scrapeStreamUrl = async (channelId, channelName) => {
+const scrapeStreamUrl = async (channelId, channelName, opts = {}) => {
   // Intentar primero scraping local (para que el token se genere con la IP del VPS)
-  const localResult = await scrapeStreamUrlLocal(channelId, channelName);
+  const localResult = await scrapeStreamUrlLocal(channelId, channelName, opts);
   if (localResult.url) {
     return localResult;
   }
   
   sendLog('system', 'warn', `⚠️ Scraping local falló (${localResult.error}), intentando vía Edge Function...`);
   
-  // Fallback: Edge Function
+  // Fallback: Edge Function (NOTA: la edge function NO usa proxy; si Tigo requiere proxy
+  // estricto, este fallback puede fallar y será mejor que el local-via-proxy reintente)
   return await scrapeStreamUrlRemote(channelId, channelName);
 };
 
 const scrapeStreamUrlWithRetries = async (process_id, channelId, channelName) => {
   let lastError = 'No se obtuvo URL';
+  const useProxy = PROXY_PROCESSES.has(String(process_id));
 
   for (let attempt = 1; attempt <= RECOVERY_SCRAPE_ATTEMPTS; attempt++) {
     try {
-      const result = await scrapeStreamUrl(channelId, channelName);
+      const result = await scrapeStreamUrl(channelId, channelName, { useProxy });
 
       if (result?.url) {
         if (attempt > 1) {
@@ -1042,7 +1124,8 @@ app.post('/api/local-scrape', async (req, res) => {
     }
     
     const channelName = CHANNEL_MAP[process_id]?.channelName || `Canal ${channel_id.substring(0, 8)}`;
-    const result = await scrapeStreamUrlLocal(channel_id, channelName);
+    const useProxy = PROXY_PROCESSES.has(String(process_id));
+    const result = await scrapeStreamUrlLocal(channel_id, channelName, { useProxy });
     
     if (!result.url) {
       return res.json({ success: false, error: result.error || 'No se obtuvo URL' });
@@ -1599,11 +1682,31 @@ app.post('/api/emit', async (req, res) => {
       );
     }
 
-    const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
-    sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 100)}...`);
+    // ── Inyección de proxy SOCKS5 vía proxychains4 (solo procesos en PROXY_PROCESSES) ──
+    // Envolvemos FFmpeg con `proxychains4 -f /tmp/proxychains-tigo.conf ffmpeg ...`
+    // para enrutar manifiesto + segmentos HLS por la IP residencial CR del Pi 5.
+    let spawnCmd = 'ffmpeg';
+    let spawnArgs = ffmpegArgs;
+    if (PROXY_PROCESSES.has(process_id)) {
+      if (!isProxychainsAvailable()) {
+        sendLog(process_id, 'error', `❌ proxychains4 no está instalado en el VPS. Ejecuta: apt install -y proxychains4`);
+        return res.status(500).json({ error: 'proxychains4 no instalado en el VPS' });
+      }
+      const confPath = ensureProxychainsConf();
+      if (!confPath) {
+        sendLog(process_id, 'error', `❌ No se pudo generar config de proxychains`);
+        return res.status(500).json({ error: 'Error generando config de proxychains' });
+      }
+      spawnCmd = 'proxychains4';
+      spawnArgs = ['-q', '-f', confPath, 'ffmpeg', ...ffmpegArgs];
+      sendLog(process_id, 'success', `🌍 FFmpeg enrutado vía proxy SOCKS5 ${TIGO_PROXY_URL}`);
+    }
 
-    // Ejecutar ffmpeg
-    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+    const commandStr = spawnCmd + ' ' + spawnArgs.join(' ');
+    sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 120)}...`);
+
+    // Ejecutar ffmpeg (posiblemente envuelto en proxychains)
+    const ffmpegProcess = spawn(spawnCmd, spawnArgs);
     const processInfo = { 
       process: ffmpegProcess, 
       status: 'starting',

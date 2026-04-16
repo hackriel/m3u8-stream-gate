@@ -59,6 +59,15 @@ else
   ok "FFmpeg instalado"
 fi
 
+# ── Paso 3.5: Instalar proxychains4 (necesario para Tigo URL vía Pi 5) ──
+echo "🌐 [3.5/8] Instalando proxychains4 (proxy SOCKS5 para Tigo)..."
+if command -v proxychains4 &>/dev/null; then
+  ok "proxychains4 ya instalado"
+else
+  apt install -y proxychains4
+  ok "proxychains4 instalado"
+fi
+
 # ── Paso 3b: Optimizar TCP keepalive para RTMP ──
 echo "🔧 [3b/8] Configurando TCP keepalive para estabilidad RTMP..."
 sysctl -w net.ipv4.tcp_keepalive_time=60 > /dev/null 2>&1
