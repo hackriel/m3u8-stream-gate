@@ -893,15 +893,53 @@ export default function EmisorM3U8Panel() {
                 {/* Backup URL field removed - Canal 6 now uses single URL */}
               </>
             )}
-            <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
-            <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
-            <input
-              type="text"
-              placeholder="rtmp://fluestabiliz.giize.com/costaSTAR007"
-              value={process.rtmp}
-              onChange={(e) => updateProcess(processIndex, { rtmp: e.target.value })}
-              className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-            />
+            {HLS_OUTPUT_PROCESSES.has(processIndex) ? (
+              // HLS Output: mostrar URL generada en vez de input RTMP
+              <>
+                <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
+                <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
+                  {process.isEmitiendo ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">Tu URL estable para XUI:</p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
+                          {`${window.location.protocol}//${window.location.host}/live/futv/playlist.m3u8`}
+                        </code>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(`${window.location.protocol}//${window.location.host}/live/futv/playlist.m3u8`);
+                            toast.success('URL copiada al portapapeles');
+                          }}
+                          className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
+                        >
+                          📋
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        💡 Esta URL es fija y no cambia. Agrégala directamente a XUI como source.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      La URL se generará al iniciar la emisión. Primero obtén la señal FUTV y presiona "Emitir HLS".
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : (
+              // RTMP normal
+              <>
+                <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
+                <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
+                <input
+                  type="text"
+                  placeholder="rtmp://fluestabiliz.giize.com/costaSTAR007"
+                  value={process.rtmp}
+                  onChange={(e) => updateProcess(processIndex, { rtmp: e.target.value })}
+                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+                />
+              </>
+            )}
 
             <div className="flex gap-3 items-center flex-wrap">
               {!process.isEmitiendo ? (
@@ -909,7 +947,7 @@ export default function EmisorM3U8Panel() {
                   onClick={() => startEmitToRTMP(processIndex)} 
                   className="px-6 py-3 rounded-xl bg-primary hover:bg-primary/90 active:scale-[.98] transition-all duration-200 font-medium text-primary-foreground shadow-lg hover:shadow-xl"
                 >
-                  🚀 Emitir a RTMP
+                  {HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
                 </button>
               ) : (
                 <button 
