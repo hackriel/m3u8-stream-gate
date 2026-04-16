@@ -9,6 +9,9 @@ import multer from 'multer';
 import fs from 'fs';
 import os from 'os';
 import { createClient } from '@supabase/supabase-js';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+import { Agent, fetch as undiciFetch } from 'undici';
+
 
 // Configurar cliente de Supabase (opcional, solo si hay variables de entorno)
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -444,9 +447,13 @@ const STREANN_RESELLER_ID = '61316705e4b0295f87dae396';
 const STREANN_BASE_URL = 'https://cf.streann.tech';
 
 // Scraping LOCAL (directo desde el VPS) — el token se genera con la IP del VPS
-// así el CDN valida correctamente la IP que hace el request de video
-const scrapeStreamUrlLocal = async (channelId, channelName) => {
-  sendLog('system', 'info', `🔄 Scraping LOCAL ${channelName}: obteniendo URL desde VPS...`);
+// así el CDN valida correctamente la IP que hace el request de video.
+// Si useProxy=true, todo el tráfico (login + token) sale por el SOCKS5 del Pi 5
+// para que el token quede vinculado a la IP residencial CR (caso Tigo).
+const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false } = {}) => {
+  const tag = useProxy ? 'LOCAL via Pi5 (CR)' : 'LOCAL';
+  sendLog('system', 'info', `🔄 Scraping ${tag} ${channelName}: obteniendo URL...`);
+  const fetchOpts = useProxy ? { dispatcher: getProxyDispatcher() } : {};
   
   const email = process.env.TDMAX_EMAIL;
   const password = process.env.TDMAX_PASSWORD;
