@@ -1680,11 +1680,31 @@ app.post('/api/emit', async (req, res) => {
       );
     }
 
-    const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
-    sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 100)}...`);
+    // ── Inyección de proxy SOCKS5 vía proxychains4 (solo procesos en PROXY_PROCESSES) ──
+    // Envolvemos FFmpeg con `proxychains4 -f /tmp/proxychains-tigo.conf ffmpeg ...`
+    // para enrutar manifiesto + segmentos HLS por la IP residencial CR del Pi 5.
+    let spawnCmd = 'ffmpeg';
+    let spawnArgs = ffmpegArgs;
+    if (PROXY_PROCESSES.has(process_id)) {
+      if (!isProxychainsAvailable()) {
+        sendLog(process_id, 'error', `❌ proxychains4 no está instalado en el VPS. Ejecuta: apt install -y proxychains4`);
+        return res.status(500).json({ error: 'proxychains4 no instalado en el VPS' });
+      }
+      const confPath = ensureProxychainsConf();
+      if (!confPath) {
+        sendLog(process_id, 'error', `❌ No se pudo generar config de proxychains`);
+        return res.status(500).json({ error: 'Error generando config de proxychains' });
+      }
+      spawnCmd = 'proxychains4';
+      spawnArgs = ['-q', '-f', confPath, 'ffmpeg', ...ffmpegArgs];
+      sendLog(process_id, 'success', `🌍 FFmpeg enrutado vía proxy SOCKS5 ${TIGO_PROXY_URL}`);
+    }
 
-    // Ejecutar ffmpeg
-    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+    const commandStr = spawnCmd + ' ' + spawnArgs.join(' ');
+    sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 120)}...`);
+
+    // Ejecutar ffmpeg (posiblemente envuelto en proxychains)
+    const ffmpegProcess = spawn(spawnCmd, spawnArgs);
     const processInfo = { 
       process: ffmpegProcess, 
       status: 'starting',
