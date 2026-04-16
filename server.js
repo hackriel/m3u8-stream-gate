@@ -2805,6 +2805,16 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Endpoint para obtener la URL HLS de un proceso
+app.get('/api/hls-url', (req, res) => {
+  const { process_id } = req.query;
+  if (!process_id || !HLS_OUTPUT_PROCESSES.has(String(process_id))) {
+    return res.status(400).json({ error: 'Proceso no es HLS output' });
+  }
+  const slug = HLS_SLUG_MAP[String(process_id)] || `stream_${process_id}`;
+  const hlsPath = `/live/${slug}/playlist.m3u8`;
+  res.json({ success: true, path: hlsPath, slug });
+});
 
 
 // ===== MÉTRICAS DEL SERVIDOR =====
