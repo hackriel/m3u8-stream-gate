@@ -1071,11 +1071,12 @@ app.post('/api/emit', async (req, res) => {
     const process_id = String(rawProcessId);
     const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
+    const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
 
-    // Validación de ID: debe ser un número entre 0 y 10
-    if (isNaN(numericId) || numericId < 0 || numericId > 10) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-10)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 10` });
+    // Validación de ID: debe ser un número entre 0 y 11
+    if (isNaN(numericId) || numericId < 0 || numericId > 11) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-11)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 11` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
