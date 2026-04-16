@@ -1559,11 +1559,44 @@ app.post('/api/emit', async (req, res) => {
       '-ar', '44100',
       '-max_muxing_queue_size', '1024',
       '-reset_timestamps', '1',
-      '-f', 'flv',
-      '-flvflags', 'no_duration_filesize',
-      '-rtmp_live', 'live',
-      target_rtmp,
     ];
+
+    // === OUTPUT: HLS local o RTMP ===
+    if (isHlsOutput) {
+      const hlsSlug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
+      const hlsDir = path.join(HLS_OUTPUT_DIR, hlsSlug);
+      if (!fs.existsSync(hlsDir)) {
+        fs.mkdirSync(hlsDir, { recursive: true });
+      }
+      // Limpiar segmentos anteriores
+      try {
+        const oldFiles = fs.readdirSync(hlsDir);
+        for (const f of oldFiles) {
+          fs.unlinkSync(path.join(hlsDir, f));
+        }
+      } catch (_) {}
+
+      const hlsPlaylistPath = path.join(hlsDir, 'playlist.m3u8');
+      ffmpegArgs.push(
+        '-f', 'hls',
+        '-hls_time', '4',                    // 4s segments (balance latencia/estabilidad)
+        '-hls_list_size', '6',               // Mantener 6 segmentos en playlist (24s de buffer)
+        '-hls_flags', 'delete_segments+append_list+independent_segments',
+        '-hls_segment_type', 'mpegts',
+        '-hls_segment_filename', path.join(hlsDir, 'seg_%05d.ts'),
+        '-hls_allow_cache', '1',
+        '-hls_start_number_source', 'epoch',  // Números de segmento únicos por sesión
+        hlsPlaylistPath
+      );
+      sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8`);
+    } else {
+      ffmpegArgs.push(
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        '-rtmp_live', 'live',
+        target_rtmp,
+      );
+    }
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 100)}...`);
