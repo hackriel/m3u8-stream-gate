@@ -15,15 +15,16 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 12;
+const NUM_PROCESSES = 13;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
+const TIGO_URL_INDEX = 12; // "TIGO URL" process - HLS output
 
 // Procesos ocultos (Tigo fue descartado por restricciones del CDN)
 const HIDDEN_PROCESSES = new Set([2, 8, 9]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -80,6 +81,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV URL", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
+  { name: "TIGO URL", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -799,6 +801,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "(oculto)" },
       { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
       { bg: "bg-emerald-500", text: "text-emerald-500", stroke: "#10b981", name: "FUTV URL" },
+      { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "TIGO URL" },
     ];
     return colors[processIndex];
   };
