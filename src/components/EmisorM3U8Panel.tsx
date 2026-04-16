@@ -79,6 +79,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 8: Tigo (descartado)
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
+  { name: "FUTV URL", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
