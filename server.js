@@ -1091,7 +1091,7 @@ app.post('/api/emit', async (req, res) => {
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
 
     // Validaciones
-    if (!effectiveSourceM3u8 || !target_rtmp) {
+    if (!effectiveSourceM3u8 || (!target_rtmp && !isHlsOutput)) {
       sendLog(process_id, 'error', 'Faltan parámetros requeridos: source_m3u8 y target_rtmp');
       return res.status(400).json({ 
         error: 'Faltan parámetros requeridos: source_m3u8 y target_rtmp' 
