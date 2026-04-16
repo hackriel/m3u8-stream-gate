@@ -126,6 +126,30 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
+// ===== HLS OUTPUT: Directorio para segmentos HLS locales =====
+const HLS_OUTPUT_DIR = path.join(__dirname, 'live');
+if (!fs.existsSync(HLS_OUTPUT_DIR)) {
+  fs.mkdirSync(HLS_OUTPUT_DIR, { recursive: true });
+}
+// Servir segmentos HLS con headers correctos para XUI/IPTV
+app.use('/live', (req, res, next) => {
+  // CORS permisivo para reproductores IPTV
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  // Cache headers para HLS: segmentos .ts se cachean, playlist .m3u8 no
+  if (req.path.endsWith('.m3u8')) {
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  } else if (req.path.endsWith('.ts')) {
+    res.setHeader('Content-Type', 'video/MP2T');
+    res.setHeader('Cache-Control', 'public, max-age=30');
+  }
+  next();
+}, express.static(HLS_OUTPUT_DIR));
+
 // Variables globales para manejo de múltiples procesos ffmpeg
 const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTime, target_rtmp }>
 const emissionStatuses = new Map(); // Map<processId, status>
@@ -217,7 +241,13 @@ const CHANNEL_MAP = {
   '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
   
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
+  '11': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV URL' },
 };
+
+// Procesos que emiten a HLS local en vez de RTMP
+const HLS_OUTPUT_PROCESSES = new Set(['11']);
+// Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
+const HLS_SLUG_MAP = { '11': 'futv' };
 
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
@@ -228,11 +258,11 @@ const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10']);
 // Fuentes que usan -re (lectura a tasa nativa) — TODOS los canales lo necesitan
 // Sin -re, FFmpeg lee a velocidad CPU (70-100fps), agota los segmentos HLS y causa EOF prematuro
-const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10']);
+const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11']);
 // Procesos con cadencia CFR (vsync cfr + 29.97fps) - canales de emisión EXCEPTO Disney 7 (TUDN)
 // Disney 7 (ID 0) usa valores enteros (30fps/GOP60) porque el servidor RTMP destino
 // rechaza conexiones con GOP decimal (59.94) causando Broken pipe a los ~120s
-const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10']);
+const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
