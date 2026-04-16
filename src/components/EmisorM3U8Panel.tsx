@@ -15,12 +15,15 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 11;
+const NUM_PROCESSES = 12;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
+const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
 
 // Procesos ocultos (Tigo fue descartado por restricciones del CDN)
 const HIDDEN_PROCESSES = new Set([2, 8, 9]);
+// Procesos que emiten HLS local (sin RTMP)
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
