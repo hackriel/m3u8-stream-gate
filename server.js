@@ -719,7 +719,8 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       if (row?.rtmp) targetRtmp = row.rtmp;
     }
     
-    if (!targetRtmp) {
+    // HLS output processes don't need RTMP target
+    if (!targetRtmp && !HLS_OUTPUT_PROCESSES.has(String(process_id))) {
       sendLog(process_id, 'error', `❌ AUTO-RECOVERY: No se encontró RTMP destino para proceso ${process_id}`);
       autoRecoveryInProgress.set(process_id, false);
       return;
