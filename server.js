@@ -1161,7 +1161,7 @@ app.post('/api/emit', async (req, res) => {
       const upsertData = {
           id: parseInt(process_id),
           m3u8: effectiveSourceM3u8,
-          rtmp: target_rtmp,
+          rtmp: isHlsOutput ? 'hls-local' : target_rtmp,
           source_url: effectiveSourceM3u8,
           is_active: true,
           is_emitting: true,
