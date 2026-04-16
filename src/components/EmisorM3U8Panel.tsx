@@ -37,7 +37,7 @@ interface EmissionProcess {
   isEmitiendo: boolean;
   elapsed: number;
   startTime: number;
-  emitStatus: "idle" | "starting" | "running" | "stopping" | "error" | "waiting_cdn";
+  emitStatus: "idle" | "starting" | "running" | "stopping" | "stopped" | "error" | "waiting_cdn";
   emitMsg: string;
   reconnectAttempts: number;
   lastReconnectTime: number;
