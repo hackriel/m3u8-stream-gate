@@ -587,11 +587,12 @@ export default function EmisorM3U8Panel() {
       return;
     }
 
-    // Procesos M3U8 -> RTMP
-    if (!process.m3u8 || !process.rtmp) {
+    // Procesos M3U8 -> RTMP o HLS local
+    const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
+    if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
-        emitMsg: "Falta M3U8 o RTMP"
+        emitMsg: isHlsOutput ? "Falta M3U8 (haz clic en Obtener URL)" : "Falta M3U8 o RTMP"
       });
       return;
     }
@@ -611,7 +612,7 @@ export default function EmisorM3U8Panel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source_m3u8: process.m3u8,
-          target_rtmp: process.rtmp,
+          target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString()
         })
       });
