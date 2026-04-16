@@ -1428,6 +1428,16 @@ app.post('/api/emit', async (req, res) => {
         '-m3u8_hold_counters', '1000'
       );
       sendLog(process_id, 'info', `🔧 Akamai CDN: modo resiliente con reconnect + hold counters`);
+    } else if (isProxyScrapedSource) {
+      // Tigo via Pi5 SOCKS5: el proxy residencial introduce jitter de red.
+      // Aumentar tolerancia HLS al máximo y arrancar 3 segmentos atrás
+      // para tener buffer de seguridad ante micro-pausas del proxy.
+      hardenedLiveInputArgs.push(
+        '-http_seekable', '0',
+        '-live_start_index', '-3',
+        '-max_reload', '1000',
+        '-m3u8_hold_counters', '1000'
+      );
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
@@ -1706,8 +1716,8 @@ app.post('/api/emit', async (req, res) => {
       ...inputArgs,
       ...hardenedLiveInputArgs,
       '-fflags', fflags,
-      '-analyzeduration', (isUnivisionLikeSource || isAkamaiSource) ? '10000000' : analyzeDuration,  // 10s para VLC-like profiles
-      '-probesize', (isUnivisionLikeSource || isAkamaiSource) ? '5000000' : probeSize,               // 5MB para VLC-like profiles
+      '-analyzeduration', (isUnivisionLikeSource || isAkamaiSource || isProxyScrapedSource) ? '10000000' : analyzeDuration,  // 10s para VLC-like profiles + proxy
+      '-probesize', (isUnivisionLikeSource || isAkamaiSource || isProxyScrapedSource) ? '5000000' : probeSize,               // 5MB para VLC-like profiles + proxy
       '-i', inputSourceUrl,
       // Univision: auto-selección + skip subtítulos EIA-608
       // Scrapeados: map por programa HLS
