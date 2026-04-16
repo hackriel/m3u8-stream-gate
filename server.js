@@ -8,9 +8,10 @@ import { createServer } from 'http';
 import multer from 'multer';
 import fs from 'fs';
 import os from 'os';
+import http from 'http';
+import https from 'https';
 import { createClient } from '@supabase/supabase-js';
 import { SocksProxyAgent } from 'socks-proxy-agent';
-import { Agent, fetch as undiciFetch } from 'undici';
 
 
 // Configurar cliente de Supabase (opcional, solo si hay variables de entorno)
@@ -266,23 +267,79 @@ const PROXY_PROCESSES = new Set(['12']);
 // Config dinámica generada en /tmp para no chocar con instalación global
 const PROXYCHAINS_CONF_PATH = '/tmp/proxychains-tigo.conf';
 
-// Cache del dispatcher SOCKS5 para reutilizar conexiones (undici).
-// undici acepta una función `connect` personalizada que devuelve un socket;
-// SocksProxyAgent.createConnection abre un socket SOCKS5 hacia el host destino.
-let _proxyDispatcher = null;
-const getProxyDispatcher = () => {
-  if (_proxyDispatcher) return _proxyDispatcher;
-  const socksAgent = new SocksProxyAgent(TIGO_PROXY_URL);
-  _proxyDispatcher = new Agent({
-    connect: (opts, cb) => {
-      socksAgent.createConnection(
-        { host: opts.hostname, port: Number(opts.port), ...opts },
-        cb
-      );
-    },
-    connectTimeout: 15000,
+// Cache del agent SOCKS5 para reutilizar conexiones HTTP/HTTPS.
+// `socks-proxy-agent` es compatible con Node 20 y funciona con http/https.request.
+let _proxyAgent = null;
+const getProxyAgent = () => {
+  if (_proxyAgent) return _proxyAgent;
+  _proxyAgent = new SocksProxyAgent(TIGO_PROXY_URL);
+  return _proxyAgent;
+};
+
+const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
+  if (!useProxy) {
+    return fetch(url, options);
+  }
+
+  return new Promise((resolve, reject) => {
+    const targetUrl = new URL(url);
+    const transport = targetUrl.protocol === 'https:' ? https : http;
+    const request = transport.request(url, {
+      method: options.method || 'GET',
+      headers: options.headers || {},
+      agent: getProxyAgent(),
+      timeout: 15000,
+    }, (response) => {
+      const chunks = [];
+
+      response.on('data', (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+
+      response.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        const setCookie = response.headers['set-cookie'];
+
+        resolve({
+          ok: (response.statusCode || 0) >= 200 && (response.statusCode || 0) < 300,
+          status: response.statusCode || 0,
+          headers: {
+            get: (name) => {
+              const value = response.headers[name.toLowerCase()];
+              return Array.isArray(value) ? value.join(', ') : (value ?? null);
+            },
+            getSetCookie: () => Array.isArray(setCookie) ? setCookie : (setCookie ? [setCookie] : []),
+          },
+          text: async () => body,
+          json: async () => {
+            try {
+              return JSON.parse(body || '{}');
+            } catch (err) {
+              throw new Error(`Respuesta JSON inválida del upstream: ${err.message}`);
+            }
+          },
+        });
+      });
+    });
+
+    const abortHandler = () => request.destroy(new Error('Request aborted'));
+    if (options.signal) {
+      if (options.signal.aborted) {
+        request.destroy(new Error('Request aborted'));
+        return reject(new Error('Request aborted'));
+      }
+      options.signal.addEventListener('abort', abortHandler, { once: true });
+    }
+
+    request.on('timeout', () => request.destroy(new Error('Request timeout')));
+    request.on('error', reject);
+
+    if (options.body) {
+      request.write(options.body);
+    }
+
+    request.end();
   });
-  return _proxyDispatcher;
 };
 
 // Genera /tmp/proxychains-tigo.conf apuntando a TIGO_PROXY_URL.
@@ -510,7 +567,6 @@ const STREANN_BASE_URL = 'https://cf.streann.tech';
 const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false } = {}) => {
   const tag = useProxy ? 'LOCAL via Pi5 (CR)' : 'LOCAL';
   sendLog('system', 'info', `🔄 Scraping ${tag} ${channelName}: obteniendo URL...`);
-  const fetchOpts = useProxy ? { dispatcher: getProxyDispatcher() } : {};
   
   const email = process.env.TDMAX_EMAIL;
   const password = process.env.TDMAX_PASSWORD;
@@ -521,7 +577,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
   
   try {
     // Paso 1: Login — capturar cookies de la respuesta
-    const loginResp = await fetch(`${STREANN_BASE_URL}/web/services/v3/external/login?r=${STREANN_RESELLER_ID}`, {
+    const loginResp = await fetchWithOptionalProxy(`${STREANN_BASE_URL}/web/services/v3/external/login?r=${STREANN_RESELLER_ID}`, {
       method: 'POST',
       signal: AbortSignal.timeout(15000),
       headers: {
@@ -534,8 +590,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
         username: email.toLowerCase(),
         password: password,
       }),
-      ...fetchOpts,
-    });
+    }, useProxy);
     
     // Capturar todas las cookies del login
     const loginCookies = loginResp.headers.getSetCookie ? loginResp.headers.getSetCookie() : [];
@@ -568,11 +623,10 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
       lbHeaders['Cookie'] = loginCookieStr;
     }
     
-    const lbResp = await fetch(lbUrl, {
+    const lbResp = await fetchWithOptionalProxy(lbUrl, {
       headers: lbHeaders,
       signal: AbortSignal.timeout(15000),
-      ...fetchOpts,
-    });
+    }, useProxy);
     
     if (!lbResp.ok) {
       const errorText = await lbResp.text();
