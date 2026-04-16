@@ -633,25 +633,27 @@ const scrapeStreamUrlRemote = async (channelId, channelName) => {
 };
 
 // Obtiene stream URL: primero intenta LOCAL (mismo IP), luego REMOTO (Edge Function)
-const scrapeStreamUrl = async (channelId, channelName) => {
+const scrapeStreamUrl = async (channelId, channelName, opts = {}) => {
   // Intentar primero scraping local (para que el token se genere con la IP del VPS)
-  const localResult = await scrapeStreamUrlLocal(channelId, channelName);
+  const localResult = await scrapeStreamUrlLocal(channelId, channelName, opts);
   if (localResult.url) {
     return localResult;
   }
   
   sendLog('system', 'warn', `⚠️ Scraping local falló (${localResult.error}), intentando vía Edge Function...`);
   
-  // Fallback: Edge Function
+  // Fallback: Edge Function (NOTA: la edge function NO usa proxy; si Tigo requiere proxy
+  // estricto, este fallback puede fallar y será mejor que el local-via-proxy reintente)
   return await scrapeStreamUrlRemote(channelId, channelName);
 };
 
 const scrapeStreamUrlWithRetries = async (process_id, channelId, channelName) => {
   let lastError = 'No se obtuvo URL';
+  const useProxy = PROXY_PROCESSES.has(String(process_id));
 
   for (let attempt = 1; attempt <= RECOVERY_SCRAPE_ATTEMPTS; attempt++) {
     try {
-      const result = await scrapeStreamUrl(channelId, channelName);
+      const result = await scrapeStreamUrl(channelId, channelName, { useProxy });
 
       if (result?.url) {
         if (attempt > 1) {
