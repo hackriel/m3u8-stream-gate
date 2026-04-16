@@ -266,18 +266,22 @@ const PROXY_PROCESSES = new Set(['12']);
 // Config dinámica generada en /tmp para no chocar con instalación global
 const PROXYCHAINS_CONF_PATH = '/tmp/proxychains-tigo.conf';
 
-// Cache del dispatcher SOCKS5 para reutilizar conexiones (undici)
+// Cache del dispatcher SOCKS5 para reutilizar conexiones (undici).
+// undici acepta una función `connect` personalizada que devuelve un socket;
+// SocksProxyAgent.createConnection abre un socket SOCKS5 hacia el host destino.
 let _proxyDispatcher = null;
 const getProxyDispatcher = () => {
   if (_proxyDispatcher) return _proxyDispatcher;
-  const agent = new SocksProxyAgent(TIGO_PROXY_URL);
-  // Usamos undici Agent con connect personalizado vía SocksProxyAgent
+  const socksAgent = new SocksProxyAgent(TIGO_PROXY_URL);
   _proxyDispatcher = new Agent({
-    connect: { socket: agent },
+    connect: (opts, cb) => {
+      socksAgent.createConnection(
+        { host: opts.hostname, port: Number(opts.port), ...opts },
+        cb
+      );
+    },
     connectTimeout: 15000,
   });
-  // Fallback simple: si Agent no acepta socket personalizado, usar undici con socksDispatcher manual.
-  // En la práctica más confiable: exportar un dispatcher dedicado.
   return _proxyDispatcher;
 };
 
