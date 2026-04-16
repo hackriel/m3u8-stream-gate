@@ -245,9 +245,9 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11']);
+const HLS_OUTPUT_PROCESSES = new Set(['11', '12']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
-const HLS_SLUG_MAP = { '11': 'futv' };
+const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo' };
 
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
@@ -258,11 +258,11 @@ const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10']);
 // Fuentes que usan -re (lectura a tasa nativa) — TODOS los canales lo necesitan
 // Sin -re, FFmpeg lee a velocidad CPU (70-100fps), agota los segmentos HLS y causa EOF prematuro
-const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11']);
+const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11', '12']);
 // Procesos con cadencia CFR (vsync cfr + 29.97fps) - canales de emisión EXCEPTO Disney 7 (TUDN)
 // Disney 7 (ID 0) usa valores enteros (30fps/GOP60) porque el servidor RTMP destino
 // rechaza conexiones con GOP decimal (59.94) causando Broken pipe a los ~120s
-const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11']);
+const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11', '12']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
@@ -1075,9 +1075,9 @@ app.post('/api/emit', async (req, res) => {
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
 
     // Validación de ID: debe ser un número entre 0 y 11
-    if (isNaN(numericId) || numericId < 0 || numericId > 11) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-11)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 11` });
+    if (isNaN(numericId) || numericId < 0 || numericId > 12) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-12)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 12` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -2781,7 +2781,7 @@ app.get('/api/status', (req, res) => {
   } else {
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i <= 11; i++) {
+    for (let i = 0; i <= 12; i++) {
       const id = i.toString();
       const processData = ffmpegProcesses.get(id);
       allStatuses[id] = {
