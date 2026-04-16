@@ -242,12 +242,26 @@ const CHANNEL_MAP = {
   
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
   '11': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV URL' },
+  '12': { channelId: '664237788f085ac1f2a15f81', channelName: 'TIGO URL' },
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
 const HLS_OUTPUT_PROCESSES = new Set(['11', '12']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo' };
+
+// ───────────────────────────────────────────────────────────────────────
+// PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
+// El proxy enruta tanto el scraping (login/token TDMax) como el consumo
+// FFmpeg (manifiesto + segmentos HLS) por la IP residencial CR para
+// evitar el geobloqueo y la validación de IP del CDN de Tigo.
+// ───────────────────────────────────────────────────────────────────────
+const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://200.91.131.146:1080';
+// IDs de proceso que deben enrutar TODO su tráfico (scraping + FFmpeg) por el proxy
+const PROXY_PROCESSES = new Set(['12']);
+// Comando proxychains4 (instalable con: apt install -y proxychains4)
+// Config dinámica generada en /tmp para no chocar con instalación global
+const PROXYCHAINS_CONF_PATH = '/tmp/proxychains-tigo.conf';
 
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
