@@ -126,6 +126,30 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
+// ===== HLS OUTPUT: Directorio para segmentos HLS locales =====
+const HLS_OUTPUT_DIR = path.join(__dirname, 'live');
+if (!fs.existsSync(HLS_OUTPUT_DIR)) {
+  fs.mkdirSync(HLS_OUTPUT_DIR, { recursive: true });
+}
+// Servir segmentos HLS con headers correctos para XUI/IPTV
+app.use('/live', (req, res, next) => {
+  // CORS permisivo para reproductores IPTV
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  // Cache headers para HLS: segmentos .ts se cachean, playlist .m3u8 no
+  if (req.path.endsWith('.m3u8')) {
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  } else if (req.path.endsWith('.ts')) {
+    res.setHeader('Content-Type', 'video/MP2T');
+    res.setHeader('Cache-Control', 'public, max-age=30');
+  }
+  next();
+}, express.static(HLS_OUTPUT_DIR));
+
 // Variables globales para manejo de múltiples procesos ffmpeg
 const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTime, target_rtmp }>
 const emissionStatuses = new Map(); // Map<processId, status>
@@ -217,7 +241,13 @@ const CHANNEL_MAP = {
   '4': { channelId: '617c2f66e4b045a692106126', channelName: 'Teletica' },
   
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
+  '11': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV URL' },
 };
+
+// Procesos que emiten a HLS local en vez de RTMP
+const HLS_OUTPUT_PROCESSES = new Set(['11']);
+// Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
+const HLS_SLUG_MAP = { '11': 'futv' };
 
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
@@ -228,11 +258,11 @@ const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10']);
 // Fuentes que usan -re (lectura a tasa nativa) — TODOS los canales lo necesitan
 // Sin -re, FFmpeg lee a velocidad CPU (70-100fps), agota los segmentos HLS y causa EOF prematuro
-const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10']);
+const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11']);
 // Procesos con cadencia CFR (vsync cfr + 29.97fps) - canales de emisión EXCEPTO Disney 7 (TUDN)
 // Disney 7 (ID 0) usa valores enteros (30fps/GOP60) porque el servidor RTMP destino
 // rechaza conexiones con GOP decimal (59.94) causando Broken pipe a los ~120s
-const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10']);
+const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
@@ -689,7 +719,8 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       if (row?.rtmp) targetRtmp = row.rtmp;
     }
     
-    if (!targetRtmp) {
+    // HLS output processes don't need RTMP target
+    if (!targetRtmp && !HLS_OUTPUT_PROCESSES.has(String(process_id))) {
       sendLog(process_id, 'error', `❌ AUTO-RECOVERY: No se encontró RTMP destino para proceso ${process_id}`);
       autoRecoveryInProgress.set(process_id, false);
       return;
@@ -712,7 +743,7 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         source_m3u8: newUrl,
-        target_rtmp: targetRtmp,
+        target_rtmp: targetRtmp || 'hls-local',
         process_id: process_id,
         is_recovery: true
       })
@@ -1041,11 +1072,12 @@ app.post('/api/emit', async (req, res) => {
     const process_id = String(rawProcessId);
     const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
+    const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
 
-    // Validación de ID: debe ser un número entre 0 y 10
-    if (isNaN(numericId) || numericId < 0 || numericId > 10) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-10)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 10` });
+    // Validación de ID: debe ser un número entre 0 y 11
+    if (isNaN(numericId) || numericId < 0 || numericId > 11) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-11)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 11` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -1060,7 +1092,7 @@ app.post('/api/emit', async (req, res) => {
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
 
     // Validaciones
-    if (!effectiveSourceM3u8 || !target_rtmp) {
+    if (!effectiveSourceM3u8 || (!target_rtmp && !isHlsOutput)) {
       sendLog(process_id, 'error', 'Faltan parámetros requeridos: source_m3u8 y target_rtmp');
       return res.status(400).json({ 
         error: 'Faltan parámetros requeridos: source_m3u8 y target_rtmp' 
@@ -1071,8 +1103,8 @@ app.post('/api/emit', async (req, res) => {
 
     // (Tigo processes removed — dead code cleaned up)
 
-    // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP
-    const conflictingProcessId = checkRTMPConflict(target_rtmp, process_id);
+    // VALIDACIÓN CRÍTICA: Verificar conflicto de destino RTMP (skip para HLS output)
+    const conflictingProcessId = isHlsOutput ? null : checkRTMPConflict(target_rtmp, process_id);
     if (conflictingProcessId) {
       const conflictingProcess = ffmpegProcesses.get(conflictingProcessId);
       sendLog(process_id, 'error', `⚠️ CONFLICTO: El destino RTMP ya está en uso por Proceso ${conflictingProcessId}`);
@@ -1129,7 +1161,7 @@ app.post('/api/emit', async (req, res) => {
       const upsertData = {
           id: parseInt(process_id),
           m3u8: effectiveSourceM3u8,
-          rtmp: target_rtmp,
+          rtmp: isHlsOutput ? 'hls-local' : target_rtmp,
           source_url: effectiveSourceM3u8,
           is_active: true,
           is_emitting: true,
@@ -1528,11 +1560,44 @@ app.post('/api/emit', async (req, res) => {
       '-ar', '44100',
       '-max_muxing_queue_size', '1024',
       '-reset_timestamps', '1',
-      '-f', 'flv',
-      '-flvflags', 'no_duration_filesize',
-      '-rtmp_live', 'live',
-      target_rtmp,
     ];
+
+    // === OUTPUT: HLS local o RTMP ===
+    if (isHlsOutput) {
+      const hlsSlug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
+      const hlsDir = path.join(HLS_OUTPUT_DIR, hlsSlug);
+      if (!fs.existsSync(hlsDir)) {
+        fs.mkdirSync(hlsDir, { recursive: true });
+      }
+      // Limpiar segmentos anteriores
+      try {
+        const oldFiles = fs.readdirSync(hlsDir);
+        for (const f of oldFiles) {
+          fs.unlinkSync(path.join(hlsDir, f));
+        }
+      } catch (_) {}
+
+      const hlsPlaylistPath = path.join(hlsDir, 'playlist.m3u8');
+      ffmpegArgs.push(
+        '-f', 'hls',
+        '-hls_time', '4',                    // 4s segments (balance latencia/estabilidad)
+        '-hls_list_size', '6',               // Mantener 6 segmentos en playlist (24s de buffer)
+        '-hls_flags', 'delete_segments+append_list+independent_segments',
+        '-hls_segment_type', 'mpegts',
+        '-hls_segment_filename', path.join(hlsDir, 'seg_%05d.ts'),
+        '-hls_allow_cache', '1',
+        '-hls_start_number_source', 'epoch',  // Números de segmento únicos por sesión
+        hlsPlaylistPath
+      );
+      sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8`);
+    } else {
+      ffmpegArgs.push(
+        '-f', 'flv',
+        '-flvflags', 'no_duration_filesize',
+        '-rtmp_live', 'live',
+        target_rtmp,
+      );
+    }
 
     const commandStr = 'ffmpeg ' + ffmpegArgs.join(' ');
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 100)}...`);
@@ -2716,7 +2781,7 @@ app.get('/api/status', (req, res) => {
   } else {
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i <= 10; i++) {
+    for (let i = 0; i <= 11; i++) {
       const id = i.toString();
       const processData = ffmpegProcesses.get(id);
       allStatuses[id] = {
@@ -2741,6 +2806,16 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Endpoint para obtener la URL HLS de un proceso
+app.get('/api/hls-url', (req, res) => {
+  const { process_id } = req.query;
+  if (!process_id || !HLS_OUTPUT_PROCESSES.has(String(process_id))) {
+    return res.status(400).json({ error: 'Proceso no es HLS output' });
+  }
+  const slug = HLS_SLUG_MAP[String(process_id)] || `stream_${process_id}`;
+  const hlsPath = `/live/${slug}/playlist.m3u8`;
+  res.json({ success: true, path: hlsPath, slug });
+});
 
 
 // ===== MÉTRICAS DEL SERVIDOR =====
@@ -2996,6 +3071,7 @@ setInterval(async () => {
 const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
+  '11': 'FUTV URL',
 };
 
 // Endpoint para toggle night_rest

@@ -15,12 +15,15 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 11;
+const NUM_PROCESSES = 12;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
+const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
 
 // Procesos ocultos (Tigo fue descartado por restricciones del CDN)
 const HIDDEN_PROCESSES = new Set([2, 8, 9]);
+// Procesos que emiten HLS local (sin RTMP)
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -76,6 +79,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 8: Tigo (descartado)
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
+  { name: "FUTV URL", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -583,11 +587,12 @@ export default function EmisorM3U8Panel() {
       return;
     }
 
-    // Procesos M3U8 -> RTMP
-    if (!process.m3u8 || !process.rtmp) {
+    // Procesos M3U8 -> RTMP o HLS local
+    const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
+    if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
-        emitMsg: "Falta M3U8 o RTMP"
+        emitMsg: isHlsOutput ? "Falta M3U8 (haz clic en Obtener URL)" : "Falta M3U8 o RTMP"
       });
       return;
     }
@@ -607,7 +612,7 @@ export default function EmisorM3U8Panel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source_m3u8: process.m3u8,
-          target_rtmp: process.rtmp,
+          target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString()
         })
       });
@@ -793,6 +798,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "(oculto)" },
       { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "(oculto)" },
       { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
+      { bg: "bg-emerald-500", text: "text-emerald-500", stroke: "#10b981", name: "FUTV URL" },
     ];
     return colors[processIndex];
   };
@@ -887,15 +893,53 @@ export default function EmisorM3U8Panel() {
                 {/* Backup URL field removed - Canal 6 now uses single URL */}
               </>
             )}
-            <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
-            <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
-            <input
-              type="text"
-              placeholder="rtmp://fluestabiliz.giize.com/costaSTAR007"
-              value={process.rtmp}
-              onChange={(e) => updateProcess(processIndex, { rtmp: e.target.value })}
-              className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-            />
+            {HLS_OUTPUT_PROCESSES.has(processIndex) ? (
+              // HLS Output: mostrar URL generada en vez de input RTMP
+              <>
+                <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
+                <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
+                  {process.isEmitiendo ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">Tu URL estable para XUI:</p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
+                          {`${window.location.protocol}//${window.location.host}/live/futv/playlist.m3u8`}
+                        </code>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(`${window.location.protocol}//${window.location.host}/live/futv/playlist.m3u8`);
+                            toast.success('URL copiada al portapapeles');
+                          }}
+                          className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
+                        >
+                          📋
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        💡 Esta URL es fija y no cambia. Agrégala directamente a XUI como source.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      La URL se generará al iniciar la emisión. Primero obtén la señal FUTV y presiona "Emitir HLS".
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : (
+              // RTMP normal
+              <>
+                <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
+                <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
+                <input
+                  type="text"
+                  placeholder="rtmp://fluestabiliz.giize.com/costaSTAR007"
+                  value={process.rtmp}
+                  onChange={(e) => updateProcess(processIndex, { rtmp: e.target.value })}
+                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+                />
+              </>
+            )}
 
             <div className="flex gap-3 items-center flex-wrap">
               {!process.isEmitiendo ? (
@@ -903,7 +947,7 @@ export default function EmisorM3U8Panel() {
                   onClick={() => startEmitToRTMP(processIndex)} 
                   className="px-6 py-3 rounded-xl bg-primary hover:bg-primary/90 active:scale-[.98] transition-all duration-200 font-medium text-primary-foreground shadow-lg hover:shadow-xl"
                 >
-                  🚀 Emitir a RTMP
+                  {HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
                 </button>
               ) : (
                 <button 
