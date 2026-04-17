@@ -1502,22 +1502,21 @@ app.post('/api/emit', async (req, res) => {
     } else if (isProxyScrapedSource) {
       // Tigo via Pi5 SOCKS5: el proxy residencial introduce jitter de red
       // (handshake SOCKS5 + TCP + TLS por cada segmento .ts).
-      // Estrategia anti-jitter:
-      //  - live_start_index -4: arrancar 4 segmentos atrás para tener buffer
+      // Estrategia anti-jitter (v3 — ajustado para token de 60s):
+      //  - live_start_index -2: arrancar 2 segmentos atrás (~12s buffer)
+      //    NOTA: -6 causaba 403 al chocar con expiración del wmsAuthSign (60s).
+      //    Con -2 hay margen para jitter pero arranca cerca del vivo.
       //  - multiple_requests 1: reusar conexión HTTP keep-alive sobre el proxy
       //    (CRÍTICO: evita renegociar SOCKS5+TLS por cada .ts → estabiliza fps)
       //  - http_persistent 1: forzar conexiones persistentes
-      //  - fflags +genpts+discardcorrupt+nobuffer: regenerar PTS y descartar
-      //    paquetes corruptos en lugar de bloquear el muxer
+      //  - fflags +genpts+discardcorrupt: regenerar PTS y descartar corruptos
       //  - rtbufsize 512M y thread_queue_size 16384: absorber bursts de jitter
       //  - max_delay 5000000 (5s): tolerancia de reordenamiento de paquetes
-      //  - live_start_index -6: arrancar 6 segmentos atrás (~36s buffer inicial)
-      //    para absorber micro-stalls del proxy residencial sin generar gap visible
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-http_persistent', '1',
         '-multiple_requests', '1',
-        '-live_start_index', '-6',
+        '-live_start_index', '-2',
         '-max_reload', '1000',
         '-m3u8_hold_counters', '1000',
         '-fflags', '+genpts+discardcorrupt',
@@ -1525,7 +1524,7 @@ app.post('/api/emit', async (req, res) => {
         '-rtbufsize', '512M',
         '-thread_queue_size', '16384'
       );
-      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter v2 (buffer 512M, start -6, max_delay 5s)`);
+      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter v3 (buffer 512M, start -2, max_delay 5s)`);
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
