@@ -444,45 +444,12 @@ const updateProxyHealth = async () => {
   return result;
 };
 
-// Pi5 stats: GET http://Pi5:8080/stats con timeout corto.
-// Si el Pi5 no tiene el mini-servicio corriendo, falla silenciosamente.
-const updatePi5Stats = async () => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 4000);
-  try {
-    const r = await fetch(PI5_STATS_URL, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    pi5StatsState.lastCheck = Date.now();
-    pi5StatsState.reachable = true;
-    pi5StatsState.cpuPct = typeof data.cpu_pct === 'number' ? Math.round(data.cpu_pct * 10) / 10 : null;
-    pi5StatsState.ramPct = typeof data.ram_pct === 'number' ? Math.round(data.ram_pct * 10) / 10 : null;
-    pi5StatsState.ramUsedMb = data.ram_used_mb ?? null;
-    pi5StatsState.ramTotalMb = data.ram_total_mb ?? null;
-    pi5StatsState.tempC = typeof data.temp_c === 'number' ? Math.round(data.temp_c * 10) / 10 : null;
-    pi5StatsState.loadAvg1 = data.load_avg_1 ?? null;
-    pi5StatsState.uptimeSec = data.uptime_sec ?? null;
-    pi5StatsState.lastError = null;
-  } catch (err) {
-    clearTimeout(timer);
-    pi5StatsState.lastCheck = Date.now();
-    pi5StatsState.reachable = false;
-    pi5StatsState.lastError = err.name === 'AbortError' ? 'timeout' : (err.message || 'unreachable');
-  }
-};
-
 // Monitor pasivo: ping al proxy cada 60s, ~50 bytes/min (despreciable)
 setInterval(() => {
   updateProxyHealth().catch(() => {});
 }, 60_000);
-// Stats Pi5 cada 60s (~80 bytes JSON, ~5KB/hora)
-setInterval(() => {
-  updatePi5Stats().catch(() => {});
-}, 60_000);
 // Primer check al arrancar (no bloqueante)
 setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
-setTimeout(() => updatePi5Stats().catch(() => {}), 5_000);
 
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
