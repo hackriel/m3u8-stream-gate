@@ -1,6 +1,6 @@
 ---
 name: tigo-pi5-socks5-proxy
-description: Proceso ID 12 (TIGO URL) enruta scraping y FFmpeg vía proxy SOCKS5 residencial Costa Rica (microsocks Pi 5 con auth user/pass). Anti-jitter v2 (buffer 512M, start -6, max_delay 5s), health-check pre-spawn, monitoreo continuo del proxy y stats hardware Pi5 (CPU/RAM/temp).
+description: Proceso ID 12 (TIGO URL) enruta scraping y FFmpeg vía proxy SOCKS5 residencial Costa Rica (microsocks Pi 5 con auth user/pass). Anti-jitter v2 (buffer 512M, start -6, max_delay 5s), health-check pre-spawn y monitoreo continuo del proxy.
 type: feature
 ---
 
@@ -26,19 +26,10 @@ Mantener `-re` (input flag) para pacing nativo. Salida CFR 29.97fps. Trade-off: 
 - `checkProxyHealth()`: TCP connect simple al puerto 1080, timeout 4s.
 - Monitor pasivo cada 60s (~50 bytes/min, despreciable). Mantiene historial de 30 muestras.
 - Pre-spawn: antes de lanzar FFmpeg con proxychains, se valida proxy. Si está caído, marca `failure_reason='proxy_down'` con mensaje claro y no spawnea.
+- Endpoint `/api/proxy-status` expone latencia actual, promedio, uptime % y último error al frontend.
 
-## Stats hardware del Pi5 (CPU/RAM/temp/load)
-- Mini-servicio Python en el Pi5 (`scripts/pi5-stats.py`) escucha en `:8080/stats`, sin dependencias externas.
-- Servicio systemd `pi5-stats.service` corre como user `ariel`, restart=always.
-- VPS hace polling HTTP cada 60s (~80 bytes JSON, ~5KB/hora — despreciable).
-- Variable env `PI5_STATS_URL` (default `http://200.91.131.146:8080/stats`).
-- Estado en `pi5StatsState`: cpuPct, ramPct, ramUsedMb, ramTotalMb, tempC, loadAvg1, uptimeSec.
-- Endpoint `/api/proxy-status` devuelve `pi5: {...}` además del estado del proxy.
-- Frontend: widget `ProxyHealthBadge` muestra dos secciones (Proxy + Hardware Pi5) con thresholds:
-  - CPU: verde <65%, amarillo 65-85%, rojo >85%
-  - RAM: verde <70%, amarillo 70-85%, rojo >85%
-  - Temp: verde <65°C, amarillo 65-75°C, rojo >75°C (throttling Pi5 a 80°C)
-- Si el Pi5 no tiene el script corriendo, la sección hardware muestra instrucciones de instalación.
+## Hardware stats Pi5 (DESCARTADO)
+Se intentó exponer CPU/RAM/temp del Pi5 vía mini-servicio HTTP en puerto 8080, pero el router residencial CR solo tiene port-forwarding del 1080 (SOCKS5). Tocar la configuración del router no se justifica para esto. **No volver a proponerlo.**
 
 ## Mensajes de fallo TIGO en UI
 `getFailureDescription` distingue cuando `processIndex === 12`:
