@@ -8,6 +8,7 @@ import { createServer } from 'http';
 import multer from 'multer';
 import fs from 'fs';
 import os from 'os';
+import net from 'net';
 import http from 'http';
 import https from 'https';
 import { createClient } from '@supabase/supabase-js';
@@ -379,6 +380,74 @@ const isProxychainsAvailable = () => {
   }
   return _proxychainsAvailable;
 };
+
+// ───────────────────────────────────────────────────────────────────────
+// HEALTH-CHECK del proxy SOCKS5 (Pi5 CR) — usado para diagnóstico y
+// pre-validación antes de spawn de FFmpeg para procesos con proxy.
+// Hace una conexión TCP simple al puerto del proxy y mide latencia.
+// NO consume tráfico (solo handshake TCP, ~50 bytes).
+// ───────────────────────────────────────────────────────────────────────
+const proxyHealthState = {
+  lastCheck: 0,
+  reachable: null,    // true | false | null (no probado)
+  latencyMs: null,
+  lastError: null,
+  history: [],        // últimas 30 mediciones
+};
+
+const checkProxyHealth = (timeoutMs = 4000) => {
+  return new Promise((resolve) => {
+    let host, port;
+    try {
+      const u = new URL(TIGO_PROXY_URL);
+      host = u.hostname;
+      port = parseInt(u.port || '1080', 10);
+    } catch {
+      return resolve({ reachable: false, latencyMs: null, error: 'invalid proxy url' });
+    }
+
+    const start = Date.now();
+    const socket = net.createConnection({ host, port });
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      try { socket.destroy(); } catch {}
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ reachable: false, latencyMs: null, error: `timeout ${timeoutMs}ms` }), timeoutMs);
+    socket.once('connect', () => {
+      clearTimeout(timer);
+      finish({ reachable: true, latencyMs: Date.now() - start, error: null });
+    });
+    socket.once('error', (err) => {
+      clearTimeout(timer);
+      finish({ reachable: false, latencyMs: null, error: err.code || err.message });
+    });
+  });
+};
+
+const updateProxyHealth = async () => {
+  const result = await checkProxyHealth();
+  proxyHealthState.lastCheck = Date.now();
+  proxyHealthState.reachable = result.reachable;
+  proxyHealthState.latencyMs = result.latencyMs;
+  proxyHealthState.lastError = result.error;
+  proxyHealthState.history.push({
+    timestamp: proxyHealthState.lastCheck,
+    reachable: result.reachable,
+    latencyMs: result.latencyMs,
+  });
+  if (proxyHealthState.history.length > 30) proxyHealthState.history.shift();
+  return result;
+};
+
+// Monitor pasivo: ping al proxy cada 60s, ~50 bytes/min (despreciable)
+setInterval(() => {
+  updateProxyHealth().catch(() => {});
+}, 60_000);
+// Primer check al arrancar (no bloqueante)
+setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
 
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
@@ -1807,6 +1876,24 @@ app.post('/api/emit', async (req, res) => {
         sendLog(process_id, 'error', `❌ proxychains4 no está instalado en el VPS. Ejecuta: apt install -y proxychains4`);
         return res.status(500).json({ error: 'proxychains4 no instalado en el VPS' });
       }
+      // Pre-validación: health-check del proxy SOCKS5 antes de spawn FFmpeg.
+      // Si el proxy está caído marcamos failure_reason='proxy_down' con mensaje claro.
+      sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
+      const health = await updateProxyHealth();
+      if (!health.reachable) {
+        const errMsg = `Proxy SOCKS5 (Pi5 CR) no responde: ${health.error}. Verificá el Pi5 (energía, Wi-Fi, microsocks).`;
+        sendLog(process_id, 'error', `❌ ${errMsg}`);
+        if (supabase) {
+          await supabase.from('emission_processes').update({
+            is_active: false, is_emitting: false, emit_status: 'error',
+            failure_reason: 'proxy_down', failure_details: errMsg,
+            ended_at: new Date().toISOString(), start_time: 0,
+          }).eq('id', parseInt(process_id));
+        }
+        emissionStatuses.set(process_id, 'idle');
+        return res.status(502).json({ error: errMsg, failure_reason: 'proxy_down' });
+      }
+      sendLog(process_id, 'success', `✅ Proxy SOCKS5 OK (latencia ${health.latencyMs}ms)`);
       const confPath = ensureProxychainsConf();
       if (!confPath) {
         sendLog(process_id, 'error', `❌ No se pudo generar config de proxychains`);
@@ -3162,6 +3249,28 @@ app.get('/api/metrics', (req, res) => {
       reason: 'metrics_unavailable'
     });
   }
+});
+
+// Estado del proxy SOCKS5 (Pi5 CR) — usado por el dashboard.
+// Devuelve último ping, latencia, uptime % de las últimas 30 muestras.
+app.get('/api/proxy-status', (req, res) => {
+  const hist = proxyHealthState.history;
+  const total = hist.length;
+  const ok = hist.filter(h => h.reachable).length;
+  const uptimePct = total > 0 ? Math.round((ok / total) * 1000) / 10 : null;
+  const latencies = hist.filter(h => h.reachable && h.latencyMs != null).map(h => h.latencyMs);
+  const avgLatency = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null;
+  res.json({
+    proxyUrl: TIGO_PROXY_URL.replace(/:\/\/[^@]+@/, '://***@'), // ocultar credenciales
+    reachable: proxyHealthState.reachable,
+    latencyMs: proxyHealthState.latencyMs,
+    avgLatencyMs: avgLatency,
+    uptimePct,
+    samples: total,
+    lastCheck: proxyHealthState.lastCheck,
+    lastError: proxyHealthState.lastError,
+    ageSeconds: proxyHealthState.lastCheck ? Math.floor((Date.now() - proxyHealthState.lastCheck) / 1000) : null,
+  });
 });
 
 // Ruta catch-all para servir la aplicación React (debe ir después de todas las rutas API)
