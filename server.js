@@ -380,6 +380,74 @@ const isProxychainsAvailable = () => {
   return _proxychainsAvailable;
 };
 
+// ───────────────────────────────────────────────────────────────────────
+// HEALTH-CHECK del proxy SOCKS5 (Pi5 CR) — usado para diagnóstico y
+// pre-validación antes de spawn de FFmpeg para procesos con proxy.
+// Hace una conexión TCP simple al puerto del proxy y mide latencia.
+// NO consume tráfico (solo handshake TCP, ~50 bytes).
+// ───────────────────────────────────────────────────────────────────────
+const proxyHealthState = {
+  lastCheck: 0,
+  reachable: null,    // true | false | null (no probado)
+  latencyMs: null,
+  lastError: null,
+  history: [],        // últimas 30 mediciones
+};
+
+const checkProxyHealth = (timeoutMs = 4000) => {
+  return new Promise((resolve) => {
+    let host, port;
+    try {
+      const u = new URL(TIGO_PROXY_URL);
+      host = u.hostname;
+      port = parseInt(u.port || '1080', 10);
+    } catch {
+      return resolve({ reachable: false, latencyMs: null, error: 'invalid proxy url' });
+    }
+
+    const start = Date.now();
+    const socket = net.createConnection({ host, port });
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      try { socket.destroy(); } catch {}
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ reachable: false, latencyMs: null, error: `timeout ${timeoutMs}ms` }), timeoutMs);
+    socket.once('connect', () => {
+      clearTimeout(timer);
+      finish({ reachable: true, latencyMs: Date.now() - start, error: null });
+    });
+    socket.once('error', (err) => {
+      clearTimeout(timer);
+      finish({ reachable: false, latencyMs: null, error: err.code || err.message });
+    });
+  });
+};
+
+const updateProxyHealth = async () => {
+  const result = await checkProxyHealth();
+  proxyHealthState.lastCheck = Date.now();
+  proxyHealthState.reachable = result.reachable;
+  proxyHealthState.latencyMs = result.latencyMs;
+  proxyHealthState.lastError = result.error;
+  proxyHealthState.history.push({
+    timestamp: proxyHealthState.lastCheck,
+    reachable: result.reachable,
+    latencyMs: result.latencyMs,
+  });
+  if (proxyHealthState.history.length > 30) proxyHealthState.history.shift();
+  return result;
+};
+
+// Monitor pasivo: ping al proxy cada 60s, ~50 bytes/min (despreciable)
+setInterval(() => {
+  updateProxyHealth().catch(() => {});
+}, 60_000);
+// Primer check al arrancar (no bloqueante)
+setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
+
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
 // Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
