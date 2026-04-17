@@ -832,6 +832,7 @@ export default function EmisorM3U8Panel() {
 
     return (
       <div className="space-y-6">
+        {processIndex === TIGO_URL_INDEX && <ProxyHealthBadge />}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Panel de configuración */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
