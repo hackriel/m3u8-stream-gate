@@ -1122,7 +1122,7 @@ export default function EmisorM3U8Panel() {
                         <span className="text-xs">{getFailureIcon(process.failureReason)}</span>
                         <div className="flex-1">
                           <p className="text-xs font-medium text-warning mb-1">{getFailureLabel(process.failureReason)}</p>
-                          <p className="text-xs text-muted-foreground">{getFailureDescription(process.failureReason, process.failureDetails)}</p>
+                          <p className="text-xs text-muted-foreground">{getFailureDescription(process.failureReason, process.failureDetails, processIndex)}</p>
                         </div>
                       </div>
                     </div>
@@ -1137,7 +1137,7 @@ export default function EmisorM3U8Panel() {
                     <span className="text-destructive text-lg">{getFailureIcon(process.failureReason)}</span>
                     <span className="text-sm font-medium text-destructive">{getFailureLabel(process.failureReason)}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">{getFailureDescription(process.failureReason, process.failureDetails)}</p>
+                  <p className="text-xs text-muted-foreground">{getFailureDescription(process.failureReason, process.failureDetails, processIndex)}</p>
                 </div>
               )}
             </div>
