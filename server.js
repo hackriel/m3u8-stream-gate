@@ -1507,19 +1507,23 @@ app.post('/api/emit', async (req, res) => {
       //  - http_persistent 1: forzar conexiones persistentes
       //  - fflags +genpts+discardcorrupt+nobuffer: regenerar PTS y descartar
       //    paquetes corruptos en lugar de bloquear el muxer
-      //  - rtbufsize 256M y thread_queue_size 8192: absorber bursts de jitter
+      //  - rtbufsize 512M y thread_queue_size 16384: absorber bursts de jitter
+      //  - max_delay 5000000 (5s): tolerancia de reordenamiento de paquetes
+      //  - live_start_index -6: arrancar 6 segmentos atrás (~36s buffer inicial)
+      //    para absorber micro-stalls del proxy residencial sin generar gap visible
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-http_persistent', '1',
         '-multiple_requests', '1',
-        '-live_start_index', '-4',
+        '-live_start_index', '-6',
         '-max_reload', '1000',
         '-m3u8_hold_counters', '1000',
         '-fflags', '+genpts+discardcorrupt',
-        '-rtbufsize', '256M',
-        '-thread_queue_size', '8192'
+        '-max_delay', '5000000',
+        '-rtbufsize', '512M',
+        '-thread_queue_size', '16384'
       );
-      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter (keep-alive HTTP, buffer 256M, start -4)`);
+      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter v2 (buffer 512M, start -6, max_delay 5s)`);
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
