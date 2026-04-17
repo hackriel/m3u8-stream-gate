@@ -395,22 +395,7 @@ const proxyHealthState = {
   history: [],        // últimas 30 mediciones
 };
 
-// Stats del Pi5 (CPU/RAM/temp) — vía endpoint HTTP del Pi5 (puerto 8080).
-// Requiere mini-servicio en el Pi5 que exponga /stats (ver scripts/pi5-stats.py).
-// Polling cada 60s = ~5KB/hora (despreciable).
-const PI5_STATS_URL = process.env.PI5_STATS_URL || 'http://200.91.131.146:8080/stats';
-const pi5StatsState = {
-  lastCheck: 0,
-  reachable: null,
-  cpuPct: null,        // 0-100
-  ramPct: null,        // 0-100
-  ramUsedMb: null,
-  ramTotalMb: null,
-  tempC: null,         // °C (Pi5 throttling >80°C)
-  loadAvg1: null,
-  uptimeSec: null,
-  lastError: null,
-};
+
 
 const checkProxyHealth = (timeoutMs = 4000) => {
   return new Promise((resolve) => {
