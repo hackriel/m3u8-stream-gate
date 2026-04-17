@@ -762,6 +762,11 @@ export default function EmisorM3U8Panel() {
       case "source": return "🔗";
       case "rtmp": return "📡";
       case "server": return "🖥️";
+      case "proxy_down": return "🌐";
+      case "eof": return "⏹️";
+      case "stall": return "🧊";
+      case "cdn_unavailable": return "☁️";
+      case "circuit_breaker": return "🛑";
       default: return "⚠️";
     }
   };
@@ -771,18 +776,32 @@ export default function EmisorM3U8Panel() {
       case "source": return "Error de Conexión con la Fuente";
       case "rtmp": return "Error de Conexión RTMP";
       case "server": return "Error del Servidor de Emisión";
+      case "proxy_down": return "Proxy SOCKS5 (Pi5 CR) no responde";
+      case "eof": return "Fuente cerró conexión (EOF)";
+      case "stall": return "Sin frames del CDN (stall)";
+      case "cdn_unavailable": return "CDN no disponible";
+      case "circuit_breaker": return "Demasiadas caídas consecutivas";
       default: return "Error de Emisión";
     }
   };
 
-  const getFailureDescription = (failureType?: string, failureDetails?: string) => {
+  const getFailureDescription = (failureType?: string, failureDetails?: string, processIndex?: number) => {
     if (failureDetails) return failureDetails;
-    
+    const isTigo = processIndex === 12;
     switch (failureType) {
       case "source": return "No se pudo conectar con la URL de origen. Verifica que la URL sea correcta y esté accesible.";
       case "rtmp": return "No se pudo establecer conexión con el servidor RTMP. Verifica la URL RTMP y las credenciales.";
       case "server": return "El servidor de emisión encontró un problema inesperado. Intenta reiniciar la emisión.";
-      default: return "Ocurrió un error durante la emisión. Revisa la configuración e intenta nuevamente.";
+      case "proxy_down": return "El Pi5 (Costa Rica) no está respondiendo. Posibles causas: corte eléctrico, Wi-Fi caído, microsocks detenido, o IP residencial cambió.";
+      case "eof":
+        if (isTigo) return "Posibles causas: token wmsAuthSign expiró (60s), proxy SOCKS5 (Pi5 CR) tuvo microcorte, o Teletica cortó la sesión por antigüedad. Reconectando con token fresco…";
+        return "El CDN cerró la conexión (token expirado, fuente terminó, o cortocircuito de red).";
+      case "stall": return "El CDN dejó de enviar segmentos. Posible problema de red intermedia o caída temporal de la fuente.";
+      case "cdn_unavailable": return "El CDN no respondió a las verificaciones de salud. Reintentando…";
+      case "circuit_breaker": return "Demasiadas caídas seguidas. El sistema pausó los reintentos automáticos para evitar saturar la fuente. Reinicia manualmente.";
+      default:
+        if (isTigo) return "Error en TIGO URL. Posibles causas: proxy SOCKS5 (Pi5 CR), token expirado, Teletica cortó la sesión, o CDN inestable.";
+        return "Ocurrió un error durante la emisión. Revisa la configuración e intenta nuevamente.";
     }
   };
 
