@@ -260,7 +260,7 @@ const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo' };
 // FFmpeg (manifiesto + segmentos HLS) por la IP residencial CR para
 // evitar el geobloqueo y la validación de IP del CDN de Tigo.
 // ───────────────────────────────────────────────────────────────────────
-const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://200.91.131.146:1080';
+const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080';
 // IDs de proceso que deben enrutar TODO su tráfico (scraping + FFmpeg) por el proxy
 const PROXY_PROCESSES = new Set(['12']);
 // Comando proxychains4 (instalable con: apt install -y proxychains4)
