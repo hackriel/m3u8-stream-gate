@@ -8,6 +8,7 @@ import { createServer } from 'http';
 import multer from 'multer';
 import fs from 'fs';
 import os from 'os';
+import net from 'net';
 import http from 'http';
 import https from 'https';
 import { createClient } from '@supabase/supabase-js';
