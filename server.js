@@ -1876,6 +1876,24 @@ app.post('/api/emit', async (req, res) => {
         sendLog(process_id, 'error', `❌ proxychains4 no está instalado en el VPS. Ejecuta: apt install -y proxychains4`);
         return res.status(500).json({ error: 'proxychains4 no instalado en el VPS' });
       }
+      // Pre-validación: health-check del proxy SOCKS5 antes de spawn FFmpeg.
+      // Si el proxy está caído marcamos failure_reason='proxy_down' con mensaje claro.
+      sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
+      const health = await updateProxyHealth();
+      if (!health.reachable) {
+        const errMsg = `Proxy SOCKS5 (Pi5 CR) no responde: ${health.error}. Verificá el Pi5 (energía, Wi-Fi, microsocks).`;
+        sendLog(process_id, 'error', `❌ ${errMsg}`);
+        if (supabase) {
+          await supabase.from('emission_processes').update({
+            is_active: false, is_emitting: false, emit_status: 'error',
+            failure_reason: 'proxy_down', failure_details: errMsg,
+            ended_at: new Date().toISOString(), start_time: 0,
+          }).eq('id', parseInt(process_id));
+        }
+        emissionStatuses.set(process_id, 'idle');
+        return res.status(502).json({ error: errMsg, failure_reason: 'proxy_down' });
+      }
+      sendLog(process_id, 'success', `✅ Proxy SOCKS5 OK (latencia ${health.latencyMs}ms)`);
       const confPath = ensureProxychainsConf();
       if (!confPath) {
         sendLog(process_id, 'error', `❌ No se pudo generar config de proxychains`);
