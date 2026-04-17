@@ -395,6 +395,23 @@ const proxyHealthState = {
   history: [],        // últimas 30 mediciones
 };
 
+// Stats del Pi5 (CPU/RAM/temp) — vía endpoint HTTP del Pi5 (puerto 8080).
+// Requiere mini-servicio en el Pi5 que exponga /stats (ver scripts/pi5-stats.py).
+// Polling cada 60s = ~5KB/hora (despreciable).
+const PI5_STATS_URL = process.env.PI5_STATS_URL || 'http://200.91.131.146:8080/stats';
+const pi5StatsState = {
+  lastCheck: 0,
+  reachable: null,
+  cpuPct: null,        // 0-100
+  ramPct: null,        // 0-100
+  ramUsedMb: null,
+  ramTotalMb: null,
+  tempC: null,         // °C (Pi5 throttling >80°C)
+  loadAvg1: null,
+  uptimeSec: null,
+  lastError: null,
+};
+
 const checkProxyHealth = (timeoutMs = 4000) => {
   return new Promise((resolve) => {
     let host, port;
@@ -442,12 +459,45 @@ const updateProxyHealth = async () => {
   return result;
 };
 
+// Pi5 stats: GET http://Pi5:8080/stats con timeout corto.
+// Si el Pi5 no tiene el mini-servicio corriendo, falla silenciosamente.
+const updatePi5Stats = async () => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const r = await fetch(PI5_STATS_URL, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    pi5StatsState.lastCheck = Date.now();
+    pi5StatsState.reachable = true;
+    pi5StatsState.cpuPct = typeof data.cpu_pct === 'number' ? Math.round(data.cpu_pct * 10) / 10 : null;
+    pi5StatsState.ramPct = typeof data.ram_pct === 'number' ? Math.round(data.ram_pct * 10) / 10 : null;
+    pi5StatsState.ramUsedMb = data.ram_used_mb ?? null;
+    pi5StatsState.ramTotalMb = data.ram_total_mb ?? null;
+    pi5StatsState.tempC = typeof data.temp_c === 'number' ? Math.round(data.temp_c * 10) / 10 : null;
+    pi5StatsState.loadAvg1 = data.load_avg_1 ?? null;
+    pi5StatsState.uptimeSec = data.uptime_sec ?? null;
+    pi5StatsState.lastError = null;
+  } catch (err) {
+    clearTimeout(timer);
+    pi5StatsState.lastCheck = Date.now();
+    pi5StatsState.reachable = false;
+    pi5StatsState.lastError = err.name === 'AbortError' ? 'timeout' : (err.message || 'unreachable');
+  }
+};
+
 // Monitor pasivo: ping al proxy cada 60s, ~50 bytes/min (despreciable)
 setInterval(() => {
   updateProxyHealth().catch(() => {});
 }, 60_000);
+// Stats Pi5 cada 60s (~80 bytes JSON, ~5KB/hora)
+setInterval(() => {
+  updatePi5Stats().catch(() => {});
+}, 60_000);
 // Primer check al arrancar (no bloqueante)
 setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
+setTimeout(() => updatePi5Stats().catch(() => {}), 5_000);
 
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
@@ -1507,19 +1557,23 @@ app.post('/api/emit', async (req, res) => {
       //  - http_persistent 1: forzar conexiones persistentes
       //  - fflags +genpts+discardcorrupt+nobuffer: regenerar PTS y descartar
       //    paquetes corruptos en lugar de bloquear el muxer
-      //  - rtbufsize 256M y thread_queue_size 8192: absorber bursts de jitter
+      //  - rtbufsize 512M y thread_queue_size 16384: absorber bursts de jitter
+      //  - max_delay 5000000 (5s): tolerancia de reordenamiento de paquetes
+      //  - live_start_index -6: arrancar 6 segmentos atrás (~36s buffer inicial)
+      //    para absorber micro-stalls del proxy residencial sin generar gap visible
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-http_persistent', '1',
         '-multiple_requests', '1',
-        '-live_start_index', '-4',
+        '-live_start_index', '-6',
         '-max_reload', '1000',
         '-m3u8_hold_counters', '1000',
         '-fflags', '+genpts+discardcorrupt',
-        '-rtbufsize', '256M',
-        '-thread_queue_size', '8192'
+        '-max_delay', '5000000',
+        '-rtbufsize', '512M',
+        '-thread_queue_size', '16384'
       );
-      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter (keep-alive HTTP, buffer 256M, start -4)`);
+      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter v2 (buffer 512M, start -6, max_delay 5s)`);
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
@@ -3270,6 +3324,18 @@ app.get('/api/proxy-status', (req, res) => {
     lastCheck: proxyHealthState.lastCheck,
     lastError: proxyHealthState.lastError,
     ageSeconds: proxyHealthState.lastCheck ? Math.floor((Date.now() - proxyHealthState.lastCheck) / 1000) : null,
+    pi5: {
+      reachable: pi5StatsState.reachable,
+      cpuPct: pi5StatsState.cpuPct,
+      ramPct: pi5StatsState.ramPct,
+      ramUsedMb: pi5StatsState.ramUsedMb,
+      ramTotalMb: pi5StatsState.ramTotalMb,
+      tempC: pi5StatsState.tempC,
+      loadAvg1: pi5StatsState.loadAvg1,
+      uptimeSec: pi5StatsState.uptimeSec,
+      lastError: pi5StatsState.lastError,
+      ageSeconds: pi5StatsState.lastCheck ? Math.floor((Date.now() - pi5StatsState.lastCheck) / 1000) : null,
+    },
   });
 });
 

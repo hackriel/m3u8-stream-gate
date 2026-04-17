@@ -1,5 +1,18 @@
 import { useEffect, useState } from 'react';
 
+export interface Pi5Stats {
+  reachable: boolean | null;
+  cpuPct: number | null;
+  ramPct: number | null;
+  ramUsedMb: number | null;
+  ramTotalMb: number | null;
+  tempC: number | null;
+  loadAvg1: number | null;
+  uptimeSec: number | null;
+  lastError: string | null;
+  ageSeconds: number | null;
+}
+
 export interface ProxyStatus {
   proxyUrl: string;
   reachable: boolean | null;
@@ -10,6 +23,7 @@ export interface ProxyStatus {
   lastCheck: number;
   lastError: string | null;
   ageSeconds: number | null;
+  pi5?: Pi5Stats;
 }
 
 const POLL_MS = 30_000; // dashboard refresca cada 30s; servidor pinguea cada 60s
