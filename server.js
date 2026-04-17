@@ -3251,6 +3251,28 @@ app.get('/api/metrics', (req, res) => {
   }
 });
 
+// Estado del proxy SOCKS5 (Pi5 CR) — usado por el dashboard.
+// Devuelve último ping, latencia, uptime % de las últimas 30 muestras.
+app.get('/api/proxy-status', (req, res) => {
+  const hist = proxyHealthState.history;
+  const total = hist.length;
+  const ok = hist.filter(h => h.reachable).length;
+  const uptimePct = total > 0 ? Math.round((ok / total) * 1000) / 10 : null;
+  const latencies = hist.filter(h => h.reachable && h.latencyMs != null).map(h => h.latencyMs);
+  const avgLatency = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null;
+  res.json({
+    proxyUrl: TIGO_PROXY_URL.replace(/:\/\/[^@]+@/, '://***@'), // ocultar credenciales
+    reachable: proxyHealthState.reachable,
+    latencyMs: proxyHealthState.latencyMs,
+    avgLatencyMs: avgLatency,
+    uptimePct,
+    samples: total,
+    lastCheck: proxyHealthState.lastCheck,
+    lastError: proxyHealthState.lastError,
+    ageSeconds: proxyHealthState.lastCheck ? Math.floor((Date.now() - proxyHealthState.lastCheck) / 1000) : null,
+  });
+});
+
 // Ruta catch-all para servir la aplicación React (debe ir después de todas las rutas API)
 app.use((req, res, next) => {
   // Solo servir index.html para rutas que no sean archivos estáticos
