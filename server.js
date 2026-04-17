@@ -1429,15 +1429,28 @@ app.post('/api/emit', async (req, res) => {
       );
       sendLog(process_id, 'info', `🔧 Akamai CDN: modo resiliente con reconnect + hold counters`);
     } else if (isProxyScrapedSource) {
-      // Tigo via Pi5 SOCKS5: el proxy residencial introduce jitter de red.
-      // Aumentar tolerancia HLS al máximo y arrancar 3 segmentos atrás
-      // para tener buffer de seguridad ante micro-pausas del proxy.
+      // Tigo via Pi5 SOCKS5: el proxy residencial introduce jitter de red
+      // (handshake SOCKS5 + TCP + TLS por cada segmento .ts).
+      // Estrategia anti-jitter:
+      //  - live_start_index -4: arrancar 4 segmentos atrás para tener buffer
+      //  - multiple_requests 1: reusar conexión HTTP keep-alive sobre el proxy
+      //    (CRÍTICO: evita renegociar SOCKS5+TLS por cada .ts → estabiliza fps)
+      //  - http_persistent 1: forzar conexiones persistentes
+      //  - fflags +genpts+discardcorrupt+nobuffer: regenerar PTS y descartar
+      //    paquetes corruptos en lugar de bloquear el muxer
+      //  - rtbufsize 256M y thread_queue_size 8192: absorber bursts de jitter
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
-        '-live_start_index', '-3',
+        '-http_persistent', '1',
+        '-multiple_requests', '1',
+        '-live_start_index', '-4',
         '-max_reload', '1000',
-        '-m3u8_hold_counters', '1000'
+        '-m3u8_hold_counters', '1000',
+        '-fflags', '+genpts+discardcorrupt',
+        '-rtbufsize', '256M',
+        '-thread_queue_size', '8192'
       );
+      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter (keep-alive HTTP, buffer 256M, start -4)`);
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
