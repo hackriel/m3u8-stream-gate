@@ -3276,18 +3276,6 @@ app.get('/api/proxy-status', (req, res) => {
     lastCheck: proxyHealthState.lastCheck,
     lastError: proxyHealthState.lastError,
     ageSeconds: proxyHealthState.lastCheck ? Math.floor((Date.now() - proxyHealthState.lastCheck) / 1000) : null,
-    pi5: {
-      reachable: pi5StatsState.reachable,
-      cpuPct: pi5StatsState.cpuPct,
-      ramPct: pi5StatsState.ramPct,
-      ramUsedMb: pi5StatsState.ramUsedMb,
-      ramTotalMb: pi5StatsState.ramTotalMb,
-      tempC: pi5StatsState.tempC,
-      loadAvg1: pi5StatsState.loadAvg1,
-      uptimeSec: pi5StatsState.uptimeSec,
-      lastError: pi5StatsState.lastError,
-      ageSeconds: pi5StatsState.lastCheck ? Math.floor((Date.now() - pi5StatsState.lastCheck) / 1000) : null,
-    },
   });
 });
 
