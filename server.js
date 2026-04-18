@@ -2032,17 +2032,13 @@ app.post('/api/emit', async (req, res) => {
     let spawnCmd = 'ffmpeg';
     let spawnArgs = ffmpegArgs;
     if (PROXY_PROCESSES.has(process_id)) {
-      if (!isProxychainsAvailable()) {
-        sendLog(process_id, 'error', `❌ proxychains4 no está instalado en el VPS. Ejecuta: apt install -y proxychains4`);
-        return res.status(500).json({ error: 'proxychains4 no instalado en el VPS' });
-      }
       // Pre-validación: health-check del proxy SOCKS5 antes de spawn FFmpeg.
-      // Si el proxy está caído marcamos failure_reason='proxy_down' con mensaje claro.
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
       const health = await updateProxyHealth();
       if (!health.reachable) {
         const errMsg = `Proxy SOCKS5 (Pi5 CR) no responde: ${health.error}. Verificá el Pi5 (energía, Wi-Fi, microsocks).`;
         sendLog(process_id, 'error', `❌ ${errMsg}`);
+        await stopTigoProxy(process_id);
         if (supabase) {
           await supabase.from('emission_processes').update({
             is_active: false, is_emitting: false, emit_status: 'error',
@@ -2054,14 +2050,26 @@ app.post('/api/emit', async (req, res) => {
         return res.status(502).json({ error: errMsg, failure_reason: 'proxy_down' });
       }
       sendLog(process_id, 'success', `✅ Proxy SOCKS5 OK (latencia ${health.latencyMs}ms)`);
-      const confPath = ensureProxychainsConf();
-      if (!confPath) {
-        sendLog(process_id, 'error', `❌ No se pudo generar config de proxychains`);
-        return res.status(500).json({ error: 'Error generando config de proxychains' });
+
+      // Si Fase 2 está activa, FFmpeg consume desde 127.0.0.1; el mini-proxy
+      // habla por SOCKS5 al CDN. NO envolver con proxychains4 (doble salto).
+      if (tigoProxies.has(String(process_id))) {
+        sendLog(process_id, 'success', `🛡️ FFmpeg consumirá del proxy local (Fase 2 activa)`);
+      } else {
+        // Fallback Fase 1: proxychains4 directo (cuando Fase 2 no pudo iniciar).
+        if (!isProxychainsAvailable()) {
+          sendLog(process_id, 'error', `❌ proxychains4 no está instalado en el VPS. Ejecuta: apt install -y proxychains4`);
+          return res.status(500).json({ error: 'proxychains4 no instalado en el VPS' });
+        }
+        const confPath = ensureProxychainsConf();
+        if (!confPath) {
+          sendLog(process_id, 'error', `❌ No se pudo generar config de proxychains`);
+          return res.status(500).json({ error: 'Error generando config de proxychains' });
+        }
+        spawnCmd = 'proxychains4';
+        spawnArgs = ['-q', '-f', confPath, 'ffmpeg', ...ffmpegArgs];
+        sendLog(process_id, 'warn', `⚠️ Fase 1 fallback activo: FFmpeg vía proxychains4 (sin token refresh proactivo)`);
       }
-      spawnCmd = 'proxychains4';
-      spawnArgs = ['-q', '-f', confPath, 'ffmpeg', ...ffmpegArgs];
-      sendLog(process_id, 'success', `🌍 FFmpeg enrutado vía proxy SOCKS5 ${TIGO_PROXY_URL}`);
     }
 
     const commandStr = spawnCmd + ' ' + spawnArgs.join(' ');
