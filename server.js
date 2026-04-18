@@ -1530,35 +1530,35 @@ app.post('/api/emit', async (req, res) => {
       );
       sendLog(process_id, 'info', `🔧 Akamai CDN: modo resiliente con reconnect + hold counters`);
     } else if (isProxyScrapedSource) {
-      // Tigo via Pi5 SOCKS5: el proxy residencial introduce jitter de red
-      // (handshake SOCKS5 + TCP + TLS por cada segmento .ts).
-      // Estrategia anti-jitter (v3 — ajustado para token de 60s):
-      //  - live_start_index dinámico (OPTIMIZACIÓN #3):
-      //      • Arranque manual: -2 (~12s buffer) → margen ante jitter inicial
-      //      • Recovery: -1 (~6s buffer) → arrancar más cerca del vivo para
-      //        evitar pedir segmentos al borde de expiración del wmsAuthSign
-      //        (caso típico: caída por 403 puntual + URL fresca → segmentos
-      //         viejos podrían ya estar en zona de gracia agotada del CDN)
-      //  - multiple_requests 1: reusar conexión HTTP keep-alive sobre el proxy
-      //    (CRÍTICO: evita renegociar SOCKS5+TLS por cada .ts → estabiliza fps)
-      //  - http_persistent 1: forzar conexiones persistentes
-      //  - fflags +genpts+discardcorrupt: regenerar PTS y descartar corruptos
-      //  - rtbufsize 512M y thread_queue_size 16384: absorber bursts de jitter
-      //  - max_delay 5000000 (5s): tolerancia de reordenamiento de paquetes
+      // Tigo via Pi5 SOCKS5 — FASE 1: modo VLC-like puro.
+      // Quitamos los flags que delatan scraper (http_persistent, multiple_requests,
+      // max_reload exagerado, m3u8_hold_counters extremo). Un cliente real (VLC,
+      // navegador) sólo usa el demuxer HLS estándar. Wowza/Nimble identifica
+      // patrones agresivos de reload/keepalive y nos castiga con 403 progresivos.
+      //
+      // Ahora aplicamos Variant Pinning aguas abajo (más adelante en el código):
+      // pasamos a FFmpeg directamente la sub-playlist de la variante 720p, no el
+      // master con 4 variantes. Esto reduce 4x el tráfico que ve el CDN de
+      // nosotros y nos hace ver como un cliente ABR normal que ya eligió calidad.
+      //
+      // Mantenemos:
+      //  - live_start_index dinámico (-2 manual, -1 recovery): margen vs jitter
+      //  - rtbufsize/thread_queue_size: absorber jitter del SOCKS5
+      //  - max_delay 5s + genpts+discardcorrupt: tolerancia a paquetes corruptos
+      //  - max_reload/m3u8_hold_counters MODERADOS (8/10): suficiente para
+      //    sobrevivir 1-2 reloads de token sin parecer scraper agresivo.
       const liveStartIndex = isRecovery ? '-1' : '-2';
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
-        '-http_persistent', '1',
-        '-multiple_requests', '1',
         '-live_start_index', liveStartIndex,
-        '-max_reload', '1000',
-        '-m3u8_hold_counters', '1000',
+        '-max_reload', '8',
+        '-m3u8_hold_counters', '10',
         '-fflags', '+genpts+discardcorrupt',
         '-max_delay', '5000000',
         '-rtbufsize', '512M',
         '-thread_queue_size', '16384'
       );
-      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter v3 (buffer 512M, start ${liveStartIndex}${isRecovery ? ' [recovery: más cerca del vivo]' : ''}, max_delay 5s)`);
+      sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1): variant pinning + reload moderado, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
