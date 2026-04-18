@@ -13,6 +13,18 @@ import http from 'http';
 import https from 'https';
 import { createClient } from '@supabase/supabase-js';
 import { SocksProxyAgent } from 'socks-proxy-agent';
+import { startTigoProxy } from './tigoTokenProxy.js';
+
+// Map de mini-proxies activos por process_id (Fase 2: token refresher).
+// Si un proceso Tigo está en este map, FFmpeg apunta a 127.0.0.1:<port>
+// y el proxy refresca el wmsAuthSign cada 50s sin reiniciar FFmpeg.
+const tigoProxies = new Map();
+const stopTigoProxy = async (process_id) => {
+  const p = tigoProxies.get(String(process_id));
+  if (!p) return;
+  tigoProxies.delete(String(process_id));
+  try { await p.stop(); } catch (_) {}
+};
 
 
 // Configurar cliente de Supabase (opcional, solo si hay variables de entorno)
@@ -1798,13 +1810,24 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'info', `📺 Akamai: URL directa sin resolución de variante`);
       // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
     } else if (isScrapedChannel && isProxyScrapedSource) {
-      // FASE 1 — Variant Pinning para Tigo: en vez de pasar el master playlist
-      // (que tiene 4 variantes y FFmpeg abre TODAS en paralelo, dato que delata
-      // a un re-emisor), parseamos el master via Pi5 SOCKS5, elegimos la 720p
-      // y le pasamos directamente la sub-playlist (chunks.m3u8).
-      // Esto reduce 4x el tráfico que ve el CDN de nosotros y nos hace ver como
-      // un cliente ABR normal que ya negoció su calidad.
+      // FASE 2 — Token refresher proxy local + Variant Pinning.
+      //
+      // Arrancamos un mini-proxy HTTP en 127.0.0.1 que:
+      //  1) Refresca el wmsAuthSign cada 50s vía Pi5 (re-scrape silencioso).
+      //  2) En cada request de FFmpeg, reescribe el wmsAuthSign al actual
+      //     y proxypasea via Pi5 SOCKS5 a Teletica.
+      //  3) Reescribe URLs absolutas en los m3u8 a 127.0.0.1 para que FFmpeg
+      //     siga pidiendo todo via el proxy local (incluidos segmentos .ts).
+      //
+      // Resultado esperado: FFmpeg jamás ve un 403 por token expirado, los
+      // reloads visibles en el player desaparecen.
+      //
+      // Si el proxy se degrada (>3 fallos consecutivos), el watchdog mata
+      // FFmpeg y el Quick Retry rebota a Fase 1 puro (proxychains4 directo).
       try {
+        // Variant Pinning previo (pasamos directamente la 720p al proxy local
+        // como master inicial, evitando que FFmpeg abra todas las variantes).
+        let masterForProxy = inputSourceUrl;
         const masterResp = await fetchWithOptionalProxy(inputSourceUrl, {
           headers: {
             'User-Agent': sessionUserAgent,
@@ -1814,45 +1837,77 @@ app.post('/api/emit', async (req, res) => {
             ...(sessionCookies ? { Cookie: sessionCookies } : {}),
           },
         }, true);
-        if (!masterResp.ok) throw new Error(`HTTP ${masterResp.status}`);
-        const body = await masterResp.text();
-
-        if (!body.includes('#EXT-X-STREAM-INF')) {
-          sendLog(process_id, 'info', `📺 Tigo: URL ya es sub-playlist directa (sin master)`);
-        } else {
-          const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
-          const variants = [];
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
-              const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
-              const resMatch = lines[i].match(/RESOLUTION=([\dx]+)/);
-              const variantUrl = lines[i + 1];
-              if (variantUrl && !variantUrl.startsWith('#')) {
-                variants.push({
-                  bandwidth: bwMatch ? parseInt(bwMatch[1]) : 0,
-                  resolution: resMatch ? resMatch[1] : null,
-                  url: variantUrl,
-                });
+        if (masterResp.ok) {
+          const body = await masterResp.text();
+          if (body.includes('#EXT-X-STREAM-INF')) {
+            const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
+            const variants = [];
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
+                const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
+                const resMatch = lines[i].match(/RESOLUTION=([\dx]+)/);
+                const variantUrl = lines[i + 1];
+                if (variantUrl && !variantUrl.startsWith('#')) {
+                  variants.push({
+                    bandwidth: bwMatch ? parseInt(bwMatch[1]) : 0,
+                    resolution: resMatch ? resMatch[1] : null,
+                    url: variantUrl,
+                  });
+                }
               }
             }
-          }
-
-          if (variants.length > 0) {
-            // Preferir 720p; si no existe, la de mayor bandwidth.
-            const target720 = variants.find(v => v.resolution && v.resolution.includes('720'));
-            const best = target720 || variants.sort((a, b) => b.bandwidth - a.bandwidth)[0];
-            let pinnedUrl = best.url;
-            if (!pinnedUrl.startsWith('http')) {
-              pinnedUrl = new URL(pinnedUrl, inputSourceUrl).toString();
+            if (variants.length > 0) {
+              const target720 = variants.find(v => v.resolution && v.resolution.includes('720'));
+              const best = target720 || variants.sort((a, b) => b.bandwidth - a.bandwidth)[0];
+              let pinnedUrl = best.url;
+              if (!pinnedUrl.startsWith('http')) {
+                pinnedUrl = new URL(pinnedUrl, inputSourceUrl).toString();
+              }
+              masterForProxy = pinnedUrl;
+              sendLog(process_id, 'success', `📌 Tigo Variant Pinning → ${best.resolution || '?'} @ ${Math.round((best.bandwidth || 0) / 1000)}kbps`);
             }
-            inputSourceUrl = pinnedUrl;
-            sendLog(process_id, 'success', `📌 Tigo Variant Pinning → ${best.resolution || '?'} @ ${Math.round((best.bandwidth || 0) / 1000)}kbps (sub-playlist directa, sin master)`);
           } else {
-            sendLog(process_id, 'warn', `⚠️ Master Tigo sin variantes parseables — usando master`);
+            sendLog(process_id, 'info', `📺 Tigo: URL ya es sub-playlist directa (sin master)`);
           }
         }
+
+        // Arrancar (o reusar) el mini-proxy de tokens para este proceso.
+        await stopTigoProxy(process_id); // limpiar instancia previa si existía
+        const channelMeta = CHANNEL_MAP[String(process_id)];
+        const proxy = await startTigoProxy({
+          initialMasterUrl: masterForProxy,
+          proxyUrl: TIGO_PROXY_URL,
+          userAgent: sessionUserAgent,
+          referer: refererDomain,
+          origin: originDomain,
+          cookies: sessionCookies,
+          authorization: authorizationValue,
+          refreshFn: async () => {
+            if (!channelMeta) return { error: 'sin channelMeta' };
+            try {
+              const fresh = await scrapeStreamUrlLocal(channelMeta.channelId, channelMeta.channelName, { useProxy: true });
+              if (fresh?.url) {
+                // Mantener el cache de sesión actualizado para Quick Retry futuro.
+                scrapeSessionCache.set(String(process_id), {
+                  cookies: fresh.cookies || null,
+                  accessToken: fresh.accessToken || null,
+                  timestamp: Date.now(),
+                });
+                return fresh;
+              }
+              return { error: fresh?.error || 'sin URL' };
+            } catch (e) {
+              return { error: e.message };
+            }
+          },
+          onLog: (level, msg) => sendLog(process_id, level, msg),
+        });
+        tigoProxies.set(String(process_id), proxy);
+        inputSourceUrl = proxy.localPlaylistUrl;
+        sendLog(process_id, 'success', `🛡️ FASE 2 activa: FFmpeg → ${proxy.localPlaylistUrl} (token auto-refresh)`);
       } catch (err) {
-        sendLog(process_id, 'warn', `⚠️ Variant pinning Tigo falló (${err.message}) — fallback a master playlist`);
+        sendLog(process_id, 'warn', `⚠️ FASE 2 falló al iniciar (${err.message}) — usando URL directa (Fase 1)`);
+        await stopTigoProxy(process_id);
       }
     } else if (isScrapedChannel) {
       // Canales scrapeados (NO proxy): mantener master playlist vivo (token de 1min necesita renovación del CDN)
@@ -1977,17 +2032,13 @@ app.post('/api/emit', async (req, res) => {
     let spawnCmd = 'ffmpeg';
     let spawnArgs = ffmpegArgs;
     if (PROXY_PROCESSES.has(process_id)) {
-      if (!isProxychainsAvailable()) {
-        sendLog(process_id, 'error', `❌ proxychains4 no está instalado en el VPS. Ejecuta: apt install -y proxychains4`);
-        return res.status(500).json({ error: 'proxychains4 no instalado en el VPS' });
-      }
       // Pre-validación: health-check del proxy SOCKS5 antes de spawn FFmpeg.
-      // Si el proxy está caído marcamos failure_reason='proxy_down' con mensaje claro.
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
       const health = await updateProxyHealth();
       if (!health.reachable) {
         const errMsg = `Proxy SOCKS5 (Pi5 CR) no responde: ${health.error}. Verificá el Pi5 (energía, Wi-Fi, microsocks).`;
         sendLog(process_id, 'error', `❌ ${errMsg}`);
+        await stopTigoProxy(process_id);
         if (supabase) {
           await supabase.from('emission_processes').update({
             is_active: false, is_emitting: false, emit_status: 'error',
@@ -1999,14 +2050,26 @@ app.post('/api/emit', async (req, res) => {
         return res.status(502).json({ error: errMsg, failure_reason: 'proxy_down' });
       }
       sendLog(process_id, 'success', `✅ Proxy SOCKS5 OK (latencia ${health.latencyMs}ms)`);
-      const confPath = ensureProxychainsConf();
-      if (!confPath) {
-        sendLog(process_id, 'error', `❌ No se pudo generar config de proxychains`);
-        return res.status(500).json({ error: 'Error generando config de proxychains' });
+
+      // Si Fase 2 está activa, FFmpeg consume desde 127.0.0.1; el mini-proxy
+      // habla por SOCKS5 al CDN. NO envolver con proxychains4 (doble salto).
+      if (tigoProxies.has(String(process_id))) {
+        sendLog(process_id, 'success', `🛡️ FFmpeg consumirá del proxy local (Fase 2 activa)`);
+      } else {
+        // Fallback Fase 1: proxychains4 directo (cuando Fase 2 no pudo iniciar).
+        if (!isProxychainsAvailable()) {
+          sendLog(process_id, 'error', `❌ proxychains4 no está instalado en el VPS. Ejecuta: apt install -y proxychains4`);
+          return res.status(500).json({ error: 'proxychains4 no instalado en el VPS' });
+        }
+        const confPath = ensureProxychainsConf();
+        if (!confPath) {
+          sendLog(process_id, 'error', `❌ No se pudo generar config de proxychains`);
+          return res.status(500).json({ error: 'Error generando config de proxychains' });
+        }
+        spawnCmd = 'proxychains4';
+        spawnArgs = ['-q', '-f', confPath, 'ffmpeg', ...ffmpegArgs];
+        sendLog(process_id, 'warn', `⚠️ Fase 1 fallback activo: FFmpeg vía proxychains4 (sin token refresh proactivo)`);
       }
-      spawnCmd = 'proxychains4';
-      spawnArgs = ['-q', '-f', confPath, 'ffmpeg', ...ffmpegArgs];
-      sendLog(process_id, 'success', `🌍 FFmpeg enrutado vía proxy SOCKS5 ${TIGO_PROXY_URL}`);
     }
 
     const commandStr = spawnCmd + ' ' + spawnArgs.join(' ');
@@ -2022,6 +2085,22 @@ app.post('/api/emit', async (req, res) => {
        source_m3u8: effectiveSourceM3u8
     };
     ffmpegProcesses.set(process_id, processInfo);
+
+    // ── Monitor de degradación del mini-proxy de Tigo (Fase 2) ──
+    // Si el token refresher acumula >3 fallos, matamos FFmpeg para que el
+    // Quick Retry rebote (potencialmente a Fase 1 si el proxy sigue degradado).
+    const tigoProxyMonitor = tigoProxies.get(String(process_id));
+    if (tigoProxyMonitor) {
+      const tigoDegradedTimer = setInterval(() => {
+        if (tigoProxyMonitor.isDegraded() && !ffmpegProcess.killed) {
+          sendLog(process_id, 'error', `🚨 Mini-proxy Tigo degradado — matando FFmpeg para rebotar a Fase 1`);
+          clearInterval(tigoDegradedTimer);
+          stopTigoProxy(process_id).catch(() => {});
+          try { ffmpegProcess.kill('SIGTERM'); } catch (_) {}
+        }
+      }, 3000);
+      ffmpegProcess.once('exit', () => clearInterval(tigoDegradedTimer));
+    }
 
     // Manejar salida estándar
     ffmpegProcess.stdout.on('data', (data) => {
@@ -2245,7 +2324,9 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
-      
+      // Cerrar mini-proxy de Tigo si existe (Fase 2)
+      stopTigoProxy(process_id).catch(() => {});
+
       lastFrameTime.delete(process_id); // Limpiar watchdog
       
       // AUTO-RECOVERY: Para canales con scraping (usa CHANNEL_MAP global)
@@ -3032,7 +3113,9 @@ app.post('/api/emit/stop', async (req, res) => {
       }
       
       ffmpegProcesses.delete(process_id);
-      
+      // Cerrar mini-proxy de Tigo si existe (Fase 2)
+      await stopTigoProxy(process_id);
+
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
       lastFrameTime.delete(process_id);
@@ -3106,6 +3189,7 @@ app.delete('/api/emit/:process_id', async (req, res) => {
       const procRef = processData.process;
       procRef.kill('SIGKILL');
       ffmpegProcesses.delete(process_id);
+      stopTigoProxy(process_id).catch(() => {});
       emissionStatuses.set(process_id, 'idle');
       
       // Matar por PID como respaldo
