@@ -2210,8 +2210,18 @@ app.post('/api/emit', async (req, res) => {
         
         if (shouldRetryFirst && runtime > 10000 && !quickRetryRecentlyFailed) {
           // Solo retry si el proceso corrió más de 10s (evitar loops en URLs inválidas)
-          sendLog(process_id, 'info', `🔁 RETRY RÁPIDO: Intentando reiniciar con misma URL antes de recovery completo...`);
-          
+          // Para Tigo (proxy): delay 5s para que Wowza limpie el nimblesessionid de la
+          // sesión anterior. Sin esto, el master playlist devuelve sub-playlists con el
+          // nimblesessionid viejo invalidado → 403 inmediato en todos los segmentos
+          // (sesiones de ~30-40s post-recovery observadas en producción).
+          const isTigoProxy = PROXY_PROCESSES.has(String(process_id));
+          const retryDelayMs = isTigoProxy ? 5000 : 500;
+          if (isTigoProxy) {
+            sendLog(process_id, 'info', `🔁 RETRY RÁPIDO Tigo: esperando ${retryDelayMs/1000}s para que Wowza libere nimblesessionid anterior...`);
+          } else {
+            sendLog(process_id, 'info', `🔁 RETRY RÁPIDO: Intentando reiniciar con misma URL antes de recovery completo...`);
+          }
+
           setTimeout(async () => {
             try {
               const rememberedState = getRememberedStreamState(process_id);
