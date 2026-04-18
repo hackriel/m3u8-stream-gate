@@ -2308,7 +2308,9 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'idle');
       ffmpegProcesses.delete(process_id);
-      
+      // Cerrar mini-proxy de Tigo si existe (Fase 2)
+      stopTigoProxy(process_id).catch(() => {});
+
       lastFrameTime.delete(process_id); // Limpiar watchdog
       
       // AUTO-RECOVERY: Para canales con scraping (usa CHANNEL_MAP global)
@@ -3095,7 +3097,9 @@ app.post('/api/emit/stop', async (req, res) => {
       }
       
       ffmpegProcesses.delete(process_id);
-      
+      // Cerrar mini-proxy de Tigo si existe (Fase 2)
+      await stopTigoProxy(process_id);
+
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
       lastFrameTime.delete(process_id);
@@ -3169,6 +3173,7 @@ app.delete('/api/emit/:process_id', async (req, res) => {
       const procRef = processData.process;
       procRef.kill('SIGKILL');
       ffmpegProcesses.delete(process_id);
+      stopTigoProxy(process_id).catch(() => {});
       emissionStatuses.set(process_id, 'idle');
       
       // Matar por PID como respaldo
