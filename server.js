@@ -2210,8 +2210,18 @@ app.post('/api/emit', async (req, res) => {
         
         if (shouldRetryFirst && runtime > 10000 && !quickRetryRecentlyFailed) {
           // Solo retry si el proceso corrió más de 10s (evitar loops en URLs inválidas)
-          sendLog(process_id, 'info', `🔁 RETRY RÁPIDO: Intentando reiniciar con misma URL antes de recovery completo...`);
-          
+          // Para Tigo (proxy): delay 5s para que Wowza limpie el nimblesessionid de la
+          // sesión anterior. Sin esto, el master playlist devuelve sub-playlists con el
+          // nimblesessionid viejo invalidado → 403 inmediato en todos los segmentos
+          // (sesiones de ~30-40s post-recovery observadas en producción).
+          const isTigoProxy = PROXY_PROCESSES.has(String(process_id));
+          const retryDelayMs = isTigoProxy ? 5000 : 500;
+          if (isTigoProxy) {
+            sendLog(process_id, 'info', `🔁 RETRY RÁPIDO Tigo: esperando ${retryDelayMs/1000}s para que Wowza libere nimblesessionid anterior...`);
+          } else {
+            sendLog(process_id, 'info', `🔁 RETRY RÁPIDO: Intentando reiniciar con misma URL antes de recovery completo...`);
+          }
+
           setTimeout(async () => {
             try {
               const rememberedState = getRememberedStreamState(process_id);
@@ -2251,13 +2261,18 @@ app.post('/api/emit', async (req, res) => {
                   sendLog(process_id, 'info', `🔄 RETRY: refrescando URL via Pi5 (token expirado)...`);
                   const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
                   if (fresh.url) {
-                    retrySourceUrl = fresh.url;
+                    // Cache-buster: forzar a Wowza/Nimble a tratar el master playlist como
+                    // request fresco y NO reutilizar el nimblesessionid de la sesión anterior
+                    // (que quedó invalidado al expirar el token original). Sin esto, los
+                    // sub-playlists (chunks.m3u8) heredan el sessionid muerto → 403 inmediato.
+                    const sep = fresh.url.includes('?') ? '&' : '?';
+                    retrySourceUrl = `${fresh.url}${sep}_t=${Date.now()}`;
                     scrapeSessionCache.set(String(process_id), {
                       cookies: fresh.cookies || null,
                       accessToken: fresh.accessToken || null,
                       timestamp: Date.now(),
                     });
-                    sendLog(process_id, 'success', `✅ RETRY: URL fresca obtenida via Pi5`);
+                    sendLog(process_id, 'success', `✅ RETRY: URL fresca obtenida via Pi5 (con cache-buster anti nimblesessionid)`);
                   } else {
                     sendLog(process_id, 'warn', `⚠️ RETRY: scraping via Pi5 falló (${fresh.error || 'sin URL'}), usando URL guardada`);
                   }
@@ -2312,7 +2327,7 @@ app.post('/api/emit', async (req, res) => {
                 await autoRecoverChannel(process_id, channelId, channelName);
               }
             }
-          }, 500);
+          }, retryDelayMs);
         } else if (CHANNEL_MAP[process_id]) {
           // Recovery completo directo (proceso corrió <10s = URL probablemente inválida)
           const { channelId, channelName } = CHANNEL_MAP[process_id];
