@@ -2322,7 +2322,7 @@ app.post('/api/emit', async (req, res) => {
                 await autoRecoverChannel(process_id, channelId, channelName);
               }
             }
-          }, 500);
+          }, retryDelayMs);
         } else if (CHANNEL_MAP[process_id]) {
           // Recovery completo directo (proceso corrió <10s = URL probablemente inválida)
           const { channelId, channelName } = CHANNEL_MAP[process_id];
