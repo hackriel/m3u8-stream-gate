@@ -1679,10 +1679,19 @@ app.post('/api/emit', async (req, res) => {
       `Origin: ${originDomain}`,
     ].filter(Boolean).join('\r\n') + '\r\n' + univisionExtraHeaders;
 
+    // FASE 1: User-Agent rotativo para Tigo (proxy). Cada arranque/recovery
+    // elige un UA distinto del pool → cada reconexión = "cliente nuevo" para Wowza.
+    const sessionUserAgent = isProxyScrapedSource
+      ? pickRandomUserAgent()
+      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+    if (isProxyScrapedSource) {
+      sendLog(process_id, 'info', `🎭 UA rotativo: ${sessionUserAgent.substring(0, 60)}...`);
+    }
+
     const inputArgs = [
       ...effectiveResilienceArgs,
       ...extraFfmpegInputArgs,
-      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      '-user_agent', sessionUserAgent,
       '-headers', combinedHeaders,
     ];
 
