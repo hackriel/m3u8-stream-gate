@@ -611,6 +611,8 @@ setInterval(() => {
     
     const stallTimeout = STABLE_SOURCE_PROCESSES.has(String(processId))
       ? 60000
+      : PROXY_PROCESSES.has(String(processId))
+      ? 120000  // Tigo via Pi5: aguantar reloads de token (60s) + jitter SOCKS5 sin matar
       : isScrapedProcess
       ? SCRAPED_WATCHDOG_STALL_TIMEOUT
       : WATCHDOG_STALL_TIMEOUT;
