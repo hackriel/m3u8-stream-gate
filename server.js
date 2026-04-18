@@ -13,18 +13,12 @@ import http from 'http';
 import https from 'https';
 import { createClient } from '@supabase/supabase-js';
 import { SocksProxyAgent } from 'socks-proxy-agent';
-import { startTigoProxy } from './tigoTokenProxy.js';
 
-// Map de mini-proxies activos por process_id (Fase 2: token refresher).
-// Si un proceso Tigo está en este map, FFmpeg apunta a 127.0.0.1:<port>
-// y el proxy refresca el wmsAuthSign cada 50s sin reiniciar FFmpeg.
+// (Fase 2 revertida — se eliminó el mini-proxy local de tokens. Tigo opera en
+// Fase 1 puro: proxychains4 → CDN. Mantenemos shims no-op para no romper
+// llamadas remanentes en el código (cleanup, exits, etc.).)
 const tigoProxies = new Map();
-const stopTigoProxy = async (process_id) => {
-  const p = tigoProxies.get(String(process_id));
-  if (!p) return;
-  tigoProxies.delete(String(process_id));
-  try { await p.stop(); } catch (_) {}
-};
+const stopTigoProxy = async (_process_id) => {};
 
 
 // Configurar cliente de Supabase (opcional, solo si hay variables de entorno)
@@ -617,6 +611,8 @@ setInterval(() => {
     
     const stallTimeout = STABLE_SOURCE_PROCESSES.has(String(processId))
       ? 60000
+      : PROXY_PROCESSES.has(String(processId))
+      ? 120000  // Tigo via Pi5: aguantar reloads de token (60s) + jitter SOCKS5 sin matar
       : isScrapedProcess
       ? SCRAPED_WATCHDOG_STALL_TIMEOUT
       : WATCHDOG_STALL_TIMEOUT;
@@ -1542,35 +1538,30 @@ app.post('/api/emit', async (req, res) => {
       );
       sendLog(process_id, 'info', `🔧 Akamai CDN: modo resiliente con reconnect + hold counters`);
     } else if (isProxyScrapedSource) {
-      // Tigo via Pi5 SOCKS5 — FASE 1: modo VLC-like puro.
-      // Quitamos los flags que delatan scraper (http_persistent, multiple_requests,
-      // max_reload exagerado, m3u8_hold_counters extremo). Un cliente real (VLC,
-      // navegador) sólo usa el demuxer HLS estándar. Wowza/Nimble identifica
-      // patrones agresivos de reload/keepalive y nos castiga con 403 progresivos.
+      // Tigo via Pi5 SOCKS5 — FASE 1 endurecida (Opción 3, Apr 2026):
+      // Tras revertir Fase 2 (mini-proxy de tokens fallaba por nimblesessionid),
+      // subimos la tolerancia del demuxer HLS a reloads para enmascarar visualmente
+      // los reloads de Wowza/Nimble cuando rota el wmsAuthSign cada ~60s.
       //
-      // Ahora aplicamos Variant Pinning aguas abajo (más adelante en el código):
-      // pasamos a FFmpeg directamente la sub-playlist de la variante 720p, no el
-      // master con 4 variantes. Esto reduce 4x el tráfico que ve el CDN de
-      // nosotros y nos hace ver como un cliente ABR normal que ya eligió calidad.
-      //
-      // Mantenemos:
-      //  - live_start_index dinámico (-2 manual, -1 recovery): margen vs jitter
-      //  - rtbufsize/thread_queue_size: absorber jitter del SOCKS5
-      //  - max_delay 5s + genpts+discardcorrupt: tolerancia a paquetes corruptos
-      //  - max_reload/m3u8_hold_counters MODERADOS (8/10): suficiente para
-      //    sobrevivir 1-2 reloads de token sin parecer scraper agresivo.
+      // Cambios respecto a la Fase 1 original:
+      //  - max_reload 8 → 50: aceptamos más reintentos antes de matar el demuxer.
+      //  - m3u8_hold_counters 10 → 50: tolerar más ciclos de "playlist sin nuevos
+      //    segmentos" mientras el CDN rota la sesión.
+      //  - rtbufsize/thread_queue_size: absorber jitter del SOCKS5.
+      //  - max_delay 5s + genpts+discardcorrupt: tolerancia a paquetes corruptos.
+      //  - SIN -http_persistent ni -multiple_requests (delatan scraper en Wowza).
       const liveStartIndex = isRecovery ? '-1' : '-2';
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-live_start_index', liveStartIndex,
-        '-max_reload', '8',
-        '-m3u8_hold_counters', '10',
+        '-max_reload', '50',
+        '-m3u8_hold_counters', '50',
         '-fflags', '+genpts+discardcorrupt',
         '-max_delay', '5000000',
         '-rtbufsize', '512M',
         '-thread_queue_size', '16384'
       );
-      sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1): variant pinning + reload moderado, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1 endurecida): max_reload=50, hold=50, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
@@ -1810,24 +1801,11 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'info', `📺 Akamai: URL directa sin resolución de variante`);
       // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
     } else if (isScrapedChannel && isProxyScrapedSource) {
-      // FASE 2 — Token refresher proxy local + Variant Pinning.
-      //
-      // Arrancamos un mini-proxy HTTP en 127.0.0.1 que:
-      //  1) Refresca el wmsAuthSign cada 50s vía Pi5 (re-scrape silencioso).
-      //  2) En cada request de FFmpeg, reescribe el wmsAuthSign al actual
-      //     y proxypasea via Pi5 SOCKS5 a Teletica.
-      //  3) Reescribe URLs absolutas en los m3u8 a 127.0.0.1 para que FFmpeg
-      //     siga pidiendo todo via el proxy local (incluidos segmentos .ts).
-      //
-      // Resultado esperado: FFmpeg jamás ve un 403 por token expirado, los
-      // reloads visibles en el player desaparecen.
-      //
-      // Si el proxy se degrada (>3 fallos consecutivos), el watchdog mata
-      // FFmpeg y el Quick Retry rebota a Fase 1 puro (proxychains4 directo).
+      // Tigo via Pi5 (Fase 1 endurecida) — Variant Pinning manual.
+      // Resolvemos el master playlist UNA vez aquí (no FFmpeg) y pasamos
+      // directamente la sub-playlist 720p para que FFmpeg no abra las 4
+      // variantes en paralelo (lo que Wowza/Nimble penaliza con 403).
       try {
-        // Variant Pinning previo (pasamos directamente la 720p al proxy local
-        // como master inicial, evitando que FFmpeg abra todas las variantes).
-        let masterForProxy = inputSourceUrl;
         const masterResp = await fetchWithOptionalProxy(inputSourceUrl, {
           headers: {
             'User-Agent': sessionUserAgent,
@@ -1863,51 +1841,15 @@ app.post('/api/emit', async (req, res) => {
               if (!pinnedUrl.startsWith('http')) {
                 pinnedUrl = new URL(pinnedUrl, inputSourceUrl).toString();
               }
-              masterForProxy = pinnedUrl;
+              inputSourceUrl = pinnedUrl;
               sendLog(process_id, 'success', `📌 Tigo Variant Pinning → ${best.resolution || '?'} @ ${Math.round((best.bandwidth || 0) / 1000)}kbps`);
             }
           } else {
             sendLog(process_id, 'info', `📺 Tigo: URL ya es sub-playlist directa (sin master)`);
           }
         }
-
-        // Arrancar (o reusar) el mini-proxy de tokens para este proceso.
-        await stopTigoProxy(process_id); // limpiar instancia previa si existía
-        const channelMeta = CHANNEL_MAP[String(process_id)];
-        const proxy = await startTigoProxy({
-          initialMasterUrl: masterForProxy,
-          proxyUrl: TIGO_PROXY_URL,
-          userAgent: sessionUserAgent,
-          referer: refererDomain,
-          origin: originDomain,
-          cookies: sessionCookies,
-          authorization: authorizationValue,
-          refreshFn: async () => {
-            if (!channelMeta) return { error: 'sin channelMeta' };
-            try {
-              const fresh = await scrapeStreamUrlLocal(channelMeta.channelId, channelMeta.channelName, { useProxy: true });
-              if (fresh?.url) {
-                // Mantener el cache de sesión actualizado para Quick Retry futuro.
-                scrapeSessionCache.set(String(process_id), {
-                  cookies: fresh.cookies || null,
-                  accessToken: fresh.accessToken || null,
-                  timestamp: Date.now(),
-                });
-                return fresh;
-              }
-              return { error: fresh?.error || 'sin URL' };
-            } catch (e) {
-              return { error: e.message };
-            }
-          },
-          onLog: (level, msg) => sendLog(process_id, level, msg),
-        });
-        tigoProxies.set(String(process_id), proxy);
-        inputSourceUrl = proxy.localPlaylistUrl;
-        sendLog(process_id, 'success', `🛡️ FASE 2 activa: FFmpeg → ${proxy.localPlaylistUrl} (token auto-refresh)`);
       } catch (err) {
-        sendLog(process_id, 'warn', `⚠️ FASE 2 falló al iniciar (${err.message}) — usando URL directa (Fase 1)`);
-        await stopTigoProxy(process_id);
+        sendLog(process_id, 'warn', `⚠️ Tigo Variant Pinning falló (${err.message}) — usando URL original`);
       }
     } else if (isScrapedChannel) {
       // Canales scrapeados (NO proxy): mantener master playlist vivo (token de 1min necesita renovación del CDN)
@@ -2086,21 +2028,7 @@ app.post('/api/emit', async (req, res) => {
     };
     ffmpegProcesses.set(process_id, processInfo);
 
-    // ── Monitor de degradación del mini-proxy de Tigo (Fase 2) ──
-    // Si el token refresher acumula >3 fallos, matamos FFmpeg para que el
-    // Quick Retry rebote (potencialmente a Fase 1 si el proxy sigue degradado).
-    const tigoProxyMonitor = tigoProxies.get(String(process_id));
-    if (tigoProxyMonitor) {
-      const tigoDegradedTimer = setInterval(() => {
-        if (tigoProxyMonitor.isDegraded() && !ffmpegProcess.killed) {
-          sendLog(process_id, 'error', `🚨 Mini-proxy Tigo degradado — matando FFmpeg para rebotar a Fase 1`);
-          clearInterval(tigoDegradedTimer);
-          stopTigoProxy(process_id).catch(() => {});
-          try { ffmpegProcess.kill('SIGTERM'); } catch (_) {}
-        }
-      }, 3000);
-      ffmpegProcess.once('exit', () => clearInterval(tigoDegradedTimer));
-    }
+    // (Monitor del mini-proxy Tigo eliminado — Fase 2 revertida.)
 
     // Manejar salida estándar
     ffmpegProcess.stdout.on('data', (data) => {
