@@ -268,6 +268,25 @@ const PROXY_PROCESSES = new Set(['12']);
 // Config dinámica generada en /tmp para no chocar con instalación global
 const PROXYCHAINS_CONF_PATH = '/tmp/proxychains-tigo.conf';
 
+// ── Pool de User-Agents reales (Fase 1: rotación de identidad por sesión) ──
+// Cada vez que arranca/reinicia un proceso con proxy (Tigo), se elige uno
+// aleatorio. Esto evita que Wowza/Nimble nos identifique como el mismo
+// "cliente persistente" entre reconexiones consecutivas.
+const REAL_USER_AGENTS = [
+  // Chrome Windows
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  // Chrome macOS
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  // Edge Windows
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0',
+  // Safari macOS
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15',
+  // Firefox Windows
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0',
+];
+const pickRandomUserAgent = () => REAL_USER_AGENTS[Math.floor(Math.random() * REAL_USER_AGENTS.length)];
+
 // Cache del agent SOCKS5 para reutilizar conexiones HTTP/HTTPS.
 // `socks-proxy-agent` es compatible con Node 20 y funciona con http/https.request.
 let _proxyAgent = null;
