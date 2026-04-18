@@ -1799,24 +1799,11 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'info', `📺 Akamai: URL directa sin resolución de variante`);
       // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
     } else if (isScrapedChannel && isProxyScrapedSource) {
-      // FASE 2 — Token refresher proxy local + Variant Pinning.
-      //
-      // Arrancamos un mini-proxy HTTP en 127.0.0.1 que:
-      //  1) Refresca el wmsAuthSign cada 50s vía Pi5 (re-scrape silencioso).
-      //  2) En cada request de FFmpeg, reescribe el wmsAuthSign al actual
-      //     y proxypasea via Pi5 SOCKS5 a Teletica.
-      //  3) Reescribe URLs absolutas en los m3u8 a 127.0.0.1 para que FFmpeg
-      //     siga pidiendo todo via el proxy local (incluidos segmentos .ts).
-      //
-      // Resultado esperado: FFmpeg jamás ve un 403 por token expirado, los
-      // reloads visibles en el player desaparecen.
-      //
-      // Si el proxy se degrada (>3 fallos consecutivos), el watchdog mata
-      // FFmpeg y el Quick Retry rebota a Fase 1 puro (proxychains4 directo).
+      // Tigo via Pi5 (Fase 1 endurecida) — Variant Pinning manual.
+      // Resolvemos el master playlist UNA vez aquí (no FFmpeg) y pasamos
+      // directamente la sub-playlist 720p para que FFmpeg no abra las 4
+      // variantes en paralelo (lo que Wowza/Nimble penaliza con 403).
       try {
-        // Variant Pinning previo (pasamos directamente la 720p al proxy local
-        // como master inicial, evitando que FFmpeg abra todas las variantes).
-        let masterForProxy = inputSourceUrl;
         const masterResp = await fetchWithOptionalProxy(inputSourceUrl, {
           headers: {
             'User-Agent': sessionUserAgent,
@@ -1852,51 +1839,15 @@ app.post('/api/emit', async (req, res) => {
               if (!pinnedUrl.startsWith('http')) {
                 pinnedUrl = new URL(pinnedUrl, inputSourceUrl).toString();
               }
-              masterForProxy = pinnedUrl;
+              inputSourceUrl = pinnedUrl;
               sendLog(process_id, 'success', `📌 Tigo Variant Pinning → ${best.resolution || '?'} @ ${Math.round((best.bandwidth || 0) / 1000)}kbps`);
             }
           } else {
             sendLog(process_id, 'info', `📺 Tigo: URL ya es sub-playlist directa (sin master)`);
           }
         }
-
-        // Arrancar (o reusar) el mini-proxy de tokens para este proceso.
-        await stopTigoProxy(process_id); // limpiar instancia previa si existía
-        const channelMeta = CHANNEL_MAP[String(process_id)];
-        const proxy = await startTigoProxy({
-          initialMasterUrl: masterForProxy,
-          proxyUrl: TIGO_PROXY_URL,
-          userAgent: sessionUserAgent,
-          referer: refererDomain,
-          origin: originDomain,
-          cookies: sessionCookies,
-          authorization: authorizationValue,
-          refreshFn: async () => {
-            if (!channelMeta) return { error: 'sin channelMeta' };
-            try {
-              const fresh = await scrapeStreamUrlLocal(channelMeta.channelId, channelMeta.channelName, { useProxy: true });
-              if (fresh?.url) {
-                // Mantener el cache de sesión actualizado para Quick Retry futuro.
-                scrapeSessionCache.set(String(process_id), {
-                  cookies: fresh.cookies || null,
-                  accessToken: fresh.accessToken || null,
-                  timestamp: Date.now(),
-                });
-                return fresh;
-              }
-              return { error: fresh?.error || 'sin URL' };
-            } catch (e) {
-              return { error: e.message };
-            }
-          },
-          onLog: (level, msg) => sendLog(process_id, level, msg),
-        });
-        tigoProxies.set(String(process_id), proxy);
-        inputSourceUrl = proxy.localPlaylistUrl;
-        sendLog(process_id, 'success', `🛡️ FASE 2 activa: FFmpeg → ${proxy.localPlaylistUrl} (token auto-refresh)`);
       } catch (err) {
-        sendLog(process_id, 'warn', `⚠️ FASE 2 falló al iniciar (${err.message}) — usando URL directa (Fase 1)`);
-        await stopTigoProxy(process_id);
+        sendLog(process_id, 'warn', `⚠️ Tigo Variant Pinning falló (${err.message}) — usando URL original`);
       }
     } else if (isScrapedChannel) {
       // Canales scrapeados (NO proxy): mantener master playlist vivo (token de 1min necesita renovación del CDN)
