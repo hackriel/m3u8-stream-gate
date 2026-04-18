@@ -1536,35 +1536,30 @@ app.post('/api/emit', async (req, res) => {
       );
       sendLog(process_id, 'info', `🔧 Akamai CDN: modo resiliente con reconnect + hold counters`);
     } else if (isProxyScrapedSource) {
-      // Tigo via Pi5 SOCKS5 — FASE 1: modo VLC-like puro.
-      // Quitamos los flags que delatan scraper (http_persistent, multiple_requests,
-      // max_reload exagerado, m3u8_hold_counters extremo). Un cliente real (VLC,
-      // navegador) sólo usa el demuxer HLS estándar. Wowza/Nimble identifica
-      // patrones agresivos de reload/keepalive y nos castiga con 403 progresivos.
+      // Tigo via Pi5 SOCKS5 — FASE 1 endurecida (Opción 3, Apr 2026):
+      // Tras revertir Fase 2 (mini-proxy de tokens fallaba por nimblesessionid),
+      // subimos la tolerancia del demuxer HLS a reloads para enmascarar visualmente
+      // los reloads de Wowza/Nimble cuando rota el wmsAuthSign cada ~60s.
       //
-      // Ahora aplicamos Variant Pinning aguas abajo (más adelante en el código):
-      // pasamos a FFmpeg directamente la sub-playlist de la variante 720p, no el
-      // master con 4 variantes. Esto reduce 4x el tráfico que ve el CDN de
-      // nosotros y nos hace ver como un cliente ABR normal que ya eligió calidad.
-      //
-      // Mantenemos:
-      //  - live_start_index dinámico (-2 manual, -1 recovery): margen vs jitter
-      //  - rtbufsize/thread_queue_size: absorber jitter del SOCKS5
-      //  - max_delay 5s + genpts+discardcorrupt: tolerancia a paquetes corruptos
-      //  - max_reload/m3u8_hold_counters MODERADOS (8/10): suficiente para
-      //    sobrevivir 1-2 reloads de token sin parecer scraper agresivo.
+      // Cambios respecto a la Fase 1 original:
+      //  - max_reload 8 → 50: aceptamos más reintentos antes de matar el demuxer.
+      //  - m3u8_hold_counters 10 → 50: tolerar más ciclos de "playlist sin nuevos
+      //    segmentos" mientras el CDN rota la sesión.
+      //  - rtbufsize/thread_queue_size: absorber jitter del SOCKS5.
+      //  - max_delay 5s + genpts+discardcorrupt: tolerancia a paquetes corruptos.
+      //  - SIN -http_persistent ni -multiple_requests (delatan scraper en Wowza).
       const liveStartIndex = isRecovery ? '-1' : '-2';
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-live_start_index', liveStartIndex,
-        '-max_reload', '8',
-        '-m3u8_hold_counters', '10',
+        '-max_reload', '50',
+        '-m3u8_hold_counters', '50',
         '-fflags', '+genpts+discardcorrupt',
         '-max_delay', '5000000',
         '-rtbufsize', '512M',
         '-thread_queue_size', '16384'
       );
-      sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1): variant pinning + reload moderado, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
+      sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1 endurecida): max_reload=50, hold=50, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
