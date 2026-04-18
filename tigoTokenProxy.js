@@ -3,54 +3,39 @@
 // le hace, sin que FFmpeg jamás vea un 403 por token expirado.
 //
 // Flujo:
-//   FFmpeg → http://127.0.0.1:<port>/playlist.m3u8
-//          → proxy reescribe wmsAuthSign con el más reciente
+//   FFmpeg → http://127.0.0.1:<port>/<path original>
+//          → proxy reescribe wmsAuthSign con el más reciente + quita nimblesessionid heredado
 //          → request via Pi5 SOCKS5 → Teletica
-//          → respuesta (m3u8 o segmento .ts) → FFmpeg
+//          → respuesta (m3u8 reescrito o segmento .ts) → FFmpeg
 //
-// El refresh proactivo del token corre cada REFRESH_INTERVAL_MS (50s, margen
-// de 10s antes de la expiración natural de 60s). Usa la `refreshFn` provista
-// por el caller (que reusa el flujo existente de scraping vía Pi5).
-//
-// Si el proxy detecta >MAX_CONSECUTIVE_FAILURES errores upstream, marca
-// `degraded=true`. server.js debe vigilar `proxy.isDegraded()` y matar
-// FFmpeg para caer al modo Fase 1 puro (URL directa al CDN).
+// Refresh proactivo cada REFRESH_INTERVAL_MS (50s, margen de 10s antes de los 60s).
+// Si fallan >MAX_CONSECUTIVE_FAILURES, marca degraded=true; server.js debe matar
+// FFmpeg para caer al modo Fase 1 puro (URL directa al CDN sin proxy local).
 
-const http = require('http');
-const https = require('https');
-const { URL } = require('url');
-const { SocksProxyAgent } = require('socks-proxy-agent');
+import http from 'http';
+import https from 'https';
+import { URL } from 'url';
+import { SocksProxyAgent } from 'socks-proxy-agent';
 
-const REFRESH_INTERVAL_MS = 50_000;       // refresh proactivo (token dura 60s)
-const REFRESH_RETRY_DELAY_MS = 5_000;     // si falla, reintenta a los 5s
-const MAX_CONSECUTIVE_FAILURES = 3;       // umbral para marcar degraded
+const REFRESH_INTERVAL_MS = 50_000;
+const REFRESH_RETRY_DELAY_MS = 5_000;
+const MAX_CONSECUTIVE_FAILURES = 3;
 const UPSTREAM_TIMEOUT_MS = 12_000;
 
-// Helper: construye un Promise sobre http(s).request usando un agent dado.
 function fetchUpstream(targetUrl, { headers = {}, agent, timeout = UPSTREAM_TIMEOUT_MS }) {
   return new Promise((resolve, reject) => {
     let parsed;
-    try {
-      parsed = new URL(targetUrl);
-    } catch (err) {
-      return reject(new Error(`URL inválida: ${err.message}`));
-    }
+    try { parsed = new URL(targetUrl); }
+    catch (err) { return reject(new Error(`URL inválida: ${err.message}`)); }
     const transport = parsed.protocol === 'https:' ? https : http;
-    const req = transport.request(targetUrl, {
-      method: 'GET',
-      headers,
-      agent,
-      timeout,
-    }, (res) => {
+    const req = transport.request(targetUrl, { method: 'GET', headers, agent, timeout }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
-      res.on('end', () => {
-        resolve({
-          status: res.statusCode || 0,
-          headers: res.headers,
-          body: Buffer.concat(chunks),
-        });
-      });
+      res.on('end', () => resolve({
+        status: res.statusCode || 0,
+        headers: res.headers,
+        body: Buffer.concat(chunks),
+      }));
     });
     req.on('timeout', () => req.destroy(new Error('upstream timeout')));
     req.on('error', reject);
@@ -58,44 +43,24 @@ function fetchUpstream(targetUrl, { headers = {}, agent, timeout = UPSTREAM_TIME
   });
 }
 
-// Reemplaza (o agrega) el parámetro wmsAuthSign en una URL.
-function rewriteWmsAuth(urlStr, freshSign) {
-  try {
-    const u = new URL(urlStr);
-    u.searchParams.set('wmsAuthSign', freshSign);
-    // Quitar nimblesessionid: lo asigna el CDN al recibir el master fresco.
-    u.searchParams.delete('nimblesessionid');
-    return u.toString();
-  } catch {
-    return urlStr;
-  }
-}
-
-// Extrae wmsAuthSign de una URL (o null si no existe).
 function extractWmsAuth(urlStr) {
-  try {
-    return new URL(urlStr).searchParams.get('wmsAuthSign');
-  } catch { return null; }
+  try { return new URL(urlStr).searchParams.get('wmsAuthSign'); }
+  catch { return null; }
 }
 
 /**
- * Inicia el mini-proxy local para una sesión Tigo.
- *
  * @param {Object} opts
- * @param {string} opts.initialMasterUrl   - URL master (ya con wmsAuthSign vigente).
- * @param {string} opts.proxyUrl           - socks5h://... del Pi5 CR.
- * @param {string} opts.userAgent          - UA de la sesión.
- * @param {string} opts.referer
- * @param {string} opts.origin
- * @param {string} [opts.cookies]          - Cookie header (opcional).
- * @param {string} [opts.authorization]    - "Bearer ..." (opcional).
- * @param {Function} opts.refreshFn        - async () => ({ url, cookies?, accessToken? })
- *                                           Debe re-scrapear via Pi5 y devolver
- *                                           el master URL nuevo con wmsAuthSign fresco.
- * @param {Function} [opts.onLog]          - (level, msg) => void
- * @returns {Promise<TigoProxy>}
+ * @param {string}   opts.initialMasterUrl
+ * @param {string}   opts.proxyUrl
+ * @param {string}   opts.userAgent
+ * @param {string}   opts.referer
+ * @param {string}   opts.origin
+ * @param {string=}  opts.cookies
+ * @param {string=}  opts.authorization      "Bearer ..."
+ * @param {Function} opts.refreshFn          async () => ({ url, cookies?, accessToken?, error? })
+ * @param {Function=} opts.onLog             (level, msg) => void
  */
-async function startTigoProxy(opts) {
+export async function startTigoProxy(opts) {
   const {
     initialMasterUrl,
     proxyUrl,
@@ -114,16 +79,17 @@ async function startTigoProxy(opts) {
 
   const agent = new SocksProxyAgent(proxyUrl);
 
-  // Estado mutable de la sesión.
   let currentSign = extractWmsAuth(initialMasterUrl);
-  let masterUrlBase = (() => {
-    try {
-      const u = new URL(initialMasterUrl);
-      u.searchParams.delete('wmsAuthSign');
-      u.searchParams.delete('nimblesessionid');
-      return u; // mantener objeto para reusar pathname/host
-    } catch { return null; }
-  })();
+  let masterUrlBase;
+  try {
+    masterUrlBase = new URL(initialMasterUrl);
+    masterUrlBase.searchParams.delete('wmsAuthSign');
+    masterUrlBase.searchParams.delete('nimblesessionid');
+  } catch {
+    throw new Error('initialMasterUrl no parseable');
+  }
+  if (!currentSign) throw new Error('initialMasterUrl sin wmsAuthSign');
+
   let sessionCookies = cookies || null;
   let sessionAuth = authorization || null;
   let consecutiveFailures = 0;
@@ -132,31 +98,28 @@ async function startTigoProxy(opts) {
   let retryTimer = null;
   let lastRefreshAt = Date.now();
   let refreshCount = 0;
+  let stopped = false;
 
-  if (!currentSign || !masterUrlBase) {
-    throw new Error('initialMasterUrl no contiene wmsAuthSign válido');
-  }
-
-  // Refresh proactivo del token via re-scrape Pi5.
   async function doRefresh() {
+    if (stopped) return;
     try {
       const fresh = await refreshFn();
       if (fresh && fresh.url) {
         const newSign = extractWmsAuth(fresh.url);
-        if (newSign && newSign !== currentSign) {
-          currentSign = newSign;
+        if (newSign) {
+          if (newSign !== currentSign) {
+            currentSign = newSign;
+            refreshCount += 1;
+            if (refreshCount === 1 || refreshCount % 5 === 0) {
+              onLog('info', `🔄 Token refresher: ${refreshCount} rotaciones OK`);
+            }
+          }
           if (fresh.cookies) sessionCookies = fresh.cookies;
           if (fresh.accessToken) sessionAuth = `Bearer ${fresh.accessToken}`;
           lastRefreshAt = Date.now();
-          refreshCount += 1;
-          // No log por cada refresh para no spamear; cada 5.
-          if (refreshCount === 1 || refreshCount % 5 === 0) {
-            onLog('info', `🔄 Token refresher: ${refreshCount} refresh OK (último wmsAuthSign rotado)`);
-          }
           consecutiveFailures = 0;
         } else {
-          // Token igual = backend devolvió mismo string; no es fallo crítico.
-          lastRefreshAt = Date.now();
+          throw new Error('refresh sin wmsAuthSign');
         }
       } else {
         throw new Error(fresh?.error || 'refreshFn no devolvió URL');
@@ -166,37 +129,25 @@ async function startTigoProxy(opts) {
       onLog('warn', `⚠️ Token refresher falló (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${err.message}`);
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         degraded = true;
-        onLog('error', `❌ Token refresher degradado tras ${consecutiveFailures} fallos. server.js debe rebotar a Fase 1.`);
-      }
-      // Reintentar pronto (no esperar al ciclo completo).
-      if (!degraded) {
+        onLog('error', `❌ Token refresher degradado. Fallback a Fase 1 requerido.`);
+      } else {
         clearTimeout(retryTimer);
         retryTimer = setTimeout(doRefresh, REFRESH_RETRY_DELAY_MS);
       }
     }
   }
 
-  // Loop periódico.
   refreshTimer = setInterval(doRefresh, REFRESH_INTERVAL_MS);
 
-  // ── HTTP server local ──
   const server = http.createServer(async (req, res) => {
-    // Cualquier path es válido — usamos el pathname para mapear al upstream.
-    // Estrategia: el path entrante (ej: /tigosport/tigosport_1/chunks.m3u8)
-    // se concatena con el host base de masterUrlBase. Reescribimos siempre
-    // el wmsAuthSign al actual.
     let upstreamUrl;
     try {
-      const reqUrl = new URL(req.url, `http://${req.headers.host}`);
-      // Construir URL upstream: mismo origin que el master, pathname del request.
+      const reqUrl = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
       const u = new URL(masterUrlBase.origin);
       u.pathname = reqUrl.pathname;
-      // Copiar query params del request original (FFmpeg a veces resuelve URLs relativas
-      // y mantiene el wmsAuthSign viejo embebido). Lo sobrescribimos abajo.
-      for (const [k, v] of reqUrl.searchParams) {
-        u.searchParams.set(k, v);
-      }
-      // Forzar wmsAuthSign fresco + quitar nimblesessionid heredado.
+      // Copiar query params del request original (para preservar parámetros que el CDN espera)
+      for (const [k, v] of reqUrl.searchParams) u.searchParams.set(k, v);
+      // Forzar wmsAuthSign actual y limpiar nimblesessionid heredado
       u.searchParams.set('wmsAuthSign', currentSign);
       u.searchParams.delete('nimblesessionid');
       upstreamUrl = u.toString();
@@ -221,9 +172,8 @@ async function startTigoProxy(opts) {
 
       if (upstream.status >= 400) {
         consecutiveFailures += 1;
-        // 403 = token muerto. Forzar refresh inmediato.
         if (upstream.status === 403) {
-          onLog('warn', `⚠️ Upstream 403 (token muerto) — forzando refresh inmediato`);
+          onLog('warn', `⚠️ Upstream 403 (token muerto) — refresh inmediato`);
           doRefresh().catch(() => {});
         }
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
@@ -234,46 +184,39 @@ async function startTigoProxy(opts) {
         return res.end(upstream.body);
       }
 
-      // Reset contador en éxito.
       consecutiveFailures = 0;
 
       const ct = (upstream.headers['content-type'] || '').toLowerCase();
       let bodyOut = upstream.body;
+      const isM3u8 = ct.includes('mpegurl') || /\.m3u8($|\?)/i.test(req.url);
 
-      // Si es un m3u8, reescribir URLs absolutas internas para que apunten al proxy local.
-      // Así FFmpeg pide siempre via 127.0.0.1 y nosotros reescribimos el token cada vez.
-      if (ct.includes('mpegurl') || req.url.endsWith('.m3u8')) {
+      if (isM3u8) {
         const text = upstream.body.toString('utf8');
         const localBase = `http://127.0.0.1:${address.port}`;
         const upstreamOrigin = masterUrlBase.origin;
         const rewritten = text.split('\n').map(line => {
           const trimmed = line.trim();
           if (!trimmed || trimmed.startsWith('#')) return line;
-          // URL absoluta del CDN → reescribir a localhost (mismo path, sin query — el proxy lo regenera)
+          // URL absoluta del CDN → reescribir a localhost (sin query, el proxy regenera token)
           if (trimmed.startsWith(upstreamOrigin)) {
             try {
               const u = new URL(trimmed);
               return `${localBase}${u.pathname}`;
             } catch { return line; }
           }
-          // URL absoluta de cualquier otro origin (raro): dejar pasar.
           if (/^https?:\/\//i.test(trimmed)) return line;
-          // URL relativa: dejarla — FFmpeg la resolverá contra el localBase del request actual.
+          // Relativa → FFmpeg la resuelve contra el localBase del request actual
           return line;
         }).join('\n');
         bodyOut = Buffer.from(rewritten, 'utf8');
       }
 
-      // Pasar respuesta a FFmpeg.
       const outHeaders = {
         'Content-Type': upstream.headers['content-type'] || 'application/octet-stream',
         'Cache-Control': 'no-cache',
       };
-      // No reenviar Content-Length original si reescribimos.
-      if (!ct.includes('mpegurl')) {
-        if (upstream.headers['content-length']) {
-          outHeaders['Content-Length'] = upstream.headers['content-length'];
-        }
+      if (!isM3u8 && upstream.headers['content-length']) {
+        outHeaders['Content-Length'] = upstream.headers['content-length'];
       }
       res.writeHead(200, outHeaders);
       res.end(bodyOut);
@@ -284,32 +227,27 @@ async function startTigoProxy(opts) {
         degraded = true;
         onLog('error', `❌ Proxy degradado tras ${consecutiveFailures} errores upstream`);
       }
-      if (!res.headersSent) {
-        res.writeHead(502, { 'Content-Type': 'text/plain' });
-      }
+      if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain' });
       res.end('upstream error');
     }
   });
 
-  // Bind a puerto efímero, solo loopback.
   const address = await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => resolve(server.address()));
   });
 
-  // Disparar primer refresh inmediato (en background) para validar que funciona.
+  // Validación inmediata: dispara primer refresh para confirmar que el flujo funciona.
   doRefresh().catch(() => {});
 
-  onLog('success', `🎯 Token refresher proxy escuchando en http://127.0.0.1:${address.port} (refresh cada ${REFRESH_INTERVAL_MS / 1000}s)`);
+  onLog('success', `🎯 Token refresher proxy escuchando en http://127.0.0.1:${address.port} (refresh ${REFRESH_INTERVAL_MS / 1000}s)`);
 
-  // URL local que FFmpeg debe consumir: misma pathname del master original.
   const localPlaylistUrl = (() => {
     const u = new URL(initialMasterUrl);
     return `http://127.0.0.1:${address.port}${u.pathname}`;
   })();
 
-  /** @type {TigoProxy} */
-  const handle = {
+  return {
     port: address.port,
     localPlaylistUrl,
     isDegraded: () => degraded,
@@ -321,13 +259,10 @@ async function startTigoProxy(opts) {
       degraded,
     }),
     stop: () => new Promise((resolve) => {
+      stopped = true;
       clearInterval(refreshTimer);
       clearTimeout(retryTimer);
       try { server.close(() => resolve()); } catch { resolve(); }
     }),
   };
-
-  return handle;
 }
-
-module.exports = { startTigoProxy };
