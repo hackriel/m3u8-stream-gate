@@ -1308,23 +1308,34 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // ── Refresco de token JIT para procesos con proxy (Tigo: wmsAuthSign dura 60s) ──
-    // El token de Teletica/Tigo expira en 1 minuto, así que SIEMPRE re-scrapeamos
-    // vía Pi5 justo antes de spawn de FFmpeg para garantizar token fresco.
+    // El token de Teletica/Tigo expira en 1 minuto, así que re-scrapeamos vía Pi5
+    // justo antes de spawn de FFmpeg para garantizar token fresco.
+    // OPTIMIZACIÓN #1: si el caller (Quick Retry) ya scrapeó hace <10s, reusar la
+    // URL recibida y saltar este refresh para evitar doble scrape (que duplica
+    // sesiones en Streann y desincroniza el token con la conexión FFmpeg).
     if (PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
-      const { channelId, channelName } = CHANNEL_MAP[process_id];
-      sendLog(process_id, 'info', `🔄 Refrescando URL via Pi5 (token de 60s)...`);
-      const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
-      if (fresh.url) {
-        effectiveSourceM3u8 = fresh.url;
-        scrapeSessionCache.set(process_id, {
-          cookies: fresh.cookies || null,
-          accessToken: fresh.accessToken || null,
-          timestamp: Date.now(),
-        });
-        sendLog(process_id, 'success', `✅ URL fresca obtenida via Pi5 para ${channelName}`);
+      const cached = scrapeSessionCache.get(process_id);
+      const cacheAgeMs = cached?.timestamp ? Date.now() - cached.timestamp : Infinity;
+      const skipRefresh = is_recovery && cacheAgeMs < 10000;
+
+      if (skipRefresh) {
+        sendLog(process_id, 'info', `♻️ Reusando URL fresca del Quick Retry (scrapeada hace ${Math.round(cacheAgeMs / 1000)}s) — sin doble scrape`);
       } else {
-        sendLog(process_id, 'error', `❌ No se pudo refrescar URL via Pi5: ${fresh.error || 'desconocido'}`);
-        return res.status(502).json({ error: `Refresco de URL falló: ${fresh.error || 'sin URL'}` });
+        const { channelId, channelName } = CHANNEL_MAP[process_id];
+        sendLog(process_id, 'info', `🔄 Refrescando URL via Pi5 (token de 60s)...`);
+        const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
+        if (fresh.url) {
+          effectiveSourceM3u8 = fresh.url;
+          scrapeSessionCache.set(process_id, {
+            cookies: fresh.cookies || null,
+            accessToken: fresh.accessToken || null,
+            timestamp: Date.now(),
+          });
+          sendLog(process_id, 'success', `✅ URL fresca obtenida via Pi5 para ${channelName}`);
+        } else {
+          sendLog(process_id, 'error', `❌ No se pudo refrescar URL via Pi5: ${fresh.error || 'desconocido'}`);
+          return res.status(502).json({ error: `Refresco de URL falló: ${fresh.error || 'sin URL'}` });
+        }
       }
     }
 
@@ -1503,20 +1514,24 @@ app.post('/api/emit', async (req, res) => {
       // Tigo via Pi5 SOCKS5: el proxy residencial introduce jitter de red
       // (handshake SOCKS5 + TCP + TLS por cada segmento .ts).
       // Estrategia anti-jitter (v3 — ajustado para token de 60s):
-      //  - live_start_index -2: arrancar 2 segmentos atrás (~12s buffer)
-      //    NOTA: -6 causaba 403 al chocar con expiración del wmsAuthSign (60s).
-      //    Con -2 hay margen para jitter pero arranca cerca del vivo.
+      //  - live_start_index dinámico (OPTIMIZACIÓN #3):
+      //      • Arranque manual: -2 (~12s buffer) → margen ante jitter inicial
+      //      • Recovery: -1 (~6s buffer) → arrancar más cerca del vivo para
+      //        evitar pedir segmentos al borde de expiración del wmsAuthSign
+      //        (caso típico: caída por 403 puntual + URL fresca → segmentos
+      //         viejos podrían ya estar en zona de gracia agotada del CDN)
       //  - multiple_requests 1: reusar conexión HTTP keep-alive sobre el proxy
       //    (CRÍTICO: evita renegociar SOCKS5+TLS por cada .ts → estabiliza fps)
       //  - http_persistent 1: forzar conexiones persistentes
       //  - fflags +genpts+discardcorrupt: regenerar PTS y descartar corruptos
       //  - rtbufsize 512M y thread_queue_size 16384: absorber bursts de jitter
       //  - max_delay 5000000 (5s): tolerancia de reordenamiento de paquetes
+      const liveStartIndex = isRecovery ? '-1' : '-2';
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-http_persistent', '1',
         '-multiple_requests', '1',
-        '-live_start_index', '-2',
+        '-live_start_index', liveStartIndex,
         '-max_reload', '1000',
         '-m3u8_hold_counters', '1000',
         '-fflags', '+genpts+discardcorrupt',
@@ -1524,7 +1539,7 @@ app.post('/api/emit', async (req, res) => {
         '-rtbufsize', '512M',
         '-thread_queue_size', '16384'
       );
-      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter v3 (buffer 512M, start -2, max_delay 5s)`);
+      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter v3 (buffer 512M, start ${liveStartIndex}${isRecovery ? ' [recovery: más cerca del vivo]' : ''}, max_delay 5s)`);
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
