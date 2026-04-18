@@ -1797,8 +1797,65 @@ app.post('/api/emit', async (req, res) => {
       // Pasar directo a FFmpeg sin resolución de variantes. Usar map genérico video+audio.
       sendLog(process_id, 'info', `📺 Akamai: URL directa sin resolución de variante`);
       // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
+    } else if (isScrapedChannel && isProxyScrapedSource) {
+      // FASE 1 — Variant Pinning para Tigo: en vez de pasar el master playlist
+      // (que tiene 4 variantes y FFmpeg abre TODAS en paralelo, dato que delata
+      // a un re-emisor), parseamos el master via Pi5 SOCKS5, elegimos la 720p
+      // y le pasamos directamente la sub-playlist (chunks.m3u8).
+      // Esto reduce 4x el tráfico que ve el CDN de nosotros y nos hace ver como
+      // un cliente ABR normal que ya negoció su calidad.
+      try {
+        const masterResp = await fetchWithOptionalProxy(inputSourceUrl, {
+          headers: {
+            'User-Agent': sessionUserAgent,
+            Referer: refererDomain,
+            Origin: originDomain,
+            ...(authorizationValue ? { Authorization: authorizationValue } : {}),
+            ...(sessionCookies ? { Cookie: sessionCookies } : {}),
+          },
+        }, true);
+        if (!masterResp.ok) throw new Error(`HTTP ${masterResp.status}`);
+        const body = await masterResp.text();
+
+        if (!body.includes('#EXT-X-STREAM-INF')) {
+          sendLog(process_id, 'info', `📺 Tigo: URL ya es sub-playlist directa (sin master)`);
+        } else {
+          const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
+          const variants = [];
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
+              const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
+              const resMatch = lines[i].match(/RESOLUTION=([\dx]+)/);
+              const variantUrl = lines[i + 1];
+              if (variantUrl && !variantUrl.startsWith('#')) {
+                variants.push({
+                  bandwidth: bwMatch ? parseInt(bwMatch[1]) : 0,
+                  resolution: resMatch ? resMatch[1] : null,
+                  url: variantUrl,
+                });
+              }
+            }
+          }
+
+          if (variants.length > 0) {
+            // Preferir 720p; si no existe, la de mayor bandwidth.
+            const target720 = variants.find(v => v.resolution && v.resolution.includes('720'));
+            const best = target720 || variants.sort((a, b) => b.bandwidth - a.bandwidth)[0];
+            let pinnedUrl = best.url;
+            if (!pinnedUrl.startsWith('http')) {
+              pinnedUrl = new URL(pinnedUrl, inputSourceUrl).toString();
+            }
+            inputSourceUrl = pinnedUrl;
+            sendLog(process_id, 'success', `📌 Tigo Variant Pinning → ${best.resolution || '?'} @ ${Math.round((best.bandwidth || 0) / 1000)}kbps (sub-playlist directa, sin master)`);
+          } else {
+            sendLog(process_id, 'warn', `⚠️ Master Tigo sin variantes parseables — usando master`);
+          }
+        }
+      } catch (err) {
+        sendLog(process_id, 'warn', `⚠️ Variant pinning Tigo falló (${err.message}) — fallback a master playlist`);
+      }
     } else if (isScrapedChannel) {
-      // Canales scrapeados: mantener master playlist vivo (token de 1min necesita renovación del CDN)
+      // Canales scrapeados (NO proxy): mantener master playlist vivo (token de 1min necesita renovación del CDN)
       // pero sí identificar el programa 720p para forzarlo con -map
       try {
         const { bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
