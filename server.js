@@ -13,18 +13,12 @@ import http from 'http';
 import https from 'https';
 import { createClient } from '@supabase/supabase-js';
 import { SocksProxyAgent } from 'socks-proxy-agent';
-import { startTigoProxy } from './tigoTokenProxy.js';
 
-// Map de mini-proxies activos por process_id (Fase 2: token refresher).
-// Si un proceso Tigo está en este map, FFmpeg apunta a 127.0.0.1:<port>
-// y el proxy refresca el wmsAuthSign cada 50s sin reiniciar FFmpeg.
+// (Fase 2 revertida — se eliminó el mini-proxy local de tokens. Tigo opera en
+// Fase 1 puro: proxychains4 → CDN. Mantenemos shims no-op para no romper
+// llamadas remanentes en el código (cleanup, exits, etc.).)
 const tigoProxies = new Map();
-const stopTigoProxy = async (process_id) => {
-  const p = tigoProxies.get(String(process_id));
-  if (!p) return;
-  tigoProxies.delete(String(process_id));
-  try { await p.stop(); } catch (_) {}
-};
+const stopTigoProxy = async (_process_id) => {};
 
 
 // Configurar cliente de Supabase (opcional, solo si hay variables de entorno)
