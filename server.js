@@ -2086,6 +2086,22 @@ app.post('/api/emit', async (req, res) => {
     };
     ffmpegProcesses.set(process_id, processInfo);
 
+    // ── Monitor de degradación del mini-proxy de Tigo (Fase 2) ──
+    // Si el token refresher acumula >3 fallos, matamos FFmpeg para que el
+    // Quick Retry rebote (potencialmente a Fase 1 si el proxy sigue degradado).
+    const tigoProxyMonitor = tigoProxies.get(String(process_id));
+    if (tigoProxyMonitor) {
+      const tigoDegradedTimer = setInterval(() => {
+        if (tigoProxyMonitor.isDegraded() && !ffmpegProcess.killed) {
+          sendLog(process_id, 'error', `🚨 Mini-proxy Tigo degradado — matando FFmpeg para rebotar a Fase 1`);
+          clearInterval(tigoDegradedTimer);
+          stopTigoProxy(process_id).catch(() => {});
+          try { ffmpegProcess.kill('SIGTERM'); } catch (_) {}
+        }
+      }, 3000);
+      ffmpegProcess.once('exit', () => clearInterval(tigoDegradedTimer));
+    }
+
     // Manejar salida estándar
     ffmpegProcess.stdout.on('data', (data) => {
       const output = data.toString();
