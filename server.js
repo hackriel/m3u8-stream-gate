@@ -268,6 +268,25 @@ const PROXY_PROCESSES = new Set(['12']);
 // Config dinámica generada en /tmp para no chocar con instalación global
 const PROXYCHAINS_CONF_PATH = '/tmp/proxychains-tigo.conf';
 
+// ── Pool de User-Agents reales (Fase 1: rotación de identidad por sesión) ──
+// Cada vez que arranca/reinicia un proceso con proxy (Tigo), se elige uno
+// aleatorio. Esto evita que Wowza/Nimble nos identifique como el mismo
+// "cliente persistente" entre reconexiones consecutivas.
+const REAL_USER_AGENTS = [
+  // Chrome Windows
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  // Chrome macOS
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  // Edge Windows
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0',
+  // Safari macOS
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15',
+  // Firefox Windows
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0',
+];
+const pickRandomUserAgent = () => REAL_USER_AGENTS[Math.floor(Math.random() * REAL_USER_AGENTS.length)];
+
 // Cache del agent SOCKS5 para reutilizar conexiones HTTP/HTTPS.
 // `socks-proxy-agent` es compatible con Node 20 y funciona con http/https.request.
 let _proxyAgent = null;
@@ -1511,35 +1530,35 @@ app.post('/api/emit', async (req, res) => {
       );
       sendLog(process_id, 'info', `🔧 Akamai CDN: modo resiliente con reconnect + hold counters`);
     } else if (isProxyScrapedSource) {
-      // Tigo via Pi5 SOCKS5: el proxy residencial introduce jitter de red
-      // (handshake SOCKS5 + TCP + TLS por cada segmento .ts).
-      // Estrategia anti-jitter (v3 — ajustado para token de 60s):
-      //  - live_start_index dinámico (OPTIMIZACIÓN #3):
-      //      • Arranque manual: -2 (~12s buffer) → margen ante jitter inicial
-      //      • Recovery: -1 (~6s buffer) → arrancar más cerca del vivo para
-      //        evitar pedir segmentos al borde de expiración del wmsAuthSign
-      //        (caso típico: caída por 403 puntual + URL fresca → segmentos
-      //         viejos podrían ya estar en zona de gracia agotada del CDN)
-      //  - multiple_requests 1: reusar conexión HTTP keep-alive sobre el proxy
-      //    (CRÍTICO: evita renegociar SOCKS5+TLS por cada .ts → estabiliza fps)
-      //  - http_persistent 1: forzar conexiones persistentes
-      //  - fflags +genpts+discardcorrupt: regenerar PTS y descartar corruptos
-      //  - rtbufsize 512M y thread_queue_size 16384: absorber bursts de jitter
-      //  - max_delay 5000000 (5s): tolerancia de reordenamiento de paquetes
+      // Tigo via Pi5 SOCKS5 — FASE 1: modo VLC-like puro.
+      // Quitamos los flags que delatan scraper (http_persistent, multiple_requests,
+      // max_reload exagerado, m3u8_hold_counters extremo). Un cliente real (VLC,
+      // navegador) sólo usa el demuxer HLS estándar. Wowza/Nimble identifica
+      // patrones agresivos de reload/keepalive y nos castiga con 403 progresivos.
+      //
+      // Ahora aplicamos Variant Pinning aguas abajo (más adelante en el código):
+      // pasamos a FFmpeg directamente la sub-playlist de la variante 720p, no el
+      // master con 4 variantes. Esto reduce 4x el tráfico que ve el CDN de
+      // nosotros y nos hace ver como un cliente ABR normal que ya eligió calidad.
+      //
+      // Mantenemos:
+      //  - live_start_index dinámico (-2 manual, -1 recovery): margen vs jitter
+      //  - rtbufsize/thread_queue_size: absorber jitter del SOCKS5
+      //  - max_delay 5s + genpts+discardcorrupt: tolerancia a paquetes corruptos
+      //  - max_reload/m3u8_hold_counters MODERADOS (8/10): suficiente para
+      //    sobrevivir 1-2 reloads de token sin parecer scraper agresivo.
       const liveStartIndex = isRecovery ? '-1' : '-2';
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
-        '-http_persistent', '1',
-        '-multiple_requests', '1',
         '-live_start_index', liveStartIndex,
-        '-max_reload', '1000',
-        '-m3u8_hold_counters', '1000',
+        '-max_reload', '8',
+        '-m3u8_hold_counters', '10',
         '-fflags', '+genpts+discardcorrupt',
         '-max_delay', '5000000',
         '-rtbufsize', '512M',
         '-thread_queue_size', '16384'
       );
-      sendLog(process_id, 'info', `🌊 Tigo proxy: anti-jitter v3 (buffer 512M, start ${liveStartIndex}${isRecovery ? ' [recovery: más cerca del vivo]' : ''}, max_delay 5s)`);
+      sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1): variant pinning + reload moderado, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
@@ -1660,10 +1679,19 @@ app.post('/api/emit', async (req, res) => {
       `Origin: ${originDomain}`,
     ].filter(Boolean).join('\r\n') + '\r\n' + univisionExtraHeaders;
 
+    // FASE 1: User-Agent rotativo para Tigo (proxy). Cada arranque/recovery
+    // elige un UA distinto del pool → cada reconexión = "cliente nuevo" para Wowza.
+    const sessionUserAgent = isProxyScrapedSource
+      ? pickRandomUserAgent()
+      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+    if (isProxyScrapedSource) {
+      sendLog(process_id, 'info', `🎭 UA rotativo: ${sessionUserAgent.substring(0, 60)}...`);
+    }
+
     const inputArgs = [
       ...effectiveResilienceArgs,
       ...extraFfmpegInputArgs,
-      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      '-user_agent', sessionUserAgent,
       '-headers', combinedHeaders,
     ];
 
@@ -1769,8 +1797,65 @@ app.post('/api/emit', async (req, res) => {
       // Pasar directo a FFmpeg sin resolución de variantes. Usar map genérico video+audio.
       sendLog(process_id, 'info', `📺 Akamai: URL directa sin resolución de variante`);
       // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
+    } else if (isScrapedChannel && isProxyScrapedSource) {
+      // FASE 1 — Variant Pinning para Tigo: en vez de pasar el master playlist
+      // (que tiene 4 variantes y FFmpeg abre TODAS en paralelo, dato que delata
+      // a un re-emisor), parseamos el master via Pi5 SOCKS5, elegimos la 720p
+      // y le pasamos directamente la sub-playlist (chunks.m3u8).
+      // Esto reduce 4x el tráfico que ve el CDN de nosotros y nos hace ver como
+      // un cliente ABR normal que ya negoció su calidad.
+      try {
+        const masterResp = await fetchWithOptionalProxy(inputSourceUrl, {
+          headers: {
+            'User-Agent': sessionUserAgent,
+            Referer: refererDomain,
+            Origin: originDomain,
+            ...(authorizationValue ? { Authorization: authorizationValue } : {}),
+            ...(sessionCookies ? { Cookie: sessionCookies } : {}),
+          },
+        }, true);
+        if (!masterResp.ok) throw new Error(`HTTP ${masterResp.status}`);
+        const body = await masterResp.text();
+
+        if (!body.includes('#EXT-X-STREAM-INF')) {
+          sendLog(process_id, 'info', `📺 Tigo: URL ya es sub-playlist directa (sin master)`);
+        } else {
+          const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
+          const variants = [];
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
+              const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
+              const resMatch = lines[i].match(/RESOLUTION=([\dx]+)/);
+              const variantUrl = lines[i + 1];
+              if (variantUrl && !variantUrl.startsWith('#')) {
+                variants.push({
+                  bandwidth: bwMatch ? parseInt(bwMatch[1]) : 0,
+                  resolution: resMatch ? resMatch[1] : null,
+                  url: variantUrl,
+                });
+              }
+            }
+          }
+
+          if (variants.length > 0) {
+            // Preferir 720p; si no existe, la de mayor bandwidth.
+            const target720 = variants.find(v => v.resolution && v.resolution.includes('720'));
+            const best = target720 || variants.sort((a, b) => b.bandwidth - a.bandwidth)[0];
+            let pinnedUrl = best.url;
+            if (!pinnedUrl.startsWith('http')) {
+              pinnedUrl = new URL(pinnedUrl, inputSourceUrl).toString();
+            }
+            inputSourceUrl = pinnedUrl;
+            sendLog(process_id, 'success', `📌 Tigo Variant Pinning → ${best.resolution || '?'} @ ${Math.round((best.bandwidth || 0) / 1000)}kbps (sub-playlist directa, sin master)`);
+          } else {
+            sendLog(process_id, 'warn', `⚠️ Master Tigo sin variantes parseables — usando master`);
+          }
+        }
+      } catch (err) {
+        sendLog(process_id, 'warn', `⚠️ Variant pinning Tigo falló (${err.message}) — fallback a master playlist`);
+      }
     } else if (isScrapedChannel) {
-      // Canales scrapeados: mantener master playlist vivo (token de 1min necesita renovación del CDN)
+      // Canales scrapeados (NO proxy): mantener master playlist vivo (token de 1min necesita renovación del CDN)
       // pero sí identificar el programa 720p para forzarlo con -map
       try {
         const { bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
