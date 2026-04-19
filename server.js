@@ -3806,7 +3806,27 @@ app.get('/api/proxy-status', (req, res) => {
   });
 });
 
-// Ruta catch-all para servir la aplicación React (debe ir después de todas las rutas API)
+// Estado SRT del ingest HDMI Tigo (Pi5 → VPS) — para el dashboard del proceso 12.
+// Devuelve si el Pi5 está conectado, bitrate Rx, paquetes perdidos y edad del último frame.
+app.get('/api/tigo-srt-status', (req, res) => {
+  const m = tigoSrtMetrics.get('12') || {
+    connected: false, bitrateKbps: 0, pktsLost: 0, lastFrameAt: 0, since: 0,
+  };
+  const now = Date.now();
+  const lastFrameAgeMs = m.lastFrameAt ? (now - m.lastFrameAt) : null;
+  // Si pasaron > 5s sin frames, marcamos como desconectado lógico
+  const liveConnected = m.connected && lastFrameAgeMs !== null && lastFrameAgeMs < 5000;
+  res.json({
+    enabled: TIGO_USE_HDMI,
+    listenerPort: TIGO_SRT_PORT,
+    connected: liveConnected,
+    bitrateKbps: liveConnected ? m.bitrateKbps : 0,
+    pktsLost: m.pktsLost,
+    lastFrameAgeMs,
+    sinceMs: m.since ? (now - m.since) : null,
+    bufferReady: fs.existsSync(TIGO_BUFFER_PLAYLIST),
+  });
+});
 app.use((req, res, next) => {
   // Solo servir index.html para rutas que no sean archivos estáticos
   if (!req.path.includes('.')) {
