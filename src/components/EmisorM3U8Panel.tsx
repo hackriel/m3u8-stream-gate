@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 import { ProxyHealthBadge } from "@/components/ProxyHealthBadge";
+import { TigoHdmiPanel } from "@/components/TigoHdmiPanel";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -833,6 +834,7 @@ export default function EmisorM3U8Panel() {
 
     return (
       <div className="space-y-6">
+        {processIndex === TIGO_URL_INDEX && <TigoHdmiPanel />}
         {processIndex === TIGO_URL_INDEX && <ProxyHealthBadge />}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Panel de configuración */}
