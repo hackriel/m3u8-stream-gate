@@ -358,16 +358,17 @@ const stopTigoKeepAlive = (process_id) => {
 // ── Buffer HLS local Tigo (Opción 1, Apr 2026) ─────────────────────
 // Cadena de 2 etapas para absorber micro-cortes del CDN sin afectar al TV:
 //   Etapa 1 (ingest): FFmpeg #1 con proxychains → escribe HLS crudo (-c copy)
-//                      a /tmp/tigo-buffer-12/buf.m3u8 (8s seg, list 6 = ~48s).
+//                      a /tmp/tigo-buffer-12/buf.m3u8 (10s seg × 8 = ~80s en disco,
+//                      ETAPA 2 espera 5 = ~50s de colchón real antes de arrancar).
 //   Etapa 2 (output): FFmpeg #2 lee del buffer local con -re y transcodea
 //                      720p CBR 2000k → /live/Tigo/playlist.m3u8 (lo que el TV consume).
-// Si Tigo cae 2-20s, el TV no se entera porque #2 lee del disco local.
+// Si Tigo cae hasta ~50s, el TV no se entera porque #2 lee del disco local.
 // Reversible con TIGO_USE_BUFFER=false (vuelve al modo single-FFmpeg actual).
 const TIGO_USE_BUFFER = (process.env.TIGO_USE_BUFFER || 'true').toLowerCase() !== 'false';
 const TIGO_BUFFER_DIR = '/tmp/tigo-buffer-12';
 const TIGO_BUFFER_PLAYLIST = path.join(TIGO_BUFFER_DIR, 'buf.m3u8');
-const TIGO_BUFFER_MIN_SEGMENTS = 3; // Esperar 3 segmentos antes de spawnear etapa 2
-const TIGO_BUFFER_WAIT_TIMEOUT_MS = 30000; // Máx 30s esperando primer buffer
+const TIGO_BUFFER_MIN_SEGMENTS = 5; // Esperar 5 segmentos × 10s = ~50s colchón
+const TIGO_BUFFER_WAIT_TIMEOUT_MS = 70000; // Máx 70s esperando primer buffer (5 segs × 10s + margen)
 
 // Map<process_id, ChildProcess> para FFmpeg #2 (output transcoder)
 const tigoOutputProcesses = new Map();
