@@ -302,6 +302,59 @@ const getProxyAgent = () => {
   return _proxyAgent;
 };
 
+// ── Keep-alive del playlist Tigo (Opción B) ──────────────────────────
+// Wowza/Nimble cierra `nimblesessionid` por idle (~30-60s). FFmpeg pide el
+// playlist cada ~6s, pero si el SOCKS5 jitterea y se salta un poll, el CDN
+// marca la sesión como muerta → micro-corte de 2-3s en el TV.
+// Hacemos GET paralelo cada 25s al MISMO playlist (variant pinned) vía la
+// MISMA IP (proxychains4/SOCKS5) para mantener la sesión caliente.
+// El resultado se descarta — solo importa que el CDN vea actividad.
+const tigoKeepAliveIntervals = new Map(); // process_id → intervalId
+
+const startTigoKeepAlive = (process_id, playlistUrl, userAgent) => {
+  // Limpiar interval previo si existe (recovery/restart)
+  stopTigoKeepAlive(process_id);
+  if (!playlistUrl) return;
+
+  const tick = async () => {
+    try {
+      const resp = await fetchWithOptionalProxy(playlistUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': userAgent || 'Mozilla/5.0',
+          'Referer': 'https://www.teletica.com/',
+          'Origin': 'https://www.teletica.com',
+          'Accept': '*/*',
+        },
+        signal: AbortSignal.timeout(8000),
+      }, true);
+      if (resp.status === 403) {
+        sendLog(process_id, 'warn', `🔑 KeepAlive: token expirado (403) — FFmpeg refrescará`);
+      } else if (resp.status === 404) {
+        sendLog(process_id, 'warn', `🔄 KeepAlive: sesión rotada (404) — playlist obsoleto`);
+      } else if (!resp.ok) {
+        sendLog(process_id, 'warn', `⚠️ KeepAlive: HTTP ${resp.status}`);
+      }
+      // status 200 = silencio (no contaminar logs)
+    } catch (err) {
+      // timeout/jitter: silencioso (esperado ocasionalmente con SOCKS5 residencial)
+    }
+  };
+
+  // Primer tick a los 25s (no inmediato: FFmpeg ya hizo el primer GET)
+  const intervalId = setInterval(tick, 25000);
+  tigoKeepAliveIntervals.set(String(process_id), intervalId);
+  sendLog(process_id, 'info', `💓 KeepAlive playlist activado (cada 25s vía Pi5)`);
+};
+
+const stopTigoKeepAlive = (process_id) => {
+  const id = tigoKeepAliveIntervals.get(String(process_id));
+  if (id) {
+    clearInterval(id);
+    tigoKeepAliveIntervals.delete(String(process_id));
+  }
+};
+
 const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
   if (!useProxy) {
     return fetch(url, options);
