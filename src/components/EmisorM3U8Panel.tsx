@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 import { ProxyHealthBadge } from "@/components/ProxyHealthBadge";
 import { TigoHdmiPanel } from "@/components/TigoHdmiPanel";
+import { useTigoSrtStatus } from "@/hooks/useTigoSrtStatus";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -106,6 +107,9 @@ const defaultProcess = (): EmissionProcess => ({
 
 export default function EmisorM3U8Panel() {
   const logContainerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<HTMLDivElement>(null));
+  const { status: tigoSrt } = useTigoSrtStatus(2000);
+  const tigoSrtConnected = tigoSrt.enabled && tigoSrt.connected;
+  const tigoSrtEnabled = tigoSrt.enabled;
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
@@ -831,6 +835,12 @@ export default function EmisorM3U8Panel() {
   const renderProcessTab = (processIndex: number) => {
     const process = processes[processIndex];
     const channelConfig = CHANNEL_CONFIGS[processIndex];
+    const isTigoHdmiTab = processIndex === TIGO_URL_INDEX;
+    // Para Tigo HDMI: solo permitir emitir si el Pi5 está enviando SRT
+    const tigoCanEmit = isTigoHdmiTab ? tigoSrtConnected : true;
+    const tigoBlockedReason = isTigoHdmiTab && !tigoSrtConnected
+      ? "Sin señal del Pi5 — verificá que la Cam Link esté conectada y el servicio tigo-hdmi-emitter activo"
+      : "";
 
     return (
       <div className="space-y-6">
@@ -881,6 +891,19 @@ export default function EmisorM3U8Panel() {
                   </div>
                 )}
               </>
+            ) : isTigoHdmiTab && tigoSrtEnabled ? (
+              // Tigo HDMI: no hay URL ni scraping, la fuente es la Cam Link 4K vía Pi5
+              <div className="mb-4 p-4 rounded-xl bg-card/50 border border-border space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-lg">📡</span>
+                  <span className="font-medium text-foreground">Fuente: HDMI vía Raspberry Pi 5</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  No requiere URL M3U8 ni scraping. La señal entra por la Elgato Cam Link 4K
+                  conectada al Pi5 y llega al VPS por SRT (puerto 9000/UDP). El panel superior
+                  muestra el estado en vivo del enlace.
+                </p>
+              </div>
             ) : (
               // Procesos M3U8 normales
               <>
@@ -973,11 +996,19 @@ export default function EmisorM3U8Panel() {
 
             <div className="flex gap-3 items-center flex-wrap">
               {!process.isEmitiendo ? (
-                <button 
-                  onClick={() => startEmitToRTMP(processIndex)} 
-                  className="px-6 py-3 rounded-xl bg-primary hover:bg-primary/90 active:scale-[.98] transition-all duration-200 font-medium text-primary-foreground shadow-lg hover:shadow-xl"
+                <button
+                  onClick={() => tigoCanEmit && startEmitToRTMP(processIndex)}
+                  disabled={!tigoCanEmit}
+                  title={tigoBlockedReason}
+                  className={`px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl ${
+                    tigoCanEmit
+                      ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                      : 'bg-muted text-muted-foreground cursor-not-allowed opacity-60'
+                  }`}
                 >
-                  {HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
+                  {isTigoHdmiTab && tigoSrtEnabled
+                    ? (tigoCanEmit ? '📺 Emitir HLS (Pi5 listo)' : '⏳ Esperando señal Pi5…')
+                    : HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
                 </button>
               ) : (
                 <button 
