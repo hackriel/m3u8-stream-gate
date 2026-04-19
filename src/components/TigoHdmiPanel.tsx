@@ -15,6 +15,7 @@ export function TigoHdmiPanel() {
   }
 
   const connected = status.connected;
+  const listenerActive = status.sinceMs != null;
   const ageS = status.lastFrameAgeMs != null ? (status.lastFrameAgeMs / 1000).toFixed(1) : "—";
   const sinceS = status.sinceMs != null ? Math.floor(status.sinceMs / 1000) : null;
 
@@ -22,7 +23,9 @@ export function TigoHdmiPanel() {
     ? "bg-muted text-muted-foreground"
     : connected
     ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
-    : "bg-red-500/15 text-red-500 border-red-500/30";
+    : listenerActive
+    ? "bg-red-500/15 text-red-500 border-red-500/30"
+    : "bg-primary/15 text-primary border-primary/30";
 
   return (
     <div className="rounded-lg border bg-card p-4 space-y-3">
@@ -36,8 +39,10 @@ export function TigoHdmiPanel() {
             <><WifiOff className="h-3 w-3 mr-1" /> Sin datos del backend</>
           ) : connected ? (
             <><CheckCircle2 className="h-3 w-3 mr-1" /> Conectado</>
-          ) : (
+          ) : listenerActive ? (
             <><AlertTriangle className="h-3 w-3 mr-1" /> Esperando Pi5…</>
+          ) : (
+            <><Radio className="h-3 w-3 mr-1" /> Listo para emitir</>
           )}
         </Badge>
       </div>
@@ -45,17 +50,17 @@ export function TigoHdmiPanel() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
         <Metric label="Bitrate" value={`${status.bitrateKbps} kbps`} highlight={connected} />
         <Metric label="Paquetes perdidos" value={String(status.pktsLost)} warn={status.pktsLost > 0} />
-        <Metric label="Último frame" value={connected ? `hace ${ageS}s` : "—"} />
+        <Metric label="Último frame" value={connected ? `hace ${ageS}s` : listenerActive ? "—" : "Sin iniciar"} />
         <Metric
           label="Sesión activa"
-          value={sinceS != null ? formatDuration(sinceS) : "—"}
+          value={sinceS != null ? formatDuration(sinceS) : "No iniciada"}
         />
       </div>
 
       <div className="flex items-center gap-2 text-[11px] text-muted-foreground pt-1 border-t">
         <Activity className="h-3 w-3" />
         <span>
-          Listener UDP {status.listenerPort} · Buffer {status.bufferReady ? "listo" : "calentando"} · Pi5 envía 720p30 H264 + AAC 48kHz vía SRT
+          {listenerActive ? 'Listener activo' : 'VPS listo'} UDP {status.listenerPort} · Buffer {status.bufferReady ? "listo" : "calentando"} · Pi5 envía 720p30 H264 + AAC 48kHz vía SRT
         </span>
       </div>
     </div>
