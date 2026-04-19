@@ -81,6 +81,15 @@ grep -q 'tcp_keepalive_time' /etc/sysctl.conf 2>/dev/null || {
 }
 ok "TCP keepalive optimizado (60s/10s/6 probes)"
 
+# ── Paso 3c: Abrir puerto SRT 9000/UDP en firewall (Tigo HDMI ingest) ──
+echo "🔓 [3c/8] Abriendo puerto 9000/UDP para SRT (Pi5 → VPS)..."
+if command -v ufw &>/dev/null; then
+  ufw allow 9000/udp comment 'Tigo HDMI SRT ingest from Pi5' 2>/dev/null || true
+  ok "Puerto 9000/UDP abierto en ufw"
+else
+  warn "ufw no instalado — asegurate de que el firewall del VPS permita UDP 9000 entrante"
+fi
+
 # ── Paso 4: Instalar dependencias ──
 echo "📥 [4/8] Instalando dependencias del proyecto..."
 [ -f "package.json" ] || fail "No se encontró package.json. Ejecuta este script desde el directorio del proyecto."
@@ -119,6 +128,9 @@ Environment=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzd
 Environment=TDMAX_EMAIL=arlopfa@gmail.com
 Environment=TDMAX_PASSWORD=vM5SdnKpPjlypvJW
 Environment=TIGO_PROXY_URL=socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080
+Environment=TIGO_USE_HDMI=true
+Environment=TIGO_SRT_PORT=9000
+Environment=TIGO_SRT_LATENCY_MS=2000
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10

@@ -356,19 +356,53 @@ const stopTigoKeepAlive = (process_id) => {
 };
 
 // ── Buffer HLS local Tigo (Opción 1, Apr 2026) ─────────────────────
-// Cadena de 2 etapas para absorber micro-cortes del CDN sin afectar al TV:
-//   Etapa 1 (ingest): FFmpeg #1 con proxychains → escribe HLS crudo (-c copy)
-//                      a /tmp/tigo-buffer-12/buf.m3u8 (10s seg × 8 = ~80s en disco,
-//                      ETAPA 2 espera 5 = ~50s de colchón real antes de arrancar).
-//   Etapa 2 (output): FFmpeg #2 lee del buffer local con -re y transcodea
-//                      720p CBR 2000k → /live/Tigo/playlist.m3u8 (lo que el TV consume).
-// Si Tigo cae hasta ~50s, el TV no se entera porque #2 lee del disco local.
-// Reversible con TIGO_USE_BUFFER=false (vuelve al modo single-FFmpeg actual).
+// Cadena de 2 etapas para absorber micro-cortes sin afectar al TV.
+//
+// MODO HDMI (default — Apr 2026): la ETAPA 1 es un FFmpeg SRT listener que
+// recibe video del Pi5 (Tigo Stick → Cam Link 4K → FFmpeg HDMI→SRT). NO se
+// usa el CDN de Tigo para nada. Cero scraping, cero tokens.
+//
+// MODO PROXY (legacy/fallback): ETAPA 1 = FFmpeg con proxychains → CDN HLS.
+// Se activa con TIGO_USE_HDMI=false. Microsocks del Pi5 sigue vivo.
+//
+// En ambos modos la ETAPA 2 es idéntica: FFmpeg #2 lee buf.m3u8 con -re y
+// transcodea 720p CBR 2000k → /live/Tigo/playlist.m3u8 (lo que el TV consume).
+// Reversible con TIGO_USE_BUFFER=false (vuelve a modo single-FFmpeg legacy).
 const TIGO_USE_BUFFER = (process.env.TIGO_USE_BUFFER || 'true').toLowerCase() !== 'false';
+const TIGO_USE_HDMI = (process.env.TIGO_USE_HDMI || 'true').toLowerCase() !== 'false';
+const TIGO_SRT_PORT = parseInt(process.env.TIGO_SRT_PORT || '9000', 10);
+const TIGO_SRT_LATENCY_MS = parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10);
 const TIGO_BUFFER_DIR = '/tmp/tigo-buffer-12';
 const TIGO_BUFFER_PLAYLIST = path.join(TIGO_BUFFER_DIR, 'buf.m3u8');
-const TIGO_BUFFER_MIN_SEGMENTS = 5; // Esperar 5 segmentos × 10s = ~50s colchón
-const TIGO_BUFFER_WAIT_TIMEOUT_MS = 70000; // Máx 70s esperando primer buffer (5 segs × 10s + margen)
+const TIGO_BUFFER_MIN_SEGMENTS = 3; // HDMI no tiene jitter de CDN, 3 segs = ~30s buffer
+const TIGO_BUFFER_WAIT_TIMEOUT_MS = 60000; // Máx 60s esperando primer buffer
+
+// ── Métricas SRT en vivo (para dashboard) ──
+// Mapa<process_id, { connected, bitrateKbps, pktsLost, lastFrameAt, since }>
+const tigoSrtMetrics = new Map();
+
+const updateTigoSrtMetric = (process_id, patch) => {
+  const key = String(process_id);
+  const prev = tigoSrtMetrics.get(key) || {
+    connected: false, bitrateKbps: 0, pktsLost: 0, lastFrameAt: 0, since: 0,
+  };
+  tigoSrtMetrics.set(key, { ...prev, ...patch });
+};
+
+const resetTigoSrtMetric = (process_id) => {
+  tigoSrtMetrics.delete(String(process_id));
+};
+
+// Parser de stderr de FFmpeg para extraer bitrate y detectar frames.
+// FFmpeg imprime líneas tipo: "frame=  150 fps= 30 q=23.0 size=    1234kB time=00:00:05.00 bitrate=2021.3kbits/s"
+const parseFfmpegProgress = (line) => {
+  const result = {};
+  const bitrateMatch = line.match(/bitrate=\s*([\d.]+)kbits\/s/);
+  if (bitrateMatch) result.bitrateKbps = Math.round(parseFloat(bitrateMatch[1]));
+  const frameMatch = line.match(/frame=\s*(\d+)/);
+  if (frameMatch) result.frame = parseInt(frameMatch[1], 10);
+  return result;
+};
 
 // Map<process_id, ChildProcess> para FFmpeg #2 (output transcoder)
 const tigoOutputProcesses = new Map();
@@ -415,6 +449,43 @@ const stopTigoOutputStage = (process_id) => {
   }
   tigoOutputProcesses.delete(key);
 };
+
+// ── ETAPA 1 modo HDMI: FFmpeg SRT listener (Pi5 → VPS) ──────────────
+// Map<process_id, ChildProcess> para el FFmpeg SRT listener (ETAPA 1 HDMI).
+// NOTA: cuando se usa modo HDMI, este proceso REEMPLAZA al ffmpegProcess
+// principal en `ffmpegProcesses`. Así toda la lógica de cierre/recovery existente
+// (manejada en ffmpegProcess.on('close')) sigue funcionando idéntica.
+const startTigoHdmiIngest = (process_id) => {
+  cleanTigoBufferDir();
+  resetTigoSrtMetric(process_id);
+
+  const srtUrl = `srt://0.0.0.0:${TIGO_SRT_PORT}?mode=listener&latency=${TIGO_SRT_LATENCY_MS}&pkt_size=1316&streamid=tigo-cr`;
+  const args = [
+    '-hide_banner',
+    '-loglevel', 'info',
+    '-stats',
+    '-fflags', '+genpts+discardcorrupt',
+    '-analyzeduration', '3000000',
+    '-probesize', '1500000',
+    '-i', srtUrl,
+    '-c', 'copy',
+    '-f', 'hls',
+    '-hls_time', '10',
+    '-hls_list_size', '8',
+    '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
+    '-hls_segment_type', 'mpegts',
+    '-hls_segment_filename', path.join(TIGO_BUFFER_DIR, 'buf_%05d.ts'),
+    '-hls_allow_cache', '0',
+    '-hls_start_number_source', 'epoch',
+    TIGO_BUFFER_PLAYLIST,
+  ];
+
+  const proc = spawn('ffmpeg', args);
+  updateTigoSrtMetric(process_id, { connected: false, since: Date.now() });
+  return { process: proc, args, command: `ffmpeg ${args.join(' ')}` };
+};
+
+
 
 const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
   if (!useProxy) {
@@ -2049,7 +2120,12 @@ app.post('/api/emit', async (req, res) => {
     // Para Tigo (ID 12) con buffer activo: FFmpeg #1 escribe HLS CRUDO (-c copy)
     // a /tmp/tigo-buffer-12 sin transcoding. FFmpeg #2 (más abajo) transcodea
     // desde el buffer local al output final que consume el TV.
-    const useTigoBuffer = isHlsOutput && String(process_id) === '12' && TIGO_USE_BUFFER && isProxyScrapedSource;
+    // Tigo (ID 12): el buffer se activa si es scraping vía proxy O si es modo HDMI.
+    // En modo HDMI, la ETAPA 1 es un FFmpeg SRT listener que recibe del Pi5;
+    // más abajo interceptamos el spawn para usar startTigoHdmiIngest() en vez
+    // de proxychains/CDN.
+    const isTigoHdmiMode = String(process_id) === '12' && TIGO_USE_HDMI;
+    const useTigoBuffer = isHlsOutput && String(process_id) === '12' && TIGO_USE_BUFFER && (isProxyScrapedSource || isTigoHdmiMode);
 
     if (useTigoBuffer) {
       // Sobrescribir args de salida: NO transcodear aquí, solo remuxear a HLS local.
@@ -2116,13 +2192,24 @@ app.post('/api/emit', async (req, res) => {
       );
     }
 
-    // ── Inyección de proxy SOCKS5 vía proxychains4 (solo procesos en PROXY_PROCESSES) ──
-    // Envolvemos FFmpeg con `proxychains4 -f /tmp/proxychains-tigo.conf ffmpeg ...`
-    // para enrutar manifiesto + segmentos HLS por la IP residencial CR del Pi 5.
+    // ── MODO HDMI (Tigo ID 12): SRT listener en vez de proxychains/CDN ──
+    // Si TIGO_USE_HDMI=true (default), descartamos los args HLS de scraping y
+    // arrancamos un FFmpeg SRT listener que recibe del Pi5. Toda la lógica de
+    // recovery/cierre de abajo sigue funcionando porque registramos el proceso
+    // en `ffmpegProcesses` igual que en el flujo normal.
     let spawnCmd = 'ffmpeg';
     let spawnArgs = ffmpegArgs;
-    if (PROXY_PROCESSES.has(process_id)) {
-      // Pre-validación: health-check del proxy SOCKS5 antes de spawn FFmpeg.
+    let ffmpegProcess;
+
+    if (isTigoHdmiMode) {
+      sendLog(process_id, 'info', `📡 Tigo HDMI: arrancando SRT listener en :${TIGO_SRT_PORT} (esperando Pi5...)`);
+      const ingest = startTigoHdmiIngest(process_id);
+      ffmpegProcess = ingest.process;
+      spawnCmd = 'ffmpeg';
+      spawnArgs = ingest.args;
+      sendLog(process_id, 'success', `🛰️ ETAPA 1 HDMI activa: srt://0.0.0.0:${TIGO_SRT_PORT} → ${TIGO_BUFFER_PLAYLIST}`);
+    } else if (PROXY_PROCESSES.has(process_id)) {
+      // ── MODO PROXY (legacy/fallback): proxychains4 → CDN HLS ──
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
       const health = await updateProxyHealth();
       if (!health.reachable) {
@@ -2141,12 +2228,9 @@ app.post('/api/emit', async (req, res) => {
       }
       sendLog(process_id, 'success', `✅ Proxy SOCKS5 OK (latencia ${health.latencyMs}ms)`);
 
-      // Si Fase 2 está activa, FFmpeg consume desde 127.0.0.1; el mini-proxy
-      // habla por SOCKS5 al CDN. NO envolver con proxychains4 (doble salto).
       if (tigoProxies.has(String(process_id))) {
         sendLog(process_id, 'success', `🛡️ FFmpeg consumirá del proxy local (Fase 2 activa)`);
       } else {
-        // Fallback Fase 1: proxychains4 directo (cuando Fase 2 no pudo iniciar).
         if (!isProxychainsAvailable()) {
           sendLog(process_id, 'error', `❌ proxychains4 no está instalado en el VPS. Ejecuta: apt install -y proxychains4`);
           return res.status(500).json({ error: 'proxychains4 no instalado en el VPS' });
@@ -2165,22 +2249,55 @@ app.post('/api/emit', async (req, res) => {
     const commandStr = spawnCmd + ' ' + spawnArgs.join(' ');
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 120)}...`);
 
-    // Ejecutar ffmpeg (posiblemente envuelto en proxychains)
-    const ffmpegProcess = spawn(spawnCmd, spawnArgs);
-    const processInfo = { 
-      process: ffmpegProcess, 
+    // Si no es modo HDMI, spawneamos aquí. En modo HDMI ya quedó spawneado arriba.
+    if (!ffmpegProcess) {
+      ffmpegProcess = spawn(spawnCmd, spawnArgs);
+    }
+    const processInfo = {
+      process: ffmpegProcess,
       status: 'starting',
       startTime: Date.now(),
       target_rtmp: target_rtmp,
-       source_m3u8: effectiveSourceM3u8
+      source_m3u8: effectiveSourceM3u8
     };
     ffmpegProcesses.set(process_id, processInfo);
 
     // ── Keep-alive del playlist Tigo (Opción B) ──
     // Mantiene caliente la sesión nimblesessionid para evitar que el CDN
     // la marque como idle y rote (causa probable de los reloads ciegos de 2-3s).
-    if (PROXY_PROCESSES.has(String(process_id))) {
+    // En modo HDMI no hay sesión CDN que mantener viva.
+    if (PROXY_PROCESSES.has(String(process_id)) && !isTigoHdmiMode) {
       startTigoKeepAlive(process_id, effectiveSourceM3u8, sessionUserAgent);
+    }
+
+    // ── Parser de métricas SRT (solo modo HDMI ID 12) ──
+    // El stderr de FFmpeg con -stats imprime cada ~1s una línea con bitrate y frame.
+    // Cuando llega la primera línea con frame > 0 → marcamos `connected = true`.
+    if (isTigoHdmiMode) {
+      ffmpegProcess.stderr.on('data', (data) => {
+        const text = data.toString();
+        for (const line of text.split('\n')) {
+          if (!line) continue;
+          const m = parseFfmpegProgress(line);
+          if (m.frame !== undefined && m.frame > 0) {
+            updateTigoSrtMetric(process_id, {
+              connected: true,
+              lastFrameAt: Date.now(),
+              ...(m.bitrateKbps !== undefined ? { bitrateKbps: m.bitrateKbps } : {}),
+            });
+          }
+          // Detectar paquetes perdidos en logs SRT (formato: "lost: N")
+          const lostMatch = line.match(/SRT.*lost\s*[:=]\s*(\d+)/i);
+          if (lostMatch) {
+            const cur = tigoSrtMetrics.get(String(process_id))?.pktsLost || 0;
+            updateTigoSrtMetric(process_id, { pktsLost: cur + parseInt(lostMatch[1], 10) });
+          }
+          // Detectar reset de conexión SRT
+          if (/Connection (lost|timed out)/i.test(line) || /SRT.*disconnect/i.test(line)) {
+            updateTigoSrtMetric(process_id, { connected: false });
+          }
+        }
+      });
     }
 
     // ── Buffer Tigo ETAPA 2 ─────────────────────────────────────────
@@ -2427,6 +2544,8 @@ app.post('/api/emit', async (req, res) => {
       stopTigoKeepAlive(process_id);
       // Si Tigo BUFFER estaba activo, matar también la ETAPA 2 (transcoder local)
       stopTigoOutputStage(process_id);
+      // Resetear métricas SRT (modo HDMI)
+      if (String(process_id) === '12') resetTigoSrtMetric(process_id);
       const processInfo = ffmpegProcesses.get(process_id);
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
       const statusAtClose = emissionStatuses.get(process_id);
@@ -3687,7 +3806,27 @@ app.get('/api/proxy-status', (req, res) => {
   });
 });
 
-// Ruta catch-all para servir la aplicación React (debe ir después de todas las rutas API)
+// Estado SRT del ingest HDMI Tigo (Pi5 → VPS) — para el dashboard del proceso 12.
+// Devuelve si el Pi5 está conectado, bitrate Rx, paquetes perdidos y edad del último frame.
+app.get('/api/tigo-srt-status', (req, res) => {
+  const m = tigoSrtMetrics.get('12') || {
+    connected: false, bitrateKbps: 0, pktsLost: 0, lastFrameAt: 0, since: 0,
+  };
+  const now = Date.now();
+  const lastFrameAgeMs = m.lastFrameAt ? (now - m.lastFrameAt) : null;
+  // Si pasaron > 5s sin frames, marcamos como desconectado lógico
+  const liveConnected = m.connected && lastFrameAgeMs !== null && lastFrameAgeMs < 5000;
+  res.json({
+    enabled: TIGO_USE_HDMI,
+    listenerPort: TIGO_SRT_PORT,
+    connected: liveConnected,
+    bitrateKbps: liveConnected ? m.bitrateKbps : 0,
+    pktsLost: m.pktsLost,
+    lastFrameAgeMs,
+    sinceMs: m.since ? (now - m.since) : null,
+    bufferReady: fs.existsSync(TIGO_BUFFER_PLAYLIST),
+  });
+});
 app.use((req, res, next) => {
   // Solo servir index.html para rutas que no sean archivos estáticos
   if (!req.path.includes('.')) {
