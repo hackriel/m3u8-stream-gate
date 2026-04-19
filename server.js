@@ -2544,6 +2544,8 @@ app.post('/api/emit', async (req, res) => {
       stopTigoKeepAlive(process_id);
       // Si Tigo BUFFER estaba activo, matar también la ETAPA 2 (transcoder local)
       stopTigoOutputStage(process_id);
+      // Resetear métricas SRT (modo HDMI)
+      if (String(process_id) === '12') resetTigoSrtMetric(process_id);
       const processInfo = ffmpegProcesses.get(process_id);
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
       const statusAtClose = emissionStatuses.get(process_id);
