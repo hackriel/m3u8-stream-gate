@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 import { ProxyHealthBadge } from "@/components/ProxyHealthBadge";
 import { TigoHdmiPanel } from "@/components/TigoHdmiPanel";
+import { useTigoSrtStatus } from "@/hooks/useTigoSrtStatus";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -106,6 +107,9 @@ const defaultProcess = (): EmissionProcess => ({
 
 export default function EmisorM3U8Panel() {
   const logContainerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<HTMLDivElement>(null));
+  const { status: tigoSrt } = useTigoSrtStatus(2000);
+  const tigoSrtConnected = tigoSrt.enabled && tigoSrt.connected;
+  const tigoSrtEnabled = tigoSrt.enabled;
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
