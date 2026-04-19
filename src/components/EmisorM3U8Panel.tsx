@@ -891,6 +891,19 @@ export default function EmisorM3U8Panel() {
                   </div>
                 )}
               </>
+            ) : isTigoHdmiTab && tigoSrtEnabled ? (
+              // Tigo HDMI: no hay URL ni scraping, la fuente es la Cam Link 4K vía Pi5
+              <div className="mb-4 p-4 rounded-xl bg-card/50 border border-border space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-lg">📡</span>
+                  <span className="font-medium text-foreground">Fuente: HDMI vía Raspberry Pi 5</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  No requiere URL M3U8 ni scraping. La señal entra por la Elgato Cam Link 4K
+                  conectada al Pi5 y llega al VPS por SRT (puerto 9000/UDP). El panel superior
+                  muestra el estado en vivo del enlace.
+                </p>
+              </div>
             ) : (
               // Procesos M3U8 normales
               <>
@@ -983,11 +996,19 @@ export default function EmisorM3U8Panel() {
 
             <div className="flex gap-3 items-center flex-wrap">
               {!process.isEmitiendo ? (
-                <button 
-                  onClick={() => startEmitToRTMP(processIndex)} 
-                  className="px-6 py-3 rounded-xl bg-primary hover:bg-primary/90 active:scale-[.98] transition-all duration-200 font-medium text-primary-foreground shadow-lg hover:shadow-xl"
+                <button
+                  onClick={() => tigoCanEmit && startEmitToRTMP(processIndex)}
+                  disabled={!tigoCanEmit}
+                  title={tigoBlockedReason}
+                  className={`px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl ${
+                    tigoCanEmit
+                      ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                      : 'bg-muted text-muted-foreground cursor-not-allowed opacity-60'
+                  }`}
                 >
-                  {HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
+                  {isTigoHdmiTab && tigoSrtEnabled
+                    ? (tigoCanEmit ? '📺 Emitir HLS (Pi5 listo)' : '⏳ Esperando señal Pi5…')
+                    : HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
                 </button>
               ) : (
                 <button 
