@@ -128,6 +128,9 @@ Environment=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzd
 Environment=TDMAX_EMAIL=arlopfa@gmail.com
 Environment=TDMAX_PASSWORD=vM5SdnKpPjlypvJW
 Environment=TIGO_PROXY_URL=socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080
+Environment=TIGO_USE_HDMI=true
+Environment=TIGO_SRT_PORT=9000
+Environment=TIGO_SRT_LATENCY_MS=2000
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
