@@ -2111,6 +2111,22 @@ app.post('/api/emit', async (req, res) => {
         if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
       }
 
+      // ── Logging quirúrgico Tigo: clasificar micro-cortes silenciosos ──
+      // Detectamos eventos que NO matan FFmpeg pero causan gaps de 2-3s en TV.
+      if (PROXY_PROCESSES.has(String(process_id))) {
+        if (/HTTP error 404/.test(output) && /\.ts/.test(output)) {
+          sendLog(process_id, 'info', `🔄 CDN rotó sesión (404 segmento) — playlist se recargará`);
+        } else if (/HTTP error 403/.test(output)) {
+          sendLog(process_id, 'info', `🔑 Token wmsAuthSign expirado (403)`);
+        } else if (/Opening '.*\.m3u8'/.test(output)) {
+          sendLog(process_id, 'info', `📋 Reload playlist HLS`);
+        } else if (/cur_seq_no|skipping \d+ segments/.test(output)) {
+          sendLog(process_id, 'info', `⚠️ Gap de segmentos detectado`);
+        } else if (/Connection timed out|Operation timed out/.test(output) && !/frame=/.test(output)) {
+          sendLog(process_id, 'info', `🌐 Jitter SOCKS5 (timeout transitorio)`);
+        }
+      }
+
       // 1) Clasificar primero causas reales (aunque no contengan "error/failed")
       const wasCategorized = detectAndCategorizeError(output, process_id);
       if (wasCategorized) return;
