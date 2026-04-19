@@ -110,6 +110,7 @@ export default function EmisorM3U8Panel() {
   const { status: tigoSrt } = useTigoSrtStatus(2000);
   const tigoSrtConnected = tigoSrt.enabled && tigoSrt.connected;
   const tigoSrtEnabled = tigoSrt.enabled;
+  const tigoSrtCanStart = tigoSrtEnabled && tigoSrt.bufferReady;
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
@@ -597,10 +598,14 @@ export default function EmisorM3U8Panel() {
 
     // Procesos M3U8 -> RTMP o HLS local
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
-    if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
+    const isTigoHdmiProcess = processIndex === TIGO_URL_INDEX && tigoSrtEnabled;
+    const requiresSourceM3u8 = !isTigoHdmiProcess;
+    if ((requiresSourceM3u8 && !process.m3u8) || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
-        emitMsg: isHlsOutput ? "Falta M3U8 (haz clic en Obtener URL)" : "Falta M3U8 o RTMP"
+        emitMsg: isHlsOutput
+          ? (isTigoHdmiProcess ? "VPS HDMI no está listo para iniciar" : "Falta M3U8 (haz clic en Obtener URL)")
+          : "Falta M3U8 o RTMP"
       });
       return;
     }
@@ -619,7 +624,7 @@ export default function EmisorM3U8Panel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          source_m3u8: process.m3u8,
+          source_m3u8: isTigoHdmiProcess ? `srt://pi5-hdmi:${tigoSrt.listenerPort}` : process.m3u8,
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString()
         })
@@ -836,10 +841,10 @@ export default function EmisorM3U8Panel() {
     const process = processes[processIndex];
     const channelConfig = CHANNEL_CONFIGS[processIndex];
     const isTigoHdmiTab = processIndex === TIGO_URL_INDEX;
-    // Para Tigo HDMI: solo permitir emitir si el Pi5 está enviando SRT
-    const tigoCanEmit = isTigoHdmiTab ? tigoSrtConnected : true;
-    const tigoBlockedReason = isTigoHdmiTab && !tigoSrtConnected
-      ? "Sin señal del Pi5 — verificá que la Cam Link esté conectada y el servicio tigo-hdmi-emitter activo"
+    // Para Tigo HDMI: el botón debe abrir el listener cuando el VPS ya está listo.
+    const tigoCanEmit = isTigoHdmiTab ? tigoSrtCanStart : true;
+    const tigoBlockedReason = isTigoHdmiTab && !tigoCanEmit
+      ? "El VPS HDMI todavía no está listo. Verificá que TIGO_USE_HDMI=true y que el panel superior muestre buffer listo."
       : "";
 
     return (
@@ -1007,7 +1012,7 @@ export default function EmisorM3U8Panel() {
                   }`}
                 >
                   {isTigoHdmiTab && tigoSrtEnabled
-                    ? (tigoCanEmit ? '📺 Emitir HLS (Pi5 listo)' : '⏳ Esperando señal Pi5…')
+                    ? (tigoCanEmit ? '📺 Emitir HLS (VPS listo)' : '⏳ Preparando HDMI…')
                     : HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
                 </button>
               ) : (

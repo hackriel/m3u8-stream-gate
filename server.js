@@ -1493,6 +1493,11 @@ app.post('/api/emit', async (req, res) => {
     const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
+    const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
+
+    if (isTigoHdmiProcess && !effectiveSourceM3u8) {
+      effectiveSourceM3u8 = `srt://pi5-hdmi:${TIGO_SRT_PORT}`;
+    }
 
     // Validación de ID: debe ser un número entre 0 y 11
     if (isNaN(numericId) || numericId < 0 || numericId > 12) {
@@ -1512,7 +1517,7 @@ app.post('/api/emit', async (req, res) => {
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
 
     // Validaciones
-    if (!effectiveSourceM3u8 || (!target_rtmp && !isHlsOutput)) {
+    if ((!isTigoHdmiProcess && !effectiveSourceM3u8) || (!target_rtmp && !isHlsOutput)) {
       sendLog(process_id, 'error', 'Faltan parámetros requeridos: source_m3u8 y target_rtmp');
       return res.status(400).json({ 
         error: 'Faltan parámetros requeridos: source_m3u8 y target_rtmp' 
@@ -1525,7 +1530,7 @@ app.post('/api/emit', async (req, res) => {
     // OPTIMIZACIÓN #1: si el caller (Quick Retry) ya scrapeó hace <10s, reusar la
     // URL recibida y saltar este refresh para evitar doble scrape (que duplica
     // sesiones en Streann y desincroniza el token con la conexión FFmpeg).
-    if (PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
+    if (!isTigoHdmiProcess && PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
       const cached = scrapeSessionCache.get(process_id);
       const cacheAgeMs = cached?.timestamp ? Date.now() - cached.timestamp : Infinity;
       const skipRefresh = is_recovery && cacheAgeMs < 10000;
