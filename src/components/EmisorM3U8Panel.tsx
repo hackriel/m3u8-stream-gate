@@ -110,7 +110,9 @@ export default function EmisorM3U8Panel() {
   const { status: tigoSrt } = useTigoSrtStatus(2000);
   const tigoSrtConnected = tigoSrt.enabled && tigoSrt.connected;
   const tigoSrtEnabled = tigoSrt.enabled;
-  const tigoSrtCanStart = tigoSrtEnabled && tigoSrt.bufferReady;
+  // El botón Tigo se habilita cuando el VPS está listo (TIGO_USE_HDMI=true).
+  // El buffer se construye DESPUÉS de pulsar Emitir, así que no se requiere acá.
+  const tigoSrtCanStart = tigoSrtEnabled;
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
