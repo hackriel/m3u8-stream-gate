@@ -2424,6 +2424,8 @@ app.post('/api/emit', async (req, res) => {
     ffmpegProcess.on('close', async (code, signal) => {
       // Detener keep-alive de Tigo (si estaba activo) — evita fugas de timers
       stopTigoKeepAlive(process_id);
+      // Si Tigo BUFFER estaba activo, matar también la ETAPA 2 (transcoder local)
+      stopTigoOutputStage(process_id);
       const processInfo = ffmpegProcesses.get(process_id);
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
       const statusAtClose = emissionStatuses.get(process_id);
