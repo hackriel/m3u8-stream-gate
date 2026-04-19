@@ -2120,7 +2120,12 @@ app.post('/api/emit', async (req, res) => {
     // Para Tigo (ID 12) con buffer activo: FFmpeg #1 escribe HLS CRUDO (-c copy)
     // a /tmp/tigo-buffer-12 sin transcoding. FFmpeg #2 (más abajo) transcodea
     // desde el buffer local al output final que consume el TV.
-    const useTigoBuffer = isHlsOutput && String(process_id) === '12' && TIGO_USE_BUFFER && isProxyScrapedSource;
+    // Tigo (ID 12): el buffer se activa si es scraping vía proxy O si es modo HDMI.
+    // En modo HDMI, la ETAPA 1 es un FFmpeg SRT listener que recibe del Pi5;
+    // más abajo interceptamos el spawn para usar startTigoHdmiIngest() en vez
+    // de proxychains/CDN.
+    const isTigoHdmiMode = String(process_id) === '12' && TIGO_USE_HDMI;
+    const useTigoBuffer = isHlsOutput && String(process_id) === '12' && TIGO_USE_BUFFER && (isProxyScrapedSource || isTigoHdmiMode);
 
     if (useTigoBuffer) {
       // Sobrescribir args de salida: NO transcodear aquí, solo remuxear a HLS local.
