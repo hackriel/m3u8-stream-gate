@@ -831,6 +831,9 @@ export default function EmisorM3U8Panel() {
   const renderProcessTab = (processIndex: number) => {
     const process = processes[processIndex];
     const channelConfig = CHANNEL_CONFIGS[processIndex];
+    // Estado SRT para Tigo HDMI (vive aquí para deshabilitar el botón Emitir)
+    const tigoSrt = (window as any).__tigoSrtStatus as { connected: boolean; enabled: boolean } | undefined;
+    const isTigoHdmiTab = processIndex === TIGO_URL_INDEX;
 
     return (
       <div className="space-y-6">
