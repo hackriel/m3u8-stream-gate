@@ -81,6 +81,15 @@ grep -q 'tcp_keepalive_time' /etc/sysctl.conf 2>/dev/null || {
 }
 ok "TCP keepalive optimizado (60s/10s/6 probes)"
 
+# ── Paso 3c: Abrir puerto SRT 9000/UDP en firewall (Tigo HDMI ingest) ──
+echo "🔓 [3c/8] Abriendo puerto 9000/UDP para SRT (Pi5 → VPS)..."
+if command -v ufw &>/dev/null; then
+  ufw allow 9000/udp comment 'Tigo HDMI SRT ingest from Pi5' 2>/dev/null || true
+  ok "Puerto 9000/UDP abierto en ufw"
+else
+  warn "ufw no instalado — asegurate de que el firewall del VPS permita UDP 9000 entrante"
+fi
+
 # ── Paso 4: Instalar dependencias ──
 echo "📥 [4/8] Instalando dependencias del proyecto..."
 [ -f "package.json" ] || fail "No se encontró package.json. Ejecuta este script desde el directorio del proyecto."
