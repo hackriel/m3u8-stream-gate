@@ -356,19 +356,53 @@ const stopTigoKeepAlive = (process_id) => {
 };
 
 // ── Buffer HLS local Tigo (Opción 1, Apr 2026) ─────────────────────
-// Cadena de 2 etapas para absorber micro-cortes del CDN sin afectar al TV:
-//   Etapa 1 (ingest): FFmpeg #1 con proxychains → escribe HLS crudo (-c copy)
-//                      a /tmp/tigo-buffer-12/buf.m3u8 (10s seg × 8 = ~80s en disco,
-//                      ETAPA 2 espera 5 = ~50s de colchón real antes de arrancar).
-//   Etapa 2 (output): FFmpeg #2 lee del buffer local con -re y transcodea
-//                      720p CBR 2000k → /live/Tigo/playlist.m3u8 (lo que el TV consume).
-// Si Tigo cae hasta ~50s, el TV no se entera porque #2 lee del disco local.
-// Reversible con TIGO_USE_BUFFER=false (vuelve al modo single-FFmpeg actual).
+// Cadena de 2 etapas para absorber micro-cortes sin afectar al TV.
+//
+// MODO HDMI (default — Apr 2026): la ETAPA 1 es un FFmpeg SRT listener que
+// recibe video del Pi5 (Tigo Stick → Cam Link 4K → FFmpeg HDMI→SRT). NO se
+// usa el CDN de Tigo para nada. Cero scraping, cero tokens.
+//
+// MODO PROXY (legacy/fallback): ETAPA 1 = FFmpeg con proxychains → CDN HLS.
+// Se activa con TIGO_USE_HDMI=false. Microsocks del Pi5 sigue vivo.
+//
+// En ambos modos la ETAPA 2 es idéntica: FFmpeg #2 lee buf.m3u8 con -re y
+// transcodea 720p CBR 2000k → /live/Tigo/playlist.m3u8 (lo que el TV consume).
+// Reversible con TIGO_USE_BUFFER=false (vuelve a modo single-FFmpeg legacy).
 const TIGO_USE_BUFFER = (process.env.TIGO_USE_BUFFER || 'true').toLowerCase() !== 'false';
+const TIGO_USE_HDMI = (process.env.TIGO_USE_HDMI || 'true').toLowerCase() !== 'false';
+const TIGO_SRT_PORT = parseInt(process.env.TIGO_SRT_PORT || '9000', 10);
+const TIGO_SRT_LATENCY_MS = parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10);
 const TIGO_BUFFER_DIR = '/tmp/tigo-buffer-12';
 const TIGO_BUFFER_PLAYLIST = path.join(TIGO_BUFFER_DIR, 'buf.m3u8');
-const TIGO_BUFFER_MIN_SEGMENTS = 5; // Esperar 5 segmentos × 10s = ~50s colchón
-const TIGO_BUFFER_WAIT_TIMEOUT_MS = 70000; // Máx 70s esperando primer buffer (5 segs × 10s + margen)
+const TIGO_BUFFER_MIN_SEGMENTS = 3; // HDMI no tiene jitter de CDN, 3 segs = ~30s buffer
+const TIGO_BUFFER_WAIT_TIMEOUT_MS = 60000; // Máx 60s esperando primer buffer
+
+// ── Métricas SRT en vivo (para dashboard) ──
+// Mapa<process_id, { connected, bitrateKbps, pktsLost, lastFrameAt, since }>
+const tigoSrtMetrics = new Map();
+
+const updateTigoSrtMetric = (process_id, patch) => {
+  const key = String(process_id);
+  const prev = tigoSrtMetrics.get(key) || {
+    connected: false, bitrateKbps: 0, pktsLost: 0, lastFrameAt: 0, since: 0,
+  };
+  tigoSrtMetrics.set(key, { ...prev, ...patch });
+};
+
+const resetTigoSrtMetric = (process_id) => {
+  tigoSrtMetrics.delete(String(process_id));
+};
+
+// Parser de stderr de FFmpeg para extraer bitrate y detectar frames.
+// FFmpeg imprime líneas tipo: "frame=  150 fps= 30 q=23.0 size=    1234kB time=00:00:05.00 bitrate=2021.3kbits/s"
+const parseFfmpegProgress = (line) => {
+  const result = {};
+  const bitrateMatch = line.match(/bitrate=\s*([\d.]+)kbits\/s/);
+  if (bitrateMatch) result.bitrateKbps = Math.round(parseFloat(bitrateMatch[1]));
+  const frameMatch = line.match(/frame=\s*(\d+)/);
+  if (frameMatch) result.frame = parseInt(frameMatch[1], 10);
+  return result;
+};
 
 // Map<process_id, ChildProcess> para FFmpeg #2 (output transcoder)
 const tigoOutputProcesses = new Map();
