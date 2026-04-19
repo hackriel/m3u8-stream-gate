@@ -2182,6 +2182,113 @@ app.post('/api/emit', async (req, res) => {
       startTigoKeepAlive(process_id, effectiveSourceM3u8, sessionUserAgent);
     }
 
+    // ── Buffer Tigo ETAPA 2 ─────────────────────────────────────────
+    // Tras spawnear FFmpeg #1 (ingest crudo a /tmp/tigo-buffer-12), esperamos
+    // a que existan ≥3 segmentos en el buffer y arrancamos FFmpeg #2 (transcoder
+    // local) que lee del disco con -re y escribe al output final que consume el TV.
+    // FFmpeg #2 NO toca el CDN de Teletica → 0 riesgo de baneo adicional.
+    if (useTigoBuffer) {
+      (async () => {
+        const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
+        const outDir = path.join(HLS_OUTPUT_DIR, slug);
+        try {
+          if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+          for (const f of fs.readdirSync(outDir)) {
+            try { fs.unlinkSync(path.join(outDir, f)); } catch (_) {}
+          }
+        } catch (_) {}
+
+        sendLog(process_id, 'info', `⏳ Tigo BUFFER ETAPA 2: esperando ≥${TIGO_BUFFER_MIN_SEGMENTS} segmentos en buffer...`);
+        const ready = await waitForTigoBufferReady();
+        if (!ready.ready) {
+          sendLog(process_id, 'error', `❌ Tigo BUFFER: timeout (${ready.waitedMs}ms) esperando segmentos. Etapa 1 puede estar fallando.`);
+          return;
+        }
+        sendLog(process_id, 'success', `✅ Tigo BUFFER listo (${ready.segments} segs en ${ready.waitedMs}ms) — spawneando ETAPA 2`);
+
+        const spawnOutputStage = () => {
+          // Si hubo parada manual mientras esperábamos, abortar
+          if (manualStopProcesses.has(process_id) || manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+            return;
+          }
+          const ingestProc = ffmpegProcesses.get(process_id);
+          if (!ingestProc || !ingestProc.process || ingestProc.process.killed) {
+            sendLog(process_id, 'warn', `⚠️ Tigo BUFFER ETAPA 2: ETAPA 1 no está viva, abortando spawn`);
+            return;
+          }
+
+          const outPlaylist = path.join(outDir, 'playlist.m3u8');
+          const stage2Args = [
+            '-re',
+            '-fflags', '+genpts+discardcorrupt',
+            '-analyzeduration', '3000000',
+            '-probesize', '1500000',
+            '-i', TIGO_BUFFER_PLAYLIST,
+            '-map', '0:v:0?',
+            '-map', '0:a:0?',
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',
+            '-profile:v', 'main',
+            '-threads', '4',
+            '-b:v', '2000k',
+            '-maxrate', '2000k',
+            '-bufsize', '4000k',
+            '-vf', 'scale=-2:720',
+            '-r', '29.97',
+            '-vsync', 'cfr',
+            '-g', '59.94',
+            '-keyint_min', '59.94',
+            '-sc_threshold', '0',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-ar', '44100',
+            '-max_muxing_queue_size', '1024',
+            '-reset_timestamps', '1',
+            '-f', 'hls',
+            '-hls_time', '4',
+            '-hls_list_size', '6',
+            '-hls_flags', 'delete_segments+append_list+independent_segments',
+            '-hls_segment_type', 'mpegts',
+            '-hls_segment_filename', path.join(outDir, 'seg_%05d.ts'),
+            '-hls_allow_cache', '1',
+            '-hls_start_number_source', 'epoch',
+            outPlaylist,
+          ];
+          const stage2 = spawn('ffmpeg', stage2Args);
+          tigoOutputProcesses.set(String(process_id), stage2);
+          sendLog(process_id, 'success', `🎬 Tigo BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode local 720p CBR 2000k)`);
+
+          stage2.stderr.on('data', (data) => {
+            const out = data.toString();
+            // Silencioso: solo errores reales
+            if (/error|failed|Invalid/i.test(out) && !/frame=/.test(out)) {
+              const line = out.split('\n').find(l => /error|failed|Invalid/i.test(l));
+              if (line) sendLog(process_id, 'warn', `[ETAPA2] ${line.trim().substring(0, 180)}`);
+            }
+          });
+
+          stage2.on('close', (code, signal) => {
+            tigoOutputProcesses.delete(String(process_id));
+            const stillRunning = ffmpegProcesses.get(process_id);
+            const isAlive = stillRunning && stillRunning.process && !stillRunning.process.killed;
+            const wasManual = manualStopProcesses.has(process_id) || manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id));
+            if (wasManual || !isAlive) {
+              sendLog(process_id, 'info', `🛑 Tigo BUFFER ETAPA 2 terminada (code=${code}, signal=${signal || '-'})`);
+              return;
+            }
+            // ETAPA 1 sigue viva → reiniciar ETAPA 2 sin tocar el CDN
+            sendLog(process_id, 'warn', `🔁 Tigo BUFFER ETAPA 2 cayó (code=${code}) — reiniciando en 2s (ETAPA 1 sigue viva)`);
+            setTimeout(spawnOutputStage, 2000);
+          });
+        };
+
+        spawnOutputStage();
+      })().catch(err => {
+        sendLog(process_id, 'error', `❌ Tigo BUFFER ETAPA 2 error: ${err.message}`);
+      });
+    }
+
+
     // (Monitor del mini-proxy Tigo eliminado — Fase 2 revertida.)
 
     // Manejar salida estándar
