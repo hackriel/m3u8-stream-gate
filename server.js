@@ -2045,7 +2045,41 @@ app.post('/api/emit', async (req, res) => {
     ];
 
     // === OUTPUT: HLS local o RTMP ===
-    if (isHlsOutput) {
+    // Para Tigo (ID 12) con buffer activo: FFmpeg #1 escribe HLS CRUDO (-c copy)
+    // a /tmp/tigo-buffer-12 sin transcoding. FFmpeg #2 (más abajo) transcodea
+    // desde el buffer local al output final que consume el TV.
+    const useTigoBuffer = isHlsOutput && String(process_id) === '12' && TIGO_USE_BUFFER && isProxyScrapedSource;
+
+    if (useTigoBuffer) {
+      // Sobrescribir args de salida: NO transcodear aquí, solo remuxear a HLS local.
+      // Quitamos las flags de transcoding que ya estaban en ffmpegArgs.
+      const transcodeFlagsToStrip = new Set([
+        '-c:v','-preset','-profile:v','-threads','-b:v','-maxrate','-bufsize',
+        '-vf','-r','-vsync','-g','-keyint_min','-sc_threshold','-c:a','-b:a','-ar',
+        '-max_muxing_queue_size','-reset_timestamps'
+      ]);
+      const stripped = [];
+      for (let i = 0; i < ffmpegArgs.length; i++) {
+        if (transcodeFlagsToStrip.has(ffmpegArgs[i])) { i++; continue; }
+        stripped.push(ffmpegArgs[i]);
+      }
+      ffmpegArgs = stripped;
+
+      cleanTigoBufferDir();
+      ffmpegArgs.push(
+        '-c', 'copy',
+        '-f', 'hls',
+        '-hls_time', '8',
+        '-hls_list_size', '6',
+        '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
+        '-hls_segment_type', 'mpegts',
+        '-hls_segment_filename', path.join(TIGO_BUFFER_DIR, 'buf_%05d.ts'),
+        '-hls_allow_cache', '0',
+        '-hls_start_number_source', 'epoch',
+        TIGO_BUFFER_PLAYLIST
+      );
+      sendLog(process_id, 'info', `🌊 Tigo BUFFER ETAPA 1 → ${TIGO_BUFFER_PLAYLIST} (-c copy, 8s seg × 6)`);
+    } else if (isHlsOutput) {
       const hlsSlug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
       const hlsDir = path.join(HLS_OUTPUT_DIR, hlsSlug);
       if (!fs.existsSync(hlsDir)) {
