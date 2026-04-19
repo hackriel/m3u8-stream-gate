@@ -43,7 +43,7 @@ if ! lsusb | grep -qi "elgato"; then
   warn "Continuando — el script igual usará /dev/video0 como fallback."
 fi
 
-VIDEO_DEV=$(v4l2-ctl --list-devices 2>/dev/null | awk '/Cam Link|Elgato/{getline; gsub(/^[ \t]+/,""); print; exit}')
+VIDEO_DEV=$(v4l2-ctl --list-devices 2>/dev/null | grep -A1 -iE "Cam Link|Elgato" | grep -oE "/dev/video[0-9]+" | head -1)
 [ -z "$VIDEO_DEV" ] && VIDEO_DEV="/dev/video0"
 ok "Video device: $VIDEO_DEV"
 
