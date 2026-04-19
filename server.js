@@ -302,6 +302,59 @@ const getProxyAgent = () => {
   return _proxyAgent;
 };
 
+// ── Keep-alive del playlist Tigo (Opción B) ──────────────────────────
+// Wowza/Nimble cierra `nimblesessionid` por idle (~30-60s). FFmpeg pide el
+// playlist cada ~6s, pero si el SOCKS5 jitterea y se salta un poll, el CDN
+// marca la sesión como muerta → micro-corte de 2-3s en el TV.
+// Hacemos GET paralelo cada 25s al MISMO playlist (variant pinned) vía la
+// MISMA IP (proxychains4/SOCKS5) para mantener la sesión caliente.
+// El resultado se descarta — solo importa que el CDN vea actividad.
+const tigoKeepAliveIntervals = new Map(); // process_id → intervalId
+
+const startTigoKeepAlive = (process_id, playlistUrl, userAgent) => {
+  // Limpiar interval previo si existe (recovery/restart)
+  stopTigoKeepAlive(process_id);
+  if (!playlistUrl) return;
+
+  const tick = async () => {
+    try {
+      const resp = await fetchWithOptionalProxy(playlistUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': userAgent || 'Mozilla/5.0',
+          'Referer': 'https://www.teletica.com/',
+          'Origin': 'https://www.teletica.com',
+          'Accept': '*/*',
+        },
+        signal: AbortSignal.timeout(8000),
+      }, true);
+      if (resp.status === 403) {
+        sendLog(process_id, 'warn', `🔑 KeepAlive: token expirado (403) — FFmpeg refrescará`);
+      } else if (resp.status === 404) {
+        sendLog(process_id, 'warn', `🔄 KeepAlive: sesión rotada (404) — playlist obsoleto`);
+      } else if (!resp.ok) {
+        sendLog(process_id, 'warn', `⚠️ KeepAlive: HTTP ${resp.status}`);
+      }
+      // status 200 = silencio (no contaminar logs)
+    } catch (err) {
+      // timeout/jitter: silencioso (esperado ocasionalmente con SOCKS5 residencial)
+    }
+  };
+
+  // Primer tick a los 25s (no inmediato: FFmpeg ya hizo el primer GET)
+  const intervalId = setInterval(tick, 25000);
+  tigoKeepAliveIntervals.set(String(process_id), intervalId);
+  sendLog(process_id, 'info', `💓 KeepAlive playlist activado (cada 25s vía Pi5)`);
+};
+
+const stopTigoKeepAlive = (process_id) => {
+  const id = tigoKeepAliveIntervals.get(String(process_id));
+  if (id) {
+    clearInterval(id);
+    tigoKeepAliveIntervals.delete(String(process_id));
+  }
+};
+
 const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
   if (!useProxy) {
     return fetch(url, options);
@@ -2028,6 +2081,13 @@ app.post('/api/emit', async (req, res) => {
     };
     ffmpegProcesses.set(process_id, processInfo);
 
+    // ── Keep-alive del playlist Tigo (Opción B) ──
+    // Mantiene caliente la sesión nimblesessionid para evitar que el CDN
+    // la marque como idle y rote (causa probable de los reloads ciegos de 2-3s).
+    if (PROXY_PROCESSES.has(String(process_id))) {
+      startTigoKeepAlive(process_id, effectiveSourceM3u8, sessionUserAgent);
+    }
+
     // (Monitor del mini-proxy Tigo eliminado — Fase 2 revertida.)
 
     // Manejar salida estándar
@@ -2049,6 +2109,22 @@ app.post('/api/emit', async (req, res) => {
       for (const line of lines) {
         stderrBuffer.push(line.trim());
         if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
+      }
+
+      // ── Logging quirúrgico Tigo: clasificar micro-cortes silenciosos ──
+      // Detectamos eventos que NO matan FFmpeg pero causan gaps de 2-3s en TV.
+      if (PROXY_PROCESSES.has(String(process_id))) {
+        if (/HTTP error 404/.test(output) && /\.ts/.test(output)) {
+          sendLog(process_id, 'info', `🔄 CDN rotó sesión (404 segmento) — playlist se recargará`);
+        } else if (/HTTP error 403/.test(output)) {
+          sendLog(process_id, 'info', `🔑 Token wmsAuthSign expirado (403)`);
+        } else if (/Opening '.*\.m3u8'/.test(output)) {
+          sendLog(process_id, 'info', `📋 Reload playlist HLS`);
+        } else if (/cur_seq_no|skipping \d+ segments/.test(output)) {
+          sendLog(process_id, 'info', `⚠️ Gap de segmentos detectado`);
+        } else if (/Connection timed out|Operation timed out/.test(output) && !/frame=/.test(output)) {
+          sendLog(process_id, 'info', `🌐 Jitter SOCKS5 (timeout transitorio)`);
+        }
       }
 
       // 1) Clasificar primero causas reales (aunque no contengan "error/failed")
@@ -2145,6 +2221,8 @@ app.post('/api/emit', async (req, res) => {
 
     // Manejar cierre del proceso
     ffmpegProcess.on('close', async (code, signal) => {
+      // Detener keep-alive de Tigo (si estaba activo) — evita fugas de timers
+      stopTigoKeepAlive(process_id);
       const processInfo = ffmpegProcesses.get(process_id);
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
       const statusAtClose = emissionStatuses.get(process_id);

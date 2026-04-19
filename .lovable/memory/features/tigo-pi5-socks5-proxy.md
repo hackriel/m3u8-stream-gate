@@ -1,6 +1,6 @@
 ---
 name: tigo-pi5-socks5-proxy
-description: Proceso ID 12 (TIGO URL) usa Pi5 SOCKS5 + Fase 1 endurecida (proxychains4 → CDN, sin mini-proxy local). Variant Pinning manual a 720p, max_reload=50, m3u8_hold_counters=50, watchdog stall 120s. Fase 2 (mini-proxy con token refresher) fue probada y revertida — incompatible con nimblesessionid de Wowza.
+description: Proceso ID 12 (TIGO URL) usa Pi5 SOCKS5 + Fase 1 endurecida (proxychains4 → CDN, sin mini-proxy local) + Opción B keep-alive playlist (GET cada 25s vía Pi5 para evitar idle de nimblesessionid) + logging quirúrgico de micro-cortes (404/403/Opening/cur_seq_no/timeout). Variant Pinning manual a 720p, max_reload=50, m3u8_hold_counters=50, watchdog stall 120s. Fase 2 (mini-proxy con token refresher) fue probada y revertida — incompatible con nimblesessionid de Wowza.
 type: feature
 ---
 
