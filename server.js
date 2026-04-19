@@ -2265,8 +2265,39 @@ app.post('/api/emit', async (req, res) => {
     // ── Keep-alive del playlist Tigo (Opción B) ──
     // Mantiene caliente la sesión nimblesessionid para evitar que el CDN
     // la marque como idle y rote (causa probable de los reloads ciegos de 2-3s).
-    if (PROXY_PROCESSES.has(String(process_id))) {
+    // En modo HDMI no hay sesión CDN que mantener viva.
+    if (PROXY_PROCESSES.has(String(process_id)) && !isTigoHdmiMode) {
       startTigoKeepAlive(process_id, effectiveSourceM3u8, sessionUserAgent);
+    }
+
+    // ── Parser de métricas SRT (solo modo HDMI ID 12) ──
+    // El stderr de FFmpeg con -stats imprime cada ~1s una línea con bitrate y frame.
+    // Cuando llega la primera línea con frame > 0 → marcamos `connected = true`.
+    if (isTigoHdmiMode) {
+      ffmpegProcess.stderr.on('data', (data) => {
+        const text = data.toString();
+        for (const line of text.split('\n')) {
+          if (!line) continue;
+          const m = parseFfmpegProgress(line);
+          if (m.frame !== undefined && m.frame > 0) {
+            updateTigoSrtMetric(process_id, {
+              connected: true,
+              lastFrameAt: Date.now(),
+              ...(m.bitrateKbps !== undefined ? { bitrateKbps: m.bitrateKbps } : {}),
+            });
+          }
+          // Detectar paquetes perdidos en logs SRT (formato: "lost: N")
+          const lostMatch = line.match(/SRT.*lost\s*[:=]\s*(\d+)/i);
+          if (lostMatch) {
+            const cur = tigoSrtMetrics.get(String(process_id))?.pktsLost || 0;
+            updateTigoSrtMetric(process_id, { pktsLost: cur + parseInt(lostMatch[1], 10) });
+          }
+          // Detectar reset de conexión SRT
+          if (/Connection (lost|timed out)/i.test(line) || /SRT.*disconnect/i.test(line)) {
+            updateTigoSrtMetric(process_id, { connected: false });
+          }
+        }
+      });
     }
 
     // ── Buffer Tigo ETAPA 2 ─────────────────────────────────────────
