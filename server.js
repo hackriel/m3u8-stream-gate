@@ -2081,6 +2081,13 @@ app.post('/api/emit', async (req, res) => {
     };
     ffmpegProcesses.set(process_id, processInfo);
 
+    // ── Keep-alive del playlist Tigo (Opción B) ──
+    // Mantiene caliente la sesión nimblesessionid para evitar que el CDN
+    // la marque como idle y rote (causa probable de los reloads ciegos de 2-3s).
+    if (PROXY_PROCESSES.has(String(process_id))) {
+      startTigoKeepAlive(process_id, effectiveSourceM3u8, sessionUserAgent);
+    }
+
     // (Monitor del mini-proxy Tigo eliminado — Fase 2 revertida.)
 
     // Manejar salida estándar
