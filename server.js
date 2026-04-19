@@ -2070,8 +2070,8 @@ app.post('/api/emit', async (req, res) => {
       ffmpegArgs.push(
         '-c', 'copy',
         '-f', 'hls',
-        '-hls_time', '8',
-        '-hls_list_size', '6',
+        '-hls_time', '10',
+        '-hls_list_size', '8',
         '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
         '-hls_segment_type', 'mpegts',
         '-hls_segment_filename', path.join(TIGO_BUFFER_DIR, 'buf_%05d.ts'),
@@ -2079,7 +2079,7 @@ app.post('/api/emit', async (req, res) => {
         '-hls_start_number_source', 'epoch',
         TIGO_BUFFER_PLAYLIST
       );
-      sendLog(process_id, 'info', `🌊 Tigo BUFFER ETAPA 1 → ${TIGO_BUFFER_PLAYLIST} (-c copy, 8s seg × 6)`);
+      sendLog(process_id, 'info', `🌊 Tigo BUFFER ETAPA 1 → ${TIGO_BUFFER_PLAYLIST} (-c copy, 10s seg × 8 = ~80s en disco)`);
     } else if (isHlsOutput) {
       const hlsSlug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
       const hlsDir = path.join(HLS_OUTPUT_DIR, hlsSlug);
