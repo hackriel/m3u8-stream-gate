@@ -43,12 +43,12 @@ if ! lsusb | grep -qi "elgato"; then
   warn "Continuando — el script igual usará /dev/video0 como fallback."
 fi
 
-VIDEO_DEV=$(v4l2-ctl --list-devices 2>/dev/null | awk '/Cam Link|Elgato/{getline; gsub(/^[ \t]+/,""); print; exit}')
+VIDEO_DEV=$(v4l2-ctl --list-devices 2>/dev/null | grep -A1 -iE "Cam Link|Elgato" | grep -oE "/dev/video[0-9]+" | head -1)
 [ -z "$VIDEO_DEV" ] && VIDEO_DEV="/dev/video0"
 ok "Video device: $VIDEO_DEV"
 
-AUDIO_CARD=$(arecord -l 2>/dev/null | awk '/Cam Link|Elgato/{match($0,/card ([0-9]+)/,a); print a[1]; exit}')
-[ -z "$AUDIO_CARD" ] && AUDIO_CARD="1"
+AUDIO_CARD=$(arecord -l 2>/dev/null | grep -iE "Cam Link|Elgato|C4K" | head -1 | sed -n 's/^card \([0-9]\+\).*/\1/p')
+[ -z "$AUDIO_CARD" ] && AUDIO_CARD="2"
 AUDIO_DEV="hw:${AUDIO_CARD},0"
 ok "Audio device: $AUDIO_DEV"
 
