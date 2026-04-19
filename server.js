@@ -355,6 +355,66 @@ const stopTigoKeepAlive = (process_id) => {
   }
 };
 
+// ── Buffer HLS local Tigo (Opción 1, Apr 2026) ─────────────────────
+// Cadena de 2 etapas para absorber micro-cortes del CDN sin afectar al TV:
+//   Etapa 1 (ingest): FFmpeg #1 con proxychains → escribe HLS crudo (-c copy)
+//                      a /tmp/tigo-buffer-12/buf.m3u8 (8s seg, list 6 = ~48s).
+//   Etapa 2 (output): FFmpeg #2 lee del buffer local con -re y transcodea
+//                      720p CBR 2000k → /live/Tigo/playlist.m3u8 (lo que el TV consume).
+// Si Tigo cae 2-20s, el TV no se entera porque #2 lee del disco local.
+// Reversible con TIGO_USE_BUFFER=false (vuelve al modo single-FFmpeg actual).
+const TIGO_USE_BUFFER = (process.env.TIGO_USE_BUFFER || 'true').toLowerCase() !== 'false';
+const TIGO_BUFFER_DIR = '/tmp/tigo-buffer-12';
+const TIGO_BUFFER_PLAYLIST = path.join(TIGO_BUFFER_DIR, 'buf.m3u8');
+const TIGO_BUFFER_MIN_SEGMENTS = 3; // Esperar 3 segmentos antes de spawnear etapa 2
+const TIGO_BUFFER_WAIT_TIMEOUT_MS = 30000; // Máx 30s esperando primer buffer
+
+// Map<process_id, ChildProcess> para FFmpeg #2 (output transcoder)
+const tigoOutputProcesses = new Map();
+// Map<process_id, intervalId> para watchdog que reinicia #2 si muere mientras #1 vive
+const tigoOutputWatchdogs = new Map();
+
+const cleanTigoBufferDir = () => {
+  try {
+    if (fs.existsSync(TIGO_BUFFER_DIR)) {
+      for (const f of fs.readdirSync(TIGO_BUFFER_DIR)) {
+        try { fs.unlinkSync(path.join(TIGO_BUFFER_DIR, f)); } catch (_) {}
+      }
+    } else {
+      fs.mkdirSync(TIGO_BUFFER_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.error('[tigo-buffer] cleanTigoBufferDir error:', err.message);
+  }
+};
+
+const waitForTigoBufferReady = async (timeoutMs = TIGO_BUFFER_WAIT_TIMEOUT_MS) => {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      if (fs.existsSync(TIGO_BUFFER_PLAYLIST)) {
+        const segs = fs.readdirSync(TIGO_BUFFER_DIR).filter(f => f.endsWith('.ts'));
+        if (segs.length >= TIGO_BUFFER_MIN_SEGMENTS) {
+          return { ready: true, segments: segs.length, waitedMs: Date.now() - start };
+        }
+      }
+    } catch (_) {}
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return { ready: false, segments: 0, waitedMs: Date.now() - start };
+};
+
+const stopTigoOutputStage = (process_id) => {
+  const key = String(process_id);
+  const wd = tigoOutputWatchdogs.get(key);
+  if (wd) { clearInterval(wd); tigoOutputWatchdogs.delete(key); }
+  const proc = tigoOutputProcesses.get(key);
+  if (proc && !proc.killed) {
+    try { proc.kill('SIGKILL'); } catch (_) {}
+  }
+  tigoOutputProcesses.delete(key);
+};
+
 const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
   if (!useProxy) {
     return fetch(url, options);
