@@ -2192,13 +2192,24 @@ app.post('/api/emit', async (req, res) => {
       );
     }
 
-    // ── Inyección de proxy SOCKS5 vía proxychains4 (solo procesos en PROXY_PROCESSES) ──
-    // Envolvemos FFmpeg con `proxychains4 -f /tmp/proxychains-tigo.conf ffmpeg ...`
-    // para enrutar manifiesto + segmentos HLS por la IP residencial CR del Pi 5.
+    // ── MODO HDMI (Tigo ID 12): SRT listener en vez de proxychains/CDN ──
+    // Si TIGO_USE_HDMI=true (default), descartamos los args HLS de scraping y
+    // arrancamos un FFmpeg SRT listener que recibe del Pi5. Toda la lógica de
+    // recovery/cierre de abajo sigue funcionando porque registramos el proceso
+    // en `ffmpegProcesses` igual que en el flujo normal.
     let spawnCmd = 'ffmpeg';
     let spawnArgs = ffmpegArgs;
-    if (PROXY_PROCESSES.has(process_id)) {
-      // Pre-validación: health-check del proxy SOCKS5 antes de spawn FFmpeg.
+    let ffmpegProcess;
+
+    if (isTigoHdmiMode) {
+      sendLog(process_id, 'info', `📡 Tigo HDMI: arrancando SRT listener en :${TIGO_SRT_PORT} (esperando Pi5...)`);
+      const ingest = startTigoHdmiIngest(process_id);
+      ffmpegProcess = ingest.process;
+      spawnCmd = 'ffmpeg';
+      spawnArgs = ingest.args;
+      sendLog(process_id, 'success', `🛰️ ETAPA 1 HDMI activa: srt://0.0.0.0:${TIGO_SRT_PORT} → ${TIGO_BUFFER_PLAYLIST}`);
+    } else if (PROXY_PROCESSES.has(process_id)) {
+      // ── MODO PROXY (legacy/fallback): proxychains4 → CDN HLS ──
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
       const health = await updateProxyHealth();
       if (!health.reachable) {
@@ -2217,12 +2228,9 @@ app.post('/api/emit', async (req, res) => {
       }
       sendLog(process_id, 'success', `✅ Proxy SOCKS5 OK (latencia ${health.latencyMs}ms)`);
 
-      // Si Fase 2 está activa, FFmpeg consume desde 127.0.0.1; el mini-proxy
-      // habla por SOCKS5 al CDN. NO envolver con proxychains4 (doble salto).
       if (tigoProxies.has(String(process_id))) {
         sendLog(process_id, 'success', `🛡️ FFmpeg consumirá del proxy local (Fase 2 activa)`);
       } else {
-        // Fallback Fase 1: proxychains4 directo (cuando Fase 2 no pudo iniciar).
         if (!isProxychainsAvailable()) {
           sendLog(process_id, 'error', `❌ proxychains4 no está instalado en el VPS. Ejecuta: apt install -y proxychains4`);
           return res.status(500).json({ error: 'proxychains4 no instalado en el VPS' });
@@ -2241,14 +2249,16 @@ app.post('/api/emit', async (req, res) => {
     const commandStr = spawnCmd + ' ' + spawnArgs.join(' ');
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 120)}...`);
 
-    // Ejecutar ffmpeg (posiblemente envuelto en proxychains)
-    const ffmpegProcess = spawn(spawnCmd, spawnArgs);
-    const processInfo = { 
-      process: ffmpegProcess, 
+    // Si no es modo HDMI, spawneamos aquí. En modo HDMI ya quedó spawneado arriba.
+    if (!ffmpegProcess) {
+      ffmpegProcess = spawn(spawnCmd, spawnArgs);
+    }
+    const processInfo = {
+      process: ffmpegProcess,
       status: 'starting',
       startTime: Date.now(),
       target_rtmp: target_rtmp,
-       source_m3u8: effectiveSourceM3u8
+      source_m3u8: effectiveSourceM3u8
     };
     ffmpegProcesses.set(process_id, processInfo);
 
