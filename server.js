@@ -450,6 +450,43 @@ const stopTigoOutputStage = (process_id) => {
   tigoOutputProcesses.delete(key);
 };
 
+// ── ETAPA 1 modo HDMI: FFmpeg SRT listener (Pi5 → VPS) ──────────────
+// Map<process_id, ChildProcess> para el FFmpeg SRT listener (ETAPA 1 HDMI).
+// NOTA: cuando se usa modo HDMI, este proceso REEMPLAZA al ffmpegProcess
+// principal en `ffmpegProcesses`. Así toda la lógica de cierre/recovery existente
+// (manejada en ffmpegProcess.on('close')) sigue funcionando idéntica.
+const startTigoHdmiIngest = (process_id) => {
+  cleanTigoBufferDir();
+  resetTigoSrtMetric(process_id);
+
+  const srtUrl = `srt://0.0.0.0:${TIGO_SRT_PORT}?mode=listener&latency=${TIGO_SRT_LATENCY_MS}&pkt_size=1316&streamid=tigo-cr`;
+  const args = [
+    '-hide_banner',
+    '-loglevel', 'info',
+    '-stats',
+    '-fflags', '+genpts+discardcorrupt',
+    '-analyzeduration', '3000000',
+    '-probesize', '1500000',
+    '-i', srtUrl,
+    '-c', 'copy',
+    '-f', 'hls',
+    '-hls_time', '10',
+    '-hls_list_size', '8',
+    '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
+    '-hls_segment_type', 'mpegts',
+    '-hls_segment_filename', path.join(TIGO_BUFFER_DIR, 'buf_%05d.ts'),
+    '-hls_allow_cache', '0',
+    '-hls_start_number_source', 'epoch',
+    TIGO_BUFFER_PLAYLIST,
+  ];
+
+  const proc = spawn('ffmpeg', args);
+  updateTigoSrtMetric(process_id, { connected: false, since: Date.now() });
+  return { process: proc, args, command: `ffmpeg ${args.join(' ')}` };
+};
+
+
+
 const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
   if (!useProxy) {
     return fetch(url, options);
