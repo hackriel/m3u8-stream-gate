@@ -2221,6 +2221,8 @@ app.post('/api/emit', async (req, res) => {
 
     // Manejar cierre del proceso
     ffmpegProcess.on('close', async (code, signal) => {
+      // Detener keep-alive de Tigo (si estaba activo) — evita fugas de timers
+      stopTigoKeepAlive(process_id);
       const processInfo = ffmpegProcesses.get(process_id);
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
       const statusAtClose = emissionStatuses.get(process_id);
