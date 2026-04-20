@@ -1520,10 +1520,10 @@ app.post('/api/emit', async (req, res) => {
       effectiveSourceM3u8 = `srt://pi5-hdmi:${TIGO_SRT_PORT}`;
     }
 
-    // Validación de ID: debe ser un número entre 0 y 11
-    if (isNaN(numericId) || numericId < 0 || numericId > 12) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-12)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 12` });
+    // Validación de ID: debe ser un número entre 0 y 15
+    if (isNaN(numericId) || numericId < 0 || numericId > 15) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-15)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 15` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
