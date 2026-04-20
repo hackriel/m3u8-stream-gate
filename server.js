@@ -267,7 +267,7 @@ const HLS_SLUG_MAP = { '11': 'FUTV', '13': 'Teletica', '14': 'Tdmas1', '15': 'Ca
 // ───────────────────────────────────────────────────────────────────────
 const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080';
 // IDs de proceso que deben enrutar TODO su tráfico (scraping + FFmpeg) por el proxy
-const PROXY_PROCESSES = new Set(['12']);
+const PROXY_PROCESSES = new Set();
 // Comando proxychains4 (instalable con: apt install -y proxychains4)
 // Config dinámica generada en /tmp para no chocar con instalación global
 const PROXYCHAINS_CONF_PATH = '/tmp/proxychains-tigo.conf';
@@ -362,7 +362,7 @@ const stopTigoKeepAlive = (process_id) => {
 // transcodea 720p CBR 2000k → /live/Tigo/playlist.m3u8 (lo que el TV consume).
 // Reversible con TIGO_USE_BUFFER=false (vuelve a modo single-FFmpeg legacy).
 const TIGO_USE_BUFFER = (process.env.TIGO_USE_BUFFER || 'true').toLowerCase() !== 'false';
-const TIGO_USE_HDMI = false; // Descartado: HDCP en salida HDMI del decoder Tigo bloquea Cam Link
+const TIGO_USE_HDMI = false; // Descartado definitivamente
 const TIGO_SRT_PORT = parseInt(process.env.TIGO_SRT_PORT || '9000', 10);
 const TIGO_SRT_LATENCY_MS = parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10);
 const TIGO_SRT_LATENCY_US = TIGO_SRT_LATENCY_MS * 1000;
@@ -679,11 +679,11 @@ const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '15']);
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10', '15']);
 // Fuentes que usan -re (lectura a tasa nativa) — TODOS los canales lo necesitan
 // Sin -re, FFmpeg lee a velocidad CPU (70-100fps), agota los segmentos HLS y causa EOF prematuro
-const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11', '12', '13', '14', '15']);
+const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11', '13', '14', '15']);
 // Procesos con cadencia CFR (vsync cfr + 29.97fps) - canales de emisión EXCEPTO Disney 7 (TUDN)
 // Disney 7 (ID 0) usa valores enteros (30fps/GOP60) porque el servidor RTMP destino
 // rechaza conexiones con GOP decimal (59.94) causando Broken pipe a los ~120s
-const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11', '12', '13', '14', '15']);
+const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11', '13', '14', '15']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
