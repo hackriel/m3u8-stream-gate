@@ -465,11 +465,20 @@ const startTigoHdmiIngest = (process_id) => {
     '-hide_banner',
     '-loglevel', 'info',
     '-stats',
-    '-fflags', '+genpts+discardcorrupt',
-    '-analyzeduration', '3000000',
-    '-probesize', '1500000',
+    '-fflags', '+genpts+discardcorrupt+nobuffer',
+    // Subido x3: el stream MPEG-TS del Pi5 tarda en exponer SPS/PPS,
+    // hace falta más tiempo de análisis para no perder el video.
+    '-analyzeduration', '10000000',
+    '-probesize', '5000000',
     '-i', srtUrl,
+    // CRÍTICO: mapear EXPLÍCITAMENTE video y audio. Sin esto FFmpeg
+    // a veces descarta el video cuando llega como "unspecified size".
+    '-map', '0:v:0',
+    '-map', '0:a:0',
     '-c', 'copy',
+    // Inyecta SPS/PPS en cada keyframe → la etapa 2 puede arrancar
+    // sin esperar el siguiente IDR del Pi5.
+    '-bsf:v', 'h264_mp4toannexb',
     '-f', 'hls',
     '-hls_time', '10',
     '-hls_list_size', '8',
