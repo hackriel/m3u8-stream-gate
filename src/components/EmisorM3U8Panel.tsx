@@ -15,15 +15,19 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 13;
+const NUM_PROCESSES = 16;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
+const TELETICA_URL_INDEX = 13;
+const TDMAS1_URL_INDEX = 14;
+const CANAL6_URL_INDEX = 15;
+const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 
 // Procesos ocultos (Tigo fue descartado por restricciones del CDN/HDCP)
 const HIDDEN_PROCESSES = new Set([2, 8, 9, 12]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -65,6 +69,7 @@ interface ChannelConfig {
   scrapeFn: string | null;
   channelId: string | null;
   fetchLabel: string;
+  presetUrl?: string;
 }
 
 const CHANNEL_CONFIGS: ChannelConfig[] = [
@@ -81,6 +86,9 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV URL", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 12: TIGO URL (descartado, HDCP)
+  { name: "TELETICA URL", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
+  { name: "TDMAS 1 URL", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
+  { name: "CANAL 6 URL", scrapeFn: null, channelId: null, fetchLabel: "🏛️ Repretel", presetUrl: "https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -324,6 +332,26 @@ export default function EmisorM3U8Panel() {
     } finally {
       setFetchingChannel(null);
     }
+  }, []);
+
+  useEffect(() => {
+    const canal6Preset = CHANNEL_CONFIGS[CANAL6_URL_INDEX]?.presetUrl;
+    if (!canal6Preset) return;
+
+    setProcesses(prev => {
+      if (prev[CANAL6_URL_INDEX]?.m3u8 === canal6Preset) return prev;
+      const next = [...prev];
+      next[CANAL6_URL_INDEX] = { ...next[CANAL6_URL_INDEX], m3u8: canal6Preset };
+      return next;
+    });
+
+    supabase
+      .from('emission_processes')
+      .update({ m3u8: canal6Preset })
+      .eq('id', CANAL6_URL_INDEX)
+      .then(({ error }) => {
+        if (error) console.error('Error guardando URL oficial de Canal 6:', error);
+      });
   }, []);
 
 
@@ -627,7 +655,7 @@ export default function EmisorM3U8Panel() {
       
       updateProcess(processIndex, {
         emitStatus: "running",
-        emitMsg: "✅ Emitiendo a RTMP",
+        emitMsg: isHlsOutput ? "✅ Emitiendo HLS" : "✅ Emitiendo a RTMP",
         elapsed: 0,
         startTime: startTimeMs,
         isEmitiendo: true
@@ -822,6 +850,9 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
       { bg: "bg-emerald-500", text: "text-emerald-500", stroke: "#10b981", name: "FUTV URL" },
       { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "(oculto)" },
+      { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "TELETICA URL" },
+      { bg: "bg-lime-500", text: "text-lime-500", stroke: "#84cc16", name: "TDMAS 1 URL" },
+      { bg: "bg-amber-500", text: "text-amber-500", stroke: "#f59e0b", name: "CANAL 6 URL" },
     ];
     return colors[processIndex];
   };
@@ -917,9 +948,14 @@ export default function EmisorM3U8Panel() {
               </>
             )}
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
-              const hlsSlugs: Record<number, string> = { [FUTV_URL_INDEX]: 'futv' };
+              const hlsSlugs: Record<number, string> = {
+                [FUTV_URL_INDEX]: 'FUTV',
+                [TELETICA_URL_INDEX]: 'Teletica',
+                [TDMAS1_URL_INDEX]: 'Tdmas1',
+                [CANAL6_URL_INDEX]: 'Canal6',
+              };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
-              const hlsUrl = `${window.location.protocol}//${window.location.host}/live/${hlsSlug}/playlist.m3u8`;
+              const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
               return (
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>

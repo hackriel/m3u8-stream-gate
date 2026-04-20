@@ -251,12 +251,14 @@ const CHANNEL_MAP = {
   
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
   '11': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV URL' },
+  '13': { channelId: '617c2f66e4b045a692106126', channelName: 'TELETICA URL' },
+  '14': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDMAS 1 URL' },
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11']);
+const HLS_OUTPUT_PROCESSES = new Set(['11', '13', '14', '15']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
-const HLS_SLUG_MAP = { '11': 'futv' };
+const HLS_SLUG_MAP = { '11': 'FUTV', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
@@ -676,22 +678,23 @@ setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
 
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
-// Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
-const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
+// Procesos manuales/estables: recovery reutiliza la URL guardada en DB
+const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '15']);
 
-// Fuentes estables (watchdogs tolerantes + recovery lento) - solo canales manuales con CDN fijo
-const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10']);
+// Fuentes estables (watchdogs tolerantes + recovery lento) - canales con CDN fijo
+const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10', '15']);
 // Fuentes que usan -re (lectura a tasa nativa) — TODOS los canales lo necesitan
 // Sin -re, FFmpeg lee a velocidad CPU (70-100fps), agota los segmentos HLS y causa EOF prematuro
-const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11', '12']);
+const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11', '12', '13', '14', '15']);
 // Procesos con cadencia CFR (vsync cfr + 29.97fps) - canales de emisión EXCEPTO Disney 7 (TUDN)
 // Disney 7 (ID 0) usa valores enteros (30fps/GOP60) porque el servidor RTMP destino
 // rechaza conexiones con GOP decimal (59.94) causando Broken pipe a los ~120s
-const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11', '12']);
+const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11', '12', '13', '14', '15']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
   '6': 'https://mdstrm.com/live-stream-playlist/5a7b1e63a8da282c34d65445.m3u8', // Multimedios oficial
+  '15': 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8', // Canal 6 oficial Repretel
 };
 
 // Track de intentos de recovery para saber cuándo usar fallback
@@ -1517,10 +1520,10 @@ app.post('/api/emit', async (req, res) => {
       effectiveSourceM3u8 = `srt://pi5-hdmi:${TIGO_SRT_PORT}`;
     }
 
-    // Validación de ID: debe ser un número entre 0 y 11
-    if (isNaN(numericId) || numericId < 0 || numericId > 12) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-12)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 12` });
+    // Validación de ID: debe ser un número entre 0 y 15
+    if (isNaN(numericId) || numericId < 0 || numericId > 15) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-15)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 15` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -2092,7 +2095,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Nombre del proceso para logs
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8' };
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
@@ -2884,7 +2887,7 @@ app.post('/api/emit', async (req, res) => {
         } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
           // Procesos manuales (Disney 7, Disney 8, Canal 6): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
-          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
+          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8', '15': 'CANAL 6 URL' };
           const procLabel = manualLabels[String(process_id)] || 'Manual';
           
           const failureType = detectedErrors.get(process_id);
@@ -2924,8 +2927,10 @@ app.post('/api/emit', async (req, res) => {
               const sourceUrl = procData?.m3u8;
               const targetRtmp = procData?.rtmp;
               
-              if (!sourceUrl || !targetRtmp) {
-                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: No hay M3U8 o RTMP guardados`);
+              const effectiveTarget = targetRtmp || (HLS_OUTPUT_PROCESSES.has(String(process_id)) ? 'hls-local' : '');
+
+              if (!sourceUrl || !effectiveTarget) {
+                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: No hay M3U8 o destino guardados`);
                 return;
               }
               
@@ -3018,7 +3023,7 @@ app.post('/api/emit', async (req, res) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   source_m3u8: finalUrl,
-                  target_rtmp: targetRtmp,
+                  target_rtmp: effectiveTarget,
                   process_id: String(process_id),
                   is_recovery: true
                 })
@@ -3966,7 +3971,7 @@ setInterval(async () => {
 const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
-  '11': 'FUTV URL',
+  '11': 'FUTV URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
 };
 
 // Endpoint para toggle night_rest
