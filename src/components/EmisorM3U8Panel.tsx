@@ -110,7 +110,7 @@ const defaultProcess = (): EmissionProcess => ({
 });
 
 export default function EmisorM3U8Panel() {
-  const logContainerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<HTMLDivElement>(null));
+  const logContainerRefs = useRef<Array<HTMLDivElement | null>>([]);
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
@@ -120,7 +120,6 @@ export default function EmisorM3U8Panel() {
     Array.from({ length: NUM_PROCESSES }, defaultProcess)
   );
 
-  const timerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<ReturnType<typeof setTimeout> | null>(null));
   
   // Cargar datos desde Supabase al montar el componente
   useEffect(() => {
@@ -440,8 +439,9 @@ export default function EmisorM3U8Panel() {
             });
             
             setTimeout(() => {
-              if (logContainerRefs[processIndex]?.current) {
-                logContainerRefs[processIndex].current!.scrollTop = logContainerRefs[processIndex].current!.scrollHeight;
+              const logContainer = logContainerRefs.current[processIndex];
+              if (logContainer) {
+                logContainer.scrollTop = logContainer.scrollHeight;
               }
             }, 50);
           }
@@ -515,7 +515,7 @@ export default function EmisorM3U8Panel() {
   };
 
   async function startEmitToRTMP(processIndex: number) {
-    const process = processes[processIndex];
+    const process = processesRef.current[processIndex];
     
     // Proceso Subida (file upload)
     if (processIndex === FILE_UPLOAD_INDEX) {
@@ -1186,7 +1186,9 @@ export default function EmisorM3U8Panel() {
           <h3 className="text-lg font-medium mb-3 text-accent">📋 Logs en Tiempo Real</h3>
           
           <div 
-            ref={logContainerRefs[processIndex]}
+            ref={(element) => {
+              logContainerRefs.current[processIndex] = element;
+            }}
             className="bg-card/50 border border-border rounded-xl p-4 h-64 overflow-y-auto font-mono text-xs space-y-1 scroll-smooth"
           >
             {/* Logs guardados en DB */}

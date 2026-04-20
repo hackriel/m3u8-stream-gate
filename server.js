@@ -13,8 +13,7 @@ import http from 'http';
 import https from 'https';
 import { createClient } from '@supabase/supabase-js';
 
-// Tigo (ID 12) descartado por HDCP en HDMI + restricciones CDN.
-// Shims no-op preservados para que llamadas remanentes (cleanup/exits) no rompan.
+// Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
 const tigoProxies = new Map();
 const stopTigoProxy = async (_process_id) => {};
 
@@ -293,13 +292,8 @@ const REAL_USER_AGENTS = [
 const pickRandomUserAgent = () => REAL_USER_AGENTS[Math.floor(Math.random() * REAL_USER_AGENTS.length)];
 
 // Cache del agent SOCKS5 para reutilizar conexiones HTTP/HTTPS.
-// `socks-proxy-agent` es compatible con Node 20 y funciona con http/https.request.
-let _proxyAgent = null;
-const getProxyAgent = () => {
-  if (_proxyAgent) return _proxyAgent;
-  _proxyAgent = new SocksProxyAgent(TIGO_PROXY_URL);
-  return _proxyAgent;
-};
+// Compat shim: evita referencia rota a SocksProxyAgent si alguna ruta legado se invoca por error.
+const getProxyAgent = () => undefined;
 
 // ── Keep-alive del playlist Tigo (Opción B) ──────────────────────────
 // Wowza/Nimble cierra `nimblesessionid` por idle (~30-60s). FFmpeg pide el
