@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import type { Tables, TablesUpdate } from "@/integrations/supabase/types";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
@@ -30,6 +31,66 @@ const HIDDEN_PROCESSES = new Set([2, 8, 9, 12]);
 const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
+
+type EmissionRow = Tables<"emission_processes">;
+type EmissionRowUpdate = TablesUpdate<"emission_processes">;
+type EmitStatus = EmissionProcess["emitStatus"];
+
+type UploadEmitResponse = {
+  start_time?: number;
+};
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+};
+
+const toEmitStatus = (status: string | null | undefined): EmitStatus => {
+  if (
+    status === "idle" ||
+    status === "starting" ||
+    status === "running" ||
+    status === "stopping" ||
+    status === "stopped" ||
+    status === "error" ||
+    status === "waiting_cdn"
+  ) {
+    return status;
+  }
+
+  return "idle";
+};
+
+const rowToProcess = (row: EmissionRow, previousLogs: LogEntry[] = []): EmissionProcess => {
+  const isRunning = row.emit_status === "running" && row.start_time > 0;
+  const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
+  const elapsed = isRunning && startTimeMs > 0
+    ? Math.floor((Date.now() - startTimeMs) / 1000)
+    : row.elapsed || 0;
+  const loadFailure = isRunning || row.is_emitting;
+
+  return {
+    m3u8: row.m3u8 || "",
+    m3u8Backup: row.m3u8_backup || "",
+    rtmp: row.rtmp || "",
+    previewSuffix: row.preview_suffix || "/video.m3u8",
+    isEmitiendo: row.is_emitting || isRunning,
+    elapsed,
+    startTime: startTimeMs,
+    emitStatus: toEmitStatus(row.emit_status),
+    emitMsg: row.emit_msg || "",
+    reconnectAttempts: 0,
+    lastReconnectTime: 0,
+    failureReason: loadFailure ? row.failure_reason || undefined : undefined,
+    failureDetails: loadFailure ? row.failure_details || undefined : undefined,
+    logs: previousLogs,
+    processLogsFromDB: row.process_logs || "",
+    recoveryCount: (isRunning || row.is_emitting) ? (row.recovery_count || 0) : 0,
+    lastSignalDuration: row.last_signal_duration || 0,
+    nightRest: row.night_rest || false,
+    sourceUrl: row.source_url || "",
+  };
+};
 
 // Tipo para un proceso de emisión
 interface EmissionProcess {
@@ -60,7 +121,7 @@ interface LogEntry {
   timestamp: number;
   level: "info" | "success" | "warn" | "error";
   message: string;
-  details?: any;
+  details?: unknown;
 }
 
 // Channel config for scraping
@@ -75,32 +136,32 @@ interface ChannelConfig {
 const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "Disney 7", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
-  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 2: Tigo (descartado)
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "TDmas 1", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "Teletica", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "Canal 6", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Multimedios", scrapeFn: "scrape-channel", channelId: "664e5de58f089fa849a58697", fetchLabel: "🔄 Multi" },
   { name: "Subida", scrapeFn: null, channelId: null, fetchLabel: "" },
-  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 8: Tigo (descartado)
-  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" },
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV URL", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
-  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 12: TIGO URL (descartado, HDCP)
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "TELETICA URL", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "TDMAS 1 URL", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "CANAL 6 URL", scrapeFn: null, channelId: null, fetchLabel: "🏛️ Repretel", presetUrl: "https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
-  m3u8: '',
-  m3u8Backup: '',
-  rtmp: '',
-  previewSuffix: '/video.m3u8',
+  m3u8: "",
+  m3u8Backup: "",
+  rtmp: "",
+  previewSuffix: "/video.m3u8",
   isEmitiendo: false,
   elapsed: 0,
   startTime: 0,
   emitStatus: "idle",
-  emitMsg: '',
+  emitMsg: "",
   reconnectAttempts: 0,
   lastReconnectTime: 0,
   logs: [],
@@ -110,235 +171,167 @@ const defaultProcess = (): EmissionProcess => ({
 });
 
 export default function EmisorM3U8Panel() {
-  const logContainerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<HTMLDivElement>(null));
-  
+  const logContainerRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const restoredSessionsRef = useRef(false);
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
   const wsRef = useRef<WebSocket | null>(null);
-  
-  const [processes, setProcesses] = useState<EmissionProcess[]>(
-    Array.from({ length: NUM_PROCESSES }, defaultProcess)
-  );
+  const [processes, setProcesses] = useState<EmissionProcess[]>(Array.from({ length: NUM_PROCESSES }, defaultProcess));
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
+  const { metricsHistory, latestMetrics } = useServerMetrics();
+  const processesRef = useRef(processes);
 
-  const timerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<ReturnType<typeof setTimeout> | null>(null));
-  
-  // Cargar datos desde Supabase al montar el componente
+  useEffect(() => {
+    processesRef.current = processes;
+  }, [processes]);
+
+  const updateProcess = useCallback((index: number, updates: Partial<EmissionProcess>) => {
+    setProcesses((prev) => prev.map((process, i) => (i === index ? { ...process, ...updates } : process)));
+
+    if (updates.m3u8 !== undefined || updates.rtmp !== undefined || updates.m3u8Backup !== undefined) {
+      const dataToUpdate: EmissionRowUpdate = {};
+      if (updates.m3u8 !== undefined) dataToUpdate.m3u8 = updates.m3u8;
+      if (updates.rtmp !== undefined) dataToUpdate.rtmp = updates.rtmp;
+      if (updates.m3u8Backup !== undefined) dataToUpdate.m3u8_backup = updates.m3u8Backup;
+
+      supabase
+        .from("emission_processes")
+        .update(dataToUpdate)
+        .eq("id", index)
+        .then(({ error }) => {
+          if (error) console.error("Error actualizando proceso en DB:", error);
+        });
+    }
+  }, []);
+
   useEffect(() => {
     const loadFromDatabase = async () => {
       try {
-        const { data, error } = await supabase
-          .from('emission_processes')
-          .select('*')
-          .order('id');
-        
+        const { data, error } = await supabase.from("emission_processes").select("*").order("id");
         if (error) throw error;
-        
+
         if (data && data.length > 0) {
-          const loadedProcesses: EmissionProcess[] = Array.from({ length: NUM_PROCESSES }, (_, index) => {
-            const row = data.find(d => d.id === index);
-            if (row) {
-              const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
-              const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
-              let elapsedSeconds = row.elapsed || 0;
-
-              if (isRunning && startTimeMs > 0) {
-                elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
-              }
-
-              // (Tigo/Evento tabs removed - indices 2, 8, 9 are hidden)
-              // Solo cargar failure state si el proceso está activo
-              const loadFailure = isRunning || row.is_emitting;
-              return {
-                m3u8: row.m3u8 || '',
-                m3u8Backup: (row as any).m3u8_backup || '',
-                rtmp: row.rtmp || '',
-                previewSuffix: row.preview_suffix || '/video.m3u8',
-                isEmitiendo: row.is_emitting || isRunning,
-                elapsed: elapsedSeconds,
-                startTime: startTimeMs,
-                emitStatus: (row.emit_status as "idle" | "starting" | "running" | "stopping" | "error") || "idle",
-                emitMsg: row.emit_msg || '',
-                reconnectAttempts: 0,
-                lastReconnectTime: 0,
-                failureReason: loadFailure ? (row.failure_reason || undefined) : undefined,
-                failureDetails: loadFailure ? (row.failure_details || undefined) : undefined,
-                logs: [],
-                processLogsFromDB: row.process_logs || '',
-                recoveryCount: (isRunning || row.is_emitting) ? ((row as any).recovery_count || 0) : 0,
-                lastSignalDuration: (row as any).last_signal_duration || 0,
-                nightRest: (row as any).night_rest || false,
-                sourceUrl: (row as any).source_url || '',
-              };
-            } else {
-              return defaultProcess();
-            }
+          const loadedProcesses = Array.from({ length: NUM_PROCESSES }, (_, index) => {
+            const row = data.find((d) => d.id === index);
+            return row ? rowToProcess(row) : defaultProcess();
           });
           setProcesses(loadedProcesses);
-          
-          // Crear filas faltantes en la base de datos
+
           for (let i = 0; i < NUM_PROCESSES; i++) {
-            const exists = data.find(d => d.id === i);
-            if (!exists) {
-              await supabase.from('emission_processes').insert({
+            if (!data.some((d) => d.id === i)) {
+              await supabase.from("emission_processes").insert({
                 id: i,
-                m3u8: '',
-                rtmp: '',
-                preview_suffix: '/video.m3u8',
+                m3u8: "",
+                rtmp: "",
+                preview_suffix: "/video.m3u8",
                 is_emitting: false,
                 elapsed: 0,
                 start_time: 0,
-                emit_status: 'idle',
-                emit_msg: ''
+                emit_status: "idle",
+                emit_msg: "",
               });
             }
           }
         } else {
           for (let i = 0; i < NUM_PROCESSES; i++) {
-            await supabase.from('emission_processes').insert({
+            await supabase.from("emission_processes").insert({
               id: i,
-              m3u8: '',
-              rtmp: '',
-              preview_suffix: '/video.m3u8',
+              m3u8: "",
+              rtmp: "",
+              preview_suffix: "/video.m3u8",
               is_emitting: false,
               elapsed: 0,
               start_time: 0,
-              emit_status: 'idle',
-              emit_msg: ''
+              emit_status: "idle",
+              emit_msg: "",
             });
           }
         }
       } catch (error) {
-        console.error('Error cargando procesos:', error);
-        toast.error('Error al cargar procesos desde la base de datos');
+        console.error("Error cargando procesos:", error);
+        toast.error("Error al cargar procesos desde la base de datos");
       } finally {
         setIsLoading(false);
       }
     };
-    
+
     loadFromDatabase();
-    
-    // Suscribirse a cambios en tiempo real
+
     const channel = supabase
-      .channel('emission_processes_changes')
+      .channel("emission_processes_changes")
       .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'emission_processes'
-        },
+        "postgres_changes",
+        { event: "*", schema: "public", table: "emission_processes" },
         (payload) => {
-          console.log('🔄 Cambio detectado en base de datos:', payload);
-          if (payload.eventType === 'UPDATE') {
-            const row = payload.new as any;
-            setProcesses(prev => {
-              const newProcesses = [...prev];
-              if (row.id >= 0 && row.id < NUM_PROCESSES) {
-                const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
-                const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
-                let elapsedSeconds = row.elapsed || 0;
+          if (payload.eventType !== "UPDATE") return;
+          const row = payload.new as EmissionRow;
 
-                if (isRunning && startTimeMs > 0) {
-                  elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
-                }
-
-                newProcesses[row.id] = {
-                  m3u8: row.m3u8,
-                  m3u8Backup: (row as any).m3u8_backup || '',
-                  rtmp: row.rtmp,
-                  previewSuffix: row.preview_suffix,
-                  isEmitiendo: row.is_emitting || isRunning,
-                  elapsed: elapsedSeconds,
-                  startTime: startTimeMs,
-                  emitStatus: row.emit_status,
-                  emitMsg: row.emit_msg,
-                  reconnectAttempts: 0,
-                  lastReconnectTime: 0,
-                  failureReason: row.failure_reason,
-                  failureDetails: row.failure_details,
-                  logs: prev[row.id]?.logs || [],
-                  processLogsFromDB: row.process_logs || '',
-                  recoveryCount: row.recovery_count || 0,
-                  lastSignalDuration: (row as any).last_signal_duration || 0,
-                  nightRest: (row as any).night_rest || false,
-                  sourceUrl: (row as any).source_url || '',
-                };
-              }
-              return newProcesses;
-            });
-          }
+          setProcesses((prev) => {
+            if (row.id < 0 || row.id >= NUM_PROCESSES) return prev;
+            const next = [...prev];
+            next[row.id] = rowToProcess(row, prev[row.id]?.logs || []);
+            return next;
+          });
         }
       )
       .subscribe();
-    
+
     return () => {
       supabase.removeChannel(channel);
     };
   }, []);
-  
-  // Timer para actualizar elapsed cada segundo desde startTime
+
   useEffect(() => {
     const interval = setInterval(() => {
-      setProcesses(prev => prev.map(p => {
-        // Timer funciona si está emitiendo Y tiene startTime válido, sin importar si es 'starting' o 'running'
-        if (p.isEmitiendo && (p.emitStatus === 'running' || p.emitStatus === 'starting') && p.startTime > 0) {
-          const newElapsed = Math.floor((Date.now() - p.startTime) / 1000);
-          return { ...p, elapsed: newElapsed };
-        }
-        return p;
-      }));
+      setProcesses((prev) =>
+        prev.map((p) => {
+          if (p.isEmitiendo && (p.emitStatus === "running" || p.emitStatus === "starting") && p.startTime > 0) {
+            return { ...p, elapsed: Math.floor((Date.now() - p.startTime) / 1000) };
+          }
+          return p;
+        })
+      );
     }, 1000);
 
     return () => clearInterval(interval);
   }, []);
-  
-  // Estado específico para el proceso de subida (archivos locales)
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
-  const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
-  const { metricsHistory, latestMetrics } = useServerMetrics();
 
-  // Función genérica para obtener URL de un canal automáticamente
-  // Usa scraping LOCAL del VPS para que el token se genere con la IP correcta
   const fetchChannelUrl = useCallback(async (processIndex: number) => {
     const config = CHANNEL_CONFIGS[processIndex];
-    if (!config.scrapeFn) return;
-    
-    const channelId = config.channelId;
-    if (!channelId) return;
-    
+    if (!config.scrapeFn || !config.channelId) return;
+
     setFetchingChannel(processIndex);
     try {
-      // Usar scraping LOCAL del VPS (no Edge Function) para que el token
-      // se genere con la misma IP que luego usa FFmpeg → evita 403
-      const resp = await fetch('/api/local-scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_id: channelId, process_id: processIndex }),
+      const resp = await fetch("/api/local-scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_id: config.channelId, process_id: processIndex }),
       });
       const data = await resp.json();
 
-      if (!data?.success) throw new Error(data?.error || 'Error desconocido');
+      if (!data?.success) throw new Error(data?.error || "Error desconocido");
 
-      const streamUrl = data.url;
-      updateProcess(processIndex, { 
-        m3u8: streamUrl,
-        rtmp: processesRef.current[processIndex].rtmp || ''
+      updateProcess(processIndex, {
+        m3u8: data.url,
+        rtmp: processesRef.current[processIndex].rtmp || "",
       });
       toast.success(`✅ URL ${config.name} extraída correctamente`);
-    } catch (e: any) {
-      console.error(`Error obteniendo URL ${config.name}:`, e);
-      toast.error(`Error obteniendo URL ${config.name}: ${e.message}`);
+    } catch (error) {
+      const message = getErrorMessage(error, `Error obteniendo URL ${config.name}`);
+      console.error(`Error obteniendo URL ${config.name}:`, error);
+      toast.error(`Error obteniendo URL ${config.name}: ${message}`);
     } finally {
       setFetchingChannel(null);
     }
-  }, []);
+  }, [updateProcess]);
 
   useEffect(() => {
     const canal6Preset = CHANNEL_CONFIGS[CANAL6_URL_INDEX]?.presetUrl;
     if (!canal6Preset) return;
 
-    setProcesses(prev => {
+    setProcesses((prev) => {
       if (prev[CANAL6_URL_INDEX]?.m3u8 === canal6Preset) return prev;
       const next = [...prev];
       next[CANAL6_URL_INDEX] = { ...next[CANAL6_URL_INDEX], m3u8: canal6Preset };
@@ -346,166 +339,127 @@ export default function EmisorM3U8Panel() {
     });
 
     supabase
-      .from('emission_processes')
+      .from("emission_processes")
       .update({ m3u8: canal6Preset })
-      .eq('id', CANAL6_URL_INDEX)
+      .eq("id", CANAL6_URL_INDEX)
       .then(({ error }) => {
-        if (error) console.error('Error guardando URL oficial de Canal 6:', error);
+        if (error) console.error("Error guardando URL oficial de Canal 6:", error);
       });
   }, []);
 
-
-
-  // Función para actualizar un proceso específico
-  const updateProcess = (index: number, updates: Partial<EmissionProcess>) => {
-    setProcesses(prev => prev.map((process, i) => 
-      i === index ? { ...process, ...updates } : process
-    ));
-    
-    if (updates.m3u8 !== undefined || updates.rtmp !== undefined || updates.m3u8Backup !== undefined) {
-      const dataToUpdate: any = {};
-      if (updates.m3u8 !== undefined) dataToUpdate.m3u8 = updates.m3u8;
-      if (updates.rtmp !== undefined) dataToUpdate.rtmp = updates.rtmp;
-      if (updates.m3u8Backup !== undefined) dataToUpdate.m3u8_backup = updates.m3u8Backup;
-      
-      supabase
-        .from('emission_processes')
-        .update(dataToUpdate)
-        .eq('id', index)
-        .then(({ error }) => {
-          if (error) console.error('Error actualizando proceso en DB:', error);
-        });
-    }
-  };
-
-  // Restaurar sesiones al cargar
   useEffect(() => {
+    if (isLoading || restoredSessionsRef.current) return;
+
     processes.forEach((process, index) => {
       if (process.isEmitiendo && process.startTime > 0) {
-        const now = Math.floor(Date.now() / 1000);
-        const calculatedElapsed = now - process.startTime;
-        
+        const calculatedElapsed = Math.max(0, Math.floor((Date.now() - process.startTime) / 1000));
         updateProcess(index, {
-          elapsed: calculatedElapsed > 0 ? calculatedElapsed : 0,
+          elapsed: calculatedElapsed,
           emitStatus: "running",
-          emitMsg: "Emisión restaurada desde sesión persistente"
+          emitMsg: "Emisión restaurada desde sesión persistente",
         });
-        
-        console.log(`✅ Estado de emisión ${index + 1} restaurado, elapsed:`, calculatedElapsed);
       }
     });
-  }, []);
 
-  // Ref para acceder al estado actual de processes sin causar re-renders
-  const processesRef = useRef(processes);
-  
-  useEffect(() => {
-    processesRef.current = processes;
-  }, [processes]);
+    restoredSessionsRef.current = true;
+  }, [isLoading, processes, updateProcess]);
 
-  // WebSocket para recibir logs y notificaciones en tiempo real
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    
-    const ws = new WebSocket(wsUrl);
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
     wsRef.current = ws;
-    
-    ws.onopen = () => {
-      console.log('📡 Conectado al sistema de logs en tiempo real');
-    };
-    
+
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
-        
+        const data = JSON.parse(event.data) as {
+          id?: string;
+          timestamp?: number;
+          level?: LogEntry["level"];
+          message?: string;
+          details?: unknown;
+          processId?: string;
+          type?: string;
+          failureType?: string;
+        };
+
         if (data.timestamp && data.level && data.message) {
-          const processIndex = parseInt(data.processId);
+          const processIndex = Number.parseInt(data.processId || "", 10);
           if (processIndex >= 0 && processIndex < NUM_PROCESSES) {
             const logEntry: LogEntry = {
               id: data.id || `${Date.now()}-${Math.random()}`,
               timestamp: data.timestamp,
               level: data.level,
               message: data.message,
-              details: data.details
+              details: data.details,
             };
-            
-            setProcesses(prev => {
-              const newProcesses = [...prev];
-              newProcesses[processIndex] = {
-                ...newProcesses[processIndex],
-                logs: [...newProcesses[processIndex].logs, logEntry].slice(-100)
+
+            setProcesses((prev) => {
+              const next = [...prev];
+              next[processIndex] = {
+                ...next[processIndex],
+                logs: [...next[processIndex].logs, logEntry].slice(-100),
               };
-              return newProcesses;
+              return next;
             });
-            
-            setTimeout(() => {
-              if (logContainerRefs[processIndex]?.current) {
-                logContainerRefs[processIndex].current!.scrollTop = logContainerRefs[processIndex].current!.scrollHeight;
+
+            window.setTimeout(() => {
+              const logContainer = logContainerRefs.current[processIndex];
+              if (logContainer) {
+                logContainer.scrollTop = logContainer.scrollHeight;
               }
             }, 50);
           }
         }
-        
-        if (data.type === 'failure') {
-          const processIndex = parseInt(data.processId);
+
+        if (data.type === "failure") {
+          const processIndex = Number.parseInt(data.processId || "", 10);
           const failureType = data.failureType;
-          const details = data.details;
-          
-          console.log(`❌ Fallo reportado en proceso ${processIndex + 1}:`, failureType, details);
-          
+          const details = typeof data.details === "string" ? data.details : "Error no especificado";
+
           const failureMessages = {
-            source: '🔗 Fallo en URL Fuente',
-            rtmp: '📡 Fallo en Destino RTMP',
-            server: '🖥️ Fallo en Servidor'
+            source: "🔗 Fallo en URL Fuente",
+            rtmp: "📡 Fallo en Destino RTMP",
+            server: "🖥️ Fallo en Servidor",
           };
-          
+
           toast.warning(`⚠️ Advertencia en ${CHANNEL_CONFIGS[processIndex]?.name || `Proceso ${processIndex + 1}`}`, {
-            description: `${failureMessages[failureType as keyof typeof failureMessages] || 'Advertencia'}: ${details}. Verificando estado...`,
+            description: `${failureMessages[failureType as keyof typeof failureMessages] || "Advertencia"}: ${details}. Verificando estado...`,
           });
-          
+
           updateProcess(processIndex, {
             failureReason: failureType,
-            failureDetails: details
+            failureDetails: details,
           });
         }
-      } catch (e) {
-        console.error('Error procesando mensaje WebSocket:', e);
+      } catch (error) {
+        console.error("Error procesando mensaje WebSocket:", error);
       }
     };
-    
+
     ws.onerror = (error) => {
-      console.error('❌ Error en WebSocket:', error);
+      console.error("❌ Error en WebSocket:", error);
     };
-    
-    ws.onclose = () => {
-      console.log('📡 Desconectado del sistema de logs');
-    };
-    
+
     return () => {
       ws.close();
       wsRef.current = null;
     };
-  }, []);
+  }, [updateProcess]);
 
   const checkProcessStatus = async (processIndex: number) => {
     try {
       const resp = await fetch(`/api/status?process_id=${processIndex}`);
       const data = await resp.json();
-      
-      if (!data.process_running && processes[processIndex].isEmitiendo) {
-        console.error(`${CHANNEL_CONFIGS[processIndex]?.name}: FFmpeg no está corriendo en el servidor`);
-        
-        setTimeout(() => {
-          console.log(`${CHANNEL_CONFIGS[processIndex]?.name}: Intentando reiniciar automáticamente...`);
+
+      if (!data.process_running && processesRef.current[processIndex].isEmitiendo) {
+        window.setTimeout(() => {
           startEmitToRTMP(processIndex);
         }, 5000);
       }
-    } catch (e) {
+    } catch {
       console.error(`${CHANNEL_CONFIGS[processIndex]?.name}: Error verificando estado del servidor`);
     }
   };
-
 
   const formatSeconds = (s: number) => {
     const hh = String(Math.floor(s / 3600)).padStart(2, "0");
@@ -515,115 +469,99 @@ export default function EmisorM3U8Panel() {
   };
 
   async function startEmitToRTMP(processIndex: number) {
-    const process = processes[processIndex];
-    
-    // Proceso Subida (file upload)
+    const process = processesRef.current[processIndex];
+
     if (processIndex === FILE_UPLOAD_INDEX) {
       if (uploadedFiles.length === 0 || !process.rtmp) {
         updateProcess(processIndex, {
           emitStatus: "error",
-          emitMsg: "Falta archivo(s) o RTMP"
+          emitMsg: "Falta archivo(s) o RTMP",
         });
         return;
       }
-      
+
       updateProcess(processIndex, {
         emitStatus: "starting",
         emitMsg: "Subiendo archivos al servidor...",
         reconnectAttempts: 0,
         lastReconnectTime: 0,
         failureReason: undefined,
-        failureDetails: undefined
+        failureDetails: undefined,
       });
       setUploadProgress(0);
-      
+
       try {
         const formData = new FormData();
-        uploadedFiles.forEach((file) => {
-          formData.append('files', file);
-        });
-        formData.append('target_rtmp', process.rtmp);
-        formData.append('process_id', processIndex.toString());
-        
-        const resp = await new Promise<any>((resolve, reject) => {
+        uploadedFiles.forEach((file) => formData.append("files", file));
+        formData.append("target_rtmp", process.rtmp);
+        formData.append("process_id", processIndex.toString());
+
+        const resp = await new Promise<UploadEmitResponse>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          
-          xhr.upload.addEventListener('progress', (e) => {
+
+          xhr.upload.addEventListener("progress", (e) => {
             if (e.lengthComputable) {
               const percentComplete = Math.round((e.loaded / e.total) * 100);
               setUploadProgress(percentComplete);
-              updateProcess(processIndex, {
-                emitMsg: `Subiendo archivos... ${percentComplete}%`
-              });
+              updateProcess(processIndex, { emitMsg: `Subiendo archivos... ${percentComplete}%` });
             }
           });
-          
-          xhr.addEventListener('load', () => {
+
+          xhr.addEventListener("load", () => {
             if (xhr.status >= 200 && xhr.status < 300) {
               try {
-                resolve(JSON.parse(xhr.responseText));
-              } catch (e) {
+                resolve(JSON.parse(xhr.responseText) as UploadEmitResponse);
+              } catch {
                 resolve({});
               }
             } else {
               reject(new Error(`HTTP ${xhr.status}`));
             }
           });
-          
-          xhr.addEventListener('error', () => reject(new Error('Network error')));
-          xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
-          
-          xhr.open('POST', '/api/emit/files');
+
+          xhr.addEventListener("error", () => reject(new Error("Network error")));
+          xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
+          xhr.open("POST", "/api/emit/files");
           xhr.send(formData);
         });
-        
+
         setUploadProgress(100);
-        
-        const data = resp;
-        const startTimeUnix = data.start_time || Math.floor(Date.now() / 1000);
-        const startTimeMs = startTimeUnix * 1000;
-        
+        const startTimeUnix = resp.start_time || Math.floor(Date.now() / 1000);
+
         updateProcess(processIndex, {
           emitStatus: "running",
           emitMsg: "✅ Archivos subidos. Emisión en progreso...",
           elapsed: 0,
-          startTime: startTimeMs,
-          isEmitiendo: true
+          startTime: startTimeUnix * 1000,
+          isEmitiendo: true,
         });
-        
+
         await supabase
-          .from('emission_processes')
-          .update({ 
-            start_time: startTimeUnix,
-            is_emitting: true,
-            emit_status: 'running'
-          })
-          .eq('id', processIndex);
-        
+          .from("emission_processes")
+          .update({ start_time: startTimeUnix, is_emitting: true, emit_status: "running" })
+          .eq("id", processIndex);
+
         toast.success(`${CHANNEL_CONFIGS[processIndex].name} iniciado con archivos locales`);
-      } catch (e: any) {
-        console.error("Error emitiendo archivos locales:", e);
+      } catch (error) {
+        const errorMsg = getErrorMessage(error, "Error al subir archivos");
+        console.error("Error emitiendo archivos locales:", error);
         setUploadProgress(0);
-        const errorMsg = e.message || "Error al subir archivos";
         updateProcess(processIndex, {
           emitStatus: "error",
           emitMsg: errorMsg,
           isEmitiendo: false,
           failureReason: "server",
-          failureDetails: `Error al subir archivos: ${errorMsg}`
+          failureDetails: `Error al subir archivos: ${errorMsg}`,
         });
       }
       return;
     }
 
-    // Procesos M3U8 -> RTMP o HLS local
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
     if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
-        emitMsg: isHlsOutput
-          ? "Falta M3U8 (haz clic en Obtener URL)"
-          : "Falta M3U8 o RTMP"
+        emitMsg: isHlsOutput ? "Falta M3U8 (haz clic en Obtener URL)" : "Falta M3U8 o RTMP",
       });
       return;
     }
@@ -634,7 +572,7 @@ export default function EmisorM3U8Panel() {
       reconnectAttempts: 0,
       lastReconnectTime: 0,
       failureReason: undefined,
-      failureDetails: undefined
+      failureDetails: undefined,
     });
 
     try {
@@ -643,392 +581,41 @@ export default function EmisorM3U8Panel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source_m3u8: process.m3u8,
-          target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
-          process_id: processIndex.toString()
-        })
+          target_rtmp: isHlsOutput ? "hls-local" : process.rtmp,
+          process_id: processIndex.toString(),
+        }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      
+      const data = (await resp.json()) as UploadEmitResponse;
       const startTimeUnix = data.start_time || Math.floor(Date.now() / 1000);
-      const startTimeMs = startTimeUnix * 1000;
-      
+
       updateProcess(processIndex, {
         emitStatus: "running",
         emitMsg: isHlsOutput ? "✅ Emitiendo HLS" : "✅ Emitiendo a RTMP",
         elapsed: 0,
-        startTime: startTimeMs,
-        isEmitiendo: true
+        startTime: startTimeUnix * 1000,
+        isEmitiendo: true,
       });
-      
+
       await supabase
-        .from('emission_processes')
-        .update({ 
-          start_time: startTimeUnix,
-          is_emitting: true,
-          emit_status: 'running'
-        })
-        .eq('id', processIndex);
-      
+        .from("emission_processes")
+        .update({ start_time: startTimeUnix, is_emitting: true, emit_status: "running" })
+        .eq("id", processIndex);
+
       toast.success(`${CHANNEL_CONFIGS[processIndex].name} iniciado`);
-    } catch (e: any) {
-      console.error("Error starting emit:", e);
-      const errorMsg = e.message || "Error al iniciar stream";
+    } catch (error) {
+      const errorMsg = getErrorMessage(error, "Error al iniciar stream");
+      console.error("Error starting emit:", error);
       updateProcess(processIndex, {
         emitStatus: "error",
         emitMsg: errorMsg,
         isEmitiendo: false,
         failureReason: "server",
-        failureDetails: `Error al iniciar stream M3U8: ${e.message}`
+        failureDetails: `Error al iniciar stream M3U8: ${errorMsg}`,
       });
     }
   }
-
-  async function stopEmit(processIndex: number) {
-    updateProcess(processIndex, {
-      emitStatus: "stopping",
-      emitMsg: "Deteniendo emisión en el servidor..."
-    });
-    
-    try {
-      const resp = await fetch("/api/emit/stop", { 
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ process_id: processIndex.toString() })
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      await resp.json().catch(() => ({}));
-    } catch (e) {
-      console.error("Error stopping emit:", e);
-    }
-
-    updateProcess(processIndex, {
-      isEmitiendo: false,
-      elapsed: 0,
-      startTime: 0,
-      emitStatus: "idle",
-      emitMsg: "",
-      failureReason: undefined,
-      failureDetails: undefined,
-      recoveryCount: 0,
-      lastSignalDuration: 0,
-    });
-    
-    await supabase
-      .from('emission_processes')
-      .update({ 
-        start_time: 0,
-        elapsed: 0,
-        is_emitting: false,
-        emit_status: 'idle',
-        recovery_count: 0,
-        last_signal_duration: 0,
-      })
-      .eq('id', processIndex);
-  }
-
-
-  async function onBorrar(processIndex: number) {
-    const process = processes[processIndex];
-    
-    if (process.isEmitiendo) {
-      await stopEmit(processIndex);
-    }
-    
-    if (processIndex === FILE_UPLOAD_INDEX && uploadedFiles.length > 0) {
-      fetch('/api/emit/files', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ process_id: processIndex.toString() })
-      }).catch((e) => console.error('Error borrando archivos:', e));
-      
-      setUploadedFiles([]);
-      setUploadProgress(0);
-    }
-    
-    updateProcess(processIndex, {
-      m3u8: "",
-      rtmp: "",
-      previewSuffix: "/video.m3u8",
-      isEmitiendo: false,
-      elapsed: 0,
-      startTime: 0,
-      emitStatus: "idle",
-      emitMsg: "",
-      failureReason: undefined,
-      failureDetails: undefined,
-      recoveryCount: 0,
-      lastSignalDuration: 0,
-    });
-    
-    // Reset recovery_count and last_signal_duration in DB
-    await supabase
-      .from('emission_processes')
-      .update({ 
-        recovery_count: 0,
-        last_signal_duration: 0,
-        failure_reason: null,
-        failure_details: null,
-      })
-      .eq('id', processIndex);
-    
-    toast.success(`${CHANNEL_CONFIGS[processIndex].name} eliminado`);
-    console.log(`🧹 ${CHANNEL_CONFIGS[processIndex].name} limpiado completamente`);
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "starting": return "bg-warning";
-      case "running": return "bg-status-live";
-      case "stopping": return "bg-warning";
-      case "error": return "bg-status-error";
-      default: return "bg-status-idle";
-    }
-  };
-
-  const getFailureIcon = (failureType?: string) => {
-    switch (failureType) {
-      case "source": return "🔗";
-      case "rtmp": return "📡";
-      case "server": return "🖥️";
-      case "proxy_down": return "🌐";
-      case "eof": return "⏹️";
-      case "stall": return "🧊";
-      case "cdn_unavailable": return "☁️";
-      case "circuit_breaker": return "🛑";
-      default: return "⚠️";
-    }
-  };
-
-  const getFailureLabel = (failureType?: string) => {
-    switch (failureType) {
-      case "source": return "Error de Conexión con la Fuente";
-      case "rtmp": return "Error de Conexión RTMP";
-      case "server": return "Error del Servidor de Emisión";
-      case "proxy_down": return "Proxy SOCKS5 (Pi5 CR) no responde";
-      case "eof": return "Fuente cerró conexión (EOF)";
-      case "stall": return "Sin frames del CDN (stall)";
-      case "cdn_unavailable": return "CDN no disponible";
-      case "circuit_breaker": return "Demasiadas caídas consecutivas";
-      default: return "Error de Emisión";
-    }
-  };
-
-  const getFailureDescription = (failureType?: string, failureDetails?: string, processIndex?: number) => {
-    if (failureDetails) return failureDetails;
-    const isTigo = processIndex === 12;
-    switch (failureType) {
-      case "source": return "No se pudo conectar con la URL de origen. Verifica que la URL sea correcta y esté accesible.";
-      case "rtmp": return "No se pudo establecer conexión con el servidor RTMP. Verifica la URL RTMP y las credenciales.";
-      case "server": return "El servidor de emisión encontró un problema inesperado. Intenta reiniciar la emisión.";
-      case "proxy_down": return "El Pi5 (Costa Rica) no está respondiendo. Posibles causas: corte eléctrico, Wi-Fi caído, microsocks detenido, o IP residencial cambió.";
-      case "eof":
-        if (isTigo) return "Posibles causas: token wmsAuthSign expiró (60s), proxy SOCKS5 (Pi5 CR) tuvo microcorte, o Teletica cortó la sesión por antigüedad. Reconectando con token fresco…";
-        return "El CDN cerró la conexión (token expirado, fuente terminó, o cortocircuito de red).";
-      case "stall": return "El CDN dejó de enviar segmentos. Posible problema de red intermedia o caída temporal de la fuente.";
-      case "cdn_unavailable": return "El CDN no respondió a las verificaciones de salud. Reintentando…";
-      case "circuit_breaker": return "Demasiadas caídas seguidas. El sistema pausó los reintentos automáticos para evitar saturar la fuente. Reinicia manualmente.";
-      default:
-        if (isTigo) return "Error en TIGO URL. Posibles causas: proxy SOCKS5 (Pi5 CR), token expirado, Teletica cortó la sesión, o CDN inestable.";
-        return "Ocurrió un error durante la emisión. Revisa la configuración e intenta nuevamente.";
-    }
-  };
-
-  // Colores únicos para cada proceso
-  const getProcessColor = (processIndex: number) => {
-    const colors = [
-      { bg: "bg-gray-500", text: "text-gray-400", stroke: "#9ca3af", name: "Disney 7" },
-      { bg: "bg-blue-500", text: "text-blue-500", stroke: "#3b82f6", name: "FUTV" },
-      { bg: "bg-purple-500", text: "text-purple-500", stroke: "#a855f7", name: "(oculto)" },
-      { bg: "bg-green-500", text: "text-green-500", stroke: "#22c55e", name: "TDmas 1" },
-      { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "Teletica" },
-      { bg: "bg-orange-500", text: "text-orange-500", stroke: "#f97316", name: "Canal 6" },
-      { bg: "bg-red-500", text: "text-red-500", stroke: "#ef4444", name: "Multimedios" },
-      { bg: "bg-yellow-500", text: "text-yellow-500", stroke: "#eab308", name: "Subida" },
-      { bg: "bg-pink-500", text: "text-pink-500", stroke: "#ec4899", name: "(oculto)" },
-      { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "(oculto)" },
-      { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
-      { bg: "bg-emerald-500", text: "text-emerald-500", stroke: "#10b981", name: "FUTV URL" },
-      { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "(oculto)" },
-      { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "TELETICA URL" },
-      { bg: "bg-lime-500", text: "text-lime-500", stroke: "#84cc16", name: "TDMAS 1 URL" },
-      { bg: "bg-amber-500", text: "text-amber-500", stroke: "#f59e0b", name: "CANAL 6 URL" },
-    ];
-    return colors[processIndex];
-  };
-
-  // Función para renderizar un tab de proceso
-  const renderProcessTab = (processIndex: number) => {
-    const process = processes[processIndex];
-    const channelConfig = CHANNEL_CONFIGS[processIndex];
-
-    return (
-      <div className="space-y-6">
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Panel de configuración */}
-          <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
-            <h2 className="text-lg font-medium mb-4 text-accent">
-              {processIndex === FILE_UPLOAD_INDEX ? "Archivos Locales" : "Fuente y Cabeceras"} - {channelConfig.name}
-            </h2>
-
-            {processIndex === FILE_UPLOAD_INDEX ? (
-              // Proceso Subida: Upload de archivos
-              <>
-                <label className="block text-sm mb-2 text-muted-foreground">Archivos de video (MP4, MKV, etc.)</label>
-                <input
-                  type="file"
-                  accept="video/*"
-                  multiple
-                  onChange={(e) => {
-                    if (e.target.files) {
-                      setUploadedFiles(Array.from(e.target.files));
-                    }
-                  }}
-                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-2 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
-                />
-                {uploadedFiles.length > 0 && (
-                  <div className="mb-4 p-3 rounded-xl bg-card/50 border border-border">
-                    <p className="text-xs text-muted-foreground mb-2">Archivos seleccionados:</p>
-                    <ul className="space-y-1">
-                      {uploadedFiles.map((file, idx) => (
-                        <li key={idx} className="text-xs text-foreground flex items-center gap-2">
-                          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
-                          {file.name} ({(file.size / (1024 * 1024)).toFixed(2)} MB)
-                        </li>
-                      ))}
-                    </ul>
-                    {uploadProgress > 0 && uploadProgress < 100 && (
-                      <div className="mt-3">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-xs text-muted-foreground">Subiendo...</span>
-                          <span className="text-xs font-semibold text-primary">{uploadProgress}%</span>
-                        </div>
-                        <Progress value={uploadProgress} className="h-2" />
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              // Procesos M3U8 normales
-              <>
-                <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 (fuente)</label>
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="url"
-                    placeholder="https://servidor/origen/playlist.m3u8"
-                    value={process.m3u8}
-                    onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
-                      processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
-                        && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
-                        ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.4)]'
-                        : 'border-border'
-                    }`}
-                  />
-                  {channelConfig.scrapeFn && (
-                    <button
-                      onClick={() => fetchChannelUrl(processIndex)}
-                      disabled={fetchingChannel !== null}
-                      className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
-                      title={`Obtener URL ${channelConfig.name} automáticamente`}
-                    >
-                      {fetchingChannel === processIndex ? (
-                        <span className="flex items-center gap-2">
-                          <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-accent-foreground" />
-                          Obteniendo...
-                        </span>
-                      ) : (
-                        channelConfig.fetchLabel
-                      )}
-                    </button>
-                  )}
-                </div>
-                {/* Backup URL field removed - Canal 6 now uses single URL */}
-              </>
-            )}
-            {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
-              const hlsSlugs: Record<number, string> = {
-                [FUTV_URL_INDEX]: 'FUTV',
-                [TELETICA_URL_INDEX]: 'Teletica',
-                [TDMAS1_URL_INDEX]: 'Tdmas1',
-                [CANAL6_URL_INDEX]: 'Canal6',
-              };
-              const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
-              const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
-              return (
-              <>
-                <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
-                <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
-                  {process.isEmitiendo ? (
-                    <div className="space-y-2">
-                      <p className="text-xs text-muted-foreground">Tu URL estable para XUI:</p>
-                      <div className="flex items-center gap-2">
-                        <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
-                          {hlsUrl}
-                        </code>
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(hlsUrl);
-                            toast.success('URL copiada al portapapeles');
-                          }}
-                          className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
-                        >
-                          📋
-                        </button>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        💡 Esta URL es fija y no cambia. Agrégala directamente a XUI como source.
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      La URL se generará al iniciar la emisión. Primero obtén la señal y presiona "Emitir HLS".
-                    </p>
-                  )}
-                </div>
-              </>
-              );
-            })() : (
-              // RTMP normal
-              <>
-                <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
-                <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
-                <input
-                  type="text"
-                  placeholder="rtmp://fluestabiliz.giize.com/costaSTAR007"
-                  value={process.rtmp}
-                  onChange={(e) => updateProcess(processIndex, { rtmp: e.target.value })}
-                  className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-                />
-              </>
-            )}
-
-            <div className="flex gap-3 items-center flex-wrap">
-              {!process.isEmitiendo ? (
-                <button
-                  onClick={() => startEmitToRTMP(processIndex)}
-                  className="px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl bg-primary hover:bg-primary/90 text-primary-foreground"
-                >
-                  {HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
-                </button>
-              ) : (
-                <button 
-                  onClick={() => stopEmit(processIndex)} 
-                  className="px-6 py-3 rounded-xl bg-warning hover:bg-warning/90 active:scale-[.98] transition-all duration-200 font-medium text-warning-foreground shadow-lg hover:shadow-xl"
-                >
-                  ⏹️ Detener emisión
-                </button>
-              )}
-              <button 
-                onClick={() => onBorrar(processIndex)} 
-                className="px-4 py-3 rounded-xl bg-destructive hover:bg-destructive/90 active:scale-[.98] transition-all duration-200 font-medium text-destructive-foreground shadow-lg hover:shadow-xl"
-              >
-                🗑️ Borrar
-              </button>
-            </div>
-
-            {/* Night Rest Toggle */}
+...
             {processIndex !== FILE_UPLOAD_INDEX && (
               <div className="flex items-center gap-3 mt-4 p-3 rounded-xl bg-card/50 border border-border">
                 <Switch
@@ -1037,13 +624,13 @@ export default function EmisorM3U8Panel() {
                     updateProcess(processIndex, { nightRest: checked });
                     try {
                       const { error } = await supabase
-                        .from('emission_processes')
-                        .update({ night_rest: checked } as any)
-                        .eq('id', processIndex);
+                        .from("emission_processes")
+                        .update({ night_rest: checked })
+                        .eq("id", processIndex);
                       if (error) throw error;
                       toast.success(`${checked ? '🌙' : '☀️'} Descanso nocturno ${checked ? 'activado' : 'desactivado'} para ${channelConfig.name}`);
-                    } catch (e) {
-                      toast.error('Error al cambiar descanso nocturno');
+                    } catch {
+                      toast.error("Error al cambiar descanso nocturno");
                       updateProcess(processIndex, { nightRest: !checked });
                     }
                   }}
