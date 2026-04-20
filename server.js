@@ -1541,7 +1541,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     if (isManualObsIngest) {
-      effectiveSourceM3u8 = 'rtmp://127.0.0.1/live/tigo';
+      effectiveSourceM3u8 = 'rtmp://167.17.69.116/live/tigo';
     }
 
     // ── Refresco de token JIT para procesos con proxy (Tigo: wmsAuthSign dura 60s) ──
@@ -1638,7 +1638,7 @@ app.post('/api/emit', async (req, res) => {
       const upsertData = {
           id: parseInt(process_id),
           m3u8: effectiveSourceM3u8,
-          rtmp: isHlsOutput ? 'hls-local' : target_rtmp,
+          rtmp: process_id === '12' ? 'rtmp://167.17.69.116/live/tigo' : (isHlsOutput ? 'hls-local' : target_rtmp),
           source_url: effectiveSourceM3u8,
           is_active: true,
           is_emitting: true,
@@ -1914,7 +1914,7 @@ app.post('/api/emit', async (req, res) => {
 
     // ── PRE-CHECK DE SALUD EN ARRANQUE INICIAL ──
     // Verificar que la URL principal responda antes de lanzar FFmpeg.
-    if (MANUAL_URL_PROCESSES.has(String(process_id)) && !is_recovery) {
+    if (MANUAL_URL_PROCESSES.has(String(process_id)) && !is_recovery && !isManualObsIngest) {
       sendLog(process_id, 'info', `🔍 Pre-check de salud antes de arrancar...`);
       const PRE_CHECK_ATTEMPTS = 3;
       const PRE_CHECK_INTERVAL = 3000;

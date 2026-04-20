@@ -26,7 +26,7 @@ const TDMAS1_URL_INDEX = 14;
 const CANAL6_URL_INDEX = 15;
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "rtmp://167.17.69.116/live/tigo";
-const TIGO_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/tigo";
+const TIGO_INTERNAL_SOURCE_URL = "rtmp://167.17.69.116/live/tigo";
 
 // Procesos ocultos (Tigo fue descartado por restricciones del CDN/HDCP)
 const HIDDEN_PROCESSES = new Set([2, 8, 9]);
