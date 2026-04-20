@@ -678,22 +678,23 @@ setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
 
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
-// Procesos manuales (Disney 7, Disney 8): recovery reutiliza la URL guardada en DB
-const MANUAL_URL_PROCESSES = new Set(['0', '5', '10']);
+// Procesos manuales/estables: recovery reutiliza la URL guardada en DB
+const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '15']);
 
-// Fuentes estables (watchdogs tolerantes + recovery lento) - solo canales manuales con CDN fijo
-const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10']);
+// Fuentes estables (watchdogs tolerantes + recovery lento) - canales con CDN fijo
+const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10', '15']);
 // Fuentes que usan -re (lectura a tasa nativa) — TODOS los canales lo necesitan
 // Sin -re, FFmpeg lee a velocidad CPU (70-100fps), agota los segmentos HLS y causa EOF prematuro
-const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11', '12']);
+const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11', '12', '13', '14', '15']);
 // Procesos con cadencia CFR (vsync cfr + 29.97fps) - canales de emisión EXCEPTO Disney 7 (TUDN)
 // Disney 7 (ID 0) usa valores enteros (30fps/GOP60) porque el servidor RTMP destino
 // rechaza conexiones con GOP decimal (59.94) causando Broken pipe a los ~120s
-const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11', '12']);
+const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11', '12', '13', '14', '15']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
   '6': 'https://mdstrm.com/live-stream-playlist/5a7b1e63a8da282c34d65445.m3u8', // Multimedios oficial
+  '15': 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8', // Canal 6 oficial Repretel
 };
 
 // Track de intentos de recovery para saber cuándo usar fallback
