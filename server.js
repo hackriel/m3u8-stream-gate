@@ -251,12 +251,14 @@ const CHANNEL_MAP = {
   
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
   '11': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV URL' },
+  '13': { channelId: '617c2f66e4b045a692106126', channelName: 'TELETICA URL' },
+  '14': { channelId: '66608d188f0839b8a740cfe9', channelName: 'TDMAS 1 URL' },
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11']);
+const HLS_OUTPUT_PROCESSES = new Set(['11', '13', '14', '15']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
-const HLS_SLUG_MAP = { '11': 'futv' };
+const HLS_SLUG_MAP = { '11': 'FUTV', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
