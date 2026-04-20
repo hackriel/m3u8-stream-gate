@@ -328,14 +328,36 @@ export default function EmisorM3U8Panel() {
 
   useEffect(() => {
     const canal6Preset = CHANNEL_CONFIGS[CANAL6_URL_INDEX]?.presetUrl;
-    if (!canal6Preset) return;
-
+    const tigoPreset = CHANNEL_CONFIGS[TIGO_URL_INDEX]?.presetUrl;
+    const tigoRtmp = TIGO_OBS_INGEST_URL;
     setProcesses(prev => {
-      if (prev[CANAL6_URL_INDEX]?.m3u8 === canal6Preset) return prev;
+      let changed = false;
       const next = [...prev];
-      next[CANAL6_URL_INDEX] = { ...next[CANAL6_URL_INDEX], m3u8: canal6Preset };
-      return next;
+
+      if (tigoPreset && (next[TIGO_URL_INDEX]?.m3u8 !== tigoPreset || next[TIGO_URL_INDEX]?.rtmp !== tigoRtmp)) {
+        next[TIGO_URL_INDEX] = { ...next[TIGO_URL_INDEX], m3u8: tigoPreset, rtmp: tigoRtmp };
+        changed = true;
+      }
+
+      if (canal6Preset && next[CANAL6_URL_INDEX]?.m3u8 !== canal6Preset) {
+        next[CANAL6_URL_INDEX] = { ...next[CANAL6_URL_INDEX], m3u8: canal6Preset };
+        changed = true;
+      }
+
+      return changed ? next : prev;
     });
+
+    if (tigoPreset) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: tigoPreset, rtmp: tigoRtmp })
+        .eq('id', TIGO_URL_INDEX)
+        .then(({ error }) => {
+          if (error) console.error('Error guardando preset de TIGO URL:', error);
+        });
+    }
+
+    if (!canal6Preset) return;
 
     supabase
       .from('emission_processes')
@@ -943,6 +965,7 @@ export default function EmisorM3U8Panel() {
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
               const hlsSlugs: Record<number, string> = {
                 [FUTV_URL_INDEX]: 'FUTV',
+                [TIGO_URL_INDEX]: 'Tigo',
                 [TELETICA_URL_INDEX]: 'Teletica',
                 [TDMAS1_URL_INDEX]: 'Tdmas1',
                 [CANAL6_URL_INDEX]: 'Canal6',
@@ -953,8 +976,27 @@ export default function EmisorM3U8Panel() {
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
                 <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
-                  {process.isEmitiendo ? (
+                  {processIndex === TIGO_URL_INDEX || process.isEmitiendo ? (
                     <div className="space-y-2">
+                      {processIndex === TIGO_URL_INDEX && (
+                        <>
+                          <p className="text-xs text-muted-foreground">RTMP de entrada para OBS:</p>
+                          <div className="flex items-center gap-2">
+                            <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
+                              {process.rtmp || TIGO_OBS_INGEST_URL}
+                            </code>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(process.rtmp || TIGO_OBS_INGEST_URL);
+                                toast.success('RTMP copiada al portapapeles');
+                              }}
+                              className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
+                            >
+                              📋
+                            </button>
+                          </div>
+                        </>
+                      )}
                       <p className="text-xs text-muted-foreground">Tu URL estable para XUI:</p>
                       <div className="flex items-center gap-2">
                         <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
@@ -971,7 +1013,9 @@ export default function EmisorM3U8Panel() {
                         </button>
                       </div>
                       <p className="text-xs text-muted-foreground mt-2">
-                        💡 Esta URL es fija y no cambia. Agrégala directamente a XUI como source.
+                        {processIndex === TIGO_URL_INDEX
+                          ? '💡 Envía desde OBS a esa RTMP y tus clientes consumirán la HLS fija de abajo.'
+                          : '💡 Esta URL es fija y no cambia. Agrégala directamente a XUI como source.'}
                       </p>
                     </div>
                   ) : (
