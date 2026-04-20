@@ -2887,7 +2887,7 @@ app.post('/api/emit', async (req, res) => {
         } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
           // Procesos manuales (Disney 7, Disney 8, Canal 6): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
-          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8' };
+          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8', '15': 'CANAL 6 URL' };
           const procLabel = manualLabels[String(process_id)] || 'Manual';
           
           const failureType = detectedErrors.get(process_id);
@@ -2927,8 +2927,10 @@ app.post('/api/emit', async (req, res) => {
               const sourceUrl = procData?.m3u8;
               const targetRtmp = procData?.rtmp;
               
-              if (!sourceUrl || !targetRtmp) {
-                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: No hay M3U8 o RTMP guardados`);
+              const effectiveTarget = targetRtmp || (HLS_OUTPUT_PROCESSES.has(String(process_id)) ? 'hls-local' : '');
+
+              if (!sourceUrl || !effectiveTarget) {
+                sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: No hay M3U8 o destino guardados`);
                 return;
               }
               
@@ -3021,7 +3023,7 @@ app.post('/api/emit', async (req, res) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   source_m3u8: finalUrl,
-                  target_rtmp: targetRtmp,
+                  target_rtmp: effectiveTarget,
                   process_id: String(process_id),
                   is_recovery: true
                 })
