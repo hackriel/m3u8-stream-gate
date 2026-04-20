@@ -1638,7 +1638,7 @@ app.post('/api/emit', async (req, res) => {
       const upsertData = {
           id: parseInt(process_id),
           m3u8: effectiveSourceM3u8,
-          rtmp: isHlsOutput ? 'hls-local' : target_rtmp,
+          rtmp: process_id === '12' ? 'rtmp://167.17.69.116/live/tigo' : (isHlsOutput ? 'hls-local' : target_rtmp),
           source_url: effectiveSourceM3u8,
           is_active: true,
           is_emitting: true,
