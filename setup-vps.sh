@@ -59,15 +59,6 @@ else
   ok "FFmpeg instalado"
 fi
 
-# ── Paso 3.5: Instalar proxychains4 (necesario para Tigo URL vía Pi 5) ──
-echo "🌐 [3.5/8] Instalando proxychains4 (proxy SOCKS5 para Tigo)..."
-if command -v proxychains4 &>/dev/null; then
-  ok "proxychains4 ya instalado"
-else
-  apt install -y proxychains4
-  ok "proxychains4 instalado"
-fi
-
 # ── Paso 3b: Optimizar TCP keepalive para RTMP ──
 echo "🔧 [3b/8] Configurando TCP keepalive para estabilidad RTMP..."
 sysctl -w net.ipv4.tcp_keepalive_time=60 > /dev/null 2>&1
@@ -80,15 +71,6 @@ grep -q 'tcp_keepalive_time' /etc/sysctl.conf 2>/dev/null || {
   echo "net.ipv4.tcp_keepalive_probes = 6" >> /etc/sysctl.conf
 }
 ok "TCP keepalive optimizado (60s/10s/6 probes)"
-
-# ── Paso 3c: Abrir puerto SRT 9000/UDP en firewall (Tigo HDMI ingest) ──
-echo "🔓 [3c/8] Abriendo puerto 9000/UDP para SRT (Pi5 → VPS)..."
-if command -v ufw &>/dev/null; then
-  ufw allow 9000/udp comment 'Tigo HDMI SRT ingest from Pi5' 2>/dev/null || true
-  ok "Puerto 9000/UDP abierto en ufw"
-else
-  warn "ufw no instalado — asegurate de que el firewall del VPS permita UDP 9000 entrante"
-fi
 
 # ── Paso 4: Instalar dependencias ──
 echo "📥 [4/8] Instalando dependencias del proyecto..."
@@ -127,10 +109,6 @@ Environment=SUPABASE_URL=https://zbrkijgnkckcutydsmkt.supabase.co
 Environment=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpicmtpamdua2NrY3V0eWRzbWt0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4OTE3NzMsImV4cCI6MjA3ODQ2Nzc3M30.igte07DdM7xmA3A-nsWXOTIno89-15i2d0PlEiIC7L8
 Environment=TDMAX_EMAIL=arlopfa@gmail.com
 Environment=TDMAX_PASSWORD=vM5SdnKpPjlypvJW
-Environment=TIGO_PROXY_URL=socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080
-Environment=TIGO_USE_HDMI=true
-Environment=TIGO_SRT_PORT=9000
-Environment=TIGO_SRT_LATENCY_MS=2000
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10

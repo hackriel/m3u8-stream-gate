@@ -6,9 +6,6 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
-import { ProxyHealthBadge } from "@/components/ProxyHealthBadge";
-import { TigoHdmiPanel } from "@/components/TigoHdmiPanel";
-import { useTigoSrtStatus } from "@/hooks/useTigoSrtStatus";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -22,12 +19,11 @@ const NUM_PROCESSES = 13;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
-const TIGO_URL_INDEX = 12; // "TIGO URL" process - HLS output
 
-// Procesos ocultos (Tigo fue descartado por restricciones del CDN)
-const HIDDEN_PROCESSES = new Set([2, 8, 9]);
+// Procesos ocultos (Tigo fue descartado por restricciones del CDN/HDCP)
+const HIDDEN_PROCESSES = new Set([2, 8, 9, 12]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -84,7 +80,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV URL", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
-  { name: "TIGO URL", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 12: TIGO URL (descartado, HDCP)
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -107,12 +103,6 @@ const defaultProcess = (): EmissionProcess => ({
 
 export default function EmisorM3U8Panel() {
   const logContainerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<HTMLDivElement>(null));
-  const { status: tigoSrt } = useTigoSrtStatus(2000);
-  const tigoSrtConnected = tigoSrt.enabled && tigoSrt.connected;
-  const tigoSrtEnabled = tigoSrt.enabled;
-  // El botón Tigo se habilita cuando el VPS está listo (TIGO_USE_HDMI=true).
-  // El buffer se construye DESPUÉS de pulsar Emitir, así que no se requiere acá.
-  const tigoSrtCanStart = tigoSrtEnabled;
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
@@ -600,13 +590,11 @@ export default function EmisorM3U8Panel() {
 
     // Procesos M3U8 -> RTMP o HLS local
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
-    const isTigoHdmiProcess = processIndex === TIGO_URL_INDEX && tigoSrtEnabled;
-    const requiresSourceM3u8 = !isTigoHdmiProcess;
-    if ((requiresSourceM3u8 && !process.m3u8) || (!process.rtmp && !isHlsOutput)) {
+    if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
         emitMsg: isHlsOutput
-          ? (isTigoHdmiProcess ? "VPS HDMI no está listo para iniciar" : "Falta M3U8 (haz clic en Obtener URL)")
+          ? "Falta M3U8 (haz clic en Obtener URL)"
           : "Falta M3U8 o RTMP"
       });
       return;
@@ -626,7 +614,7 @@ export default function EmisorM3U8Panel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          source_m3u8: isTigoHdmiProcess ? `srt://pi5-hdmi:${tigoSrt.listenerPort}` : process.m3u8,
+          source_m3u8: process.m3u8,
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString()
         })
@@ -833,7 +821,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "(oculto)" },
       { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
       { bg: "bg-emerald-500", text: "text-emerald-500", stroke: "#10b981", name: "FUTV URL" },
-      { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "TIGO URL" },
+      { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "(oculto)" },
     ];
     return colors[processIndex];
   };
@@ -842,17 +830,9 @@ export default function EmisorM3U8Panel() {
   const renderProcessTab = (processIndex: number) => {
     const process = processes[processIndex];
     const channelConfig = CHANNEL_CONFIGS[processIndex];
-    const isTigoHdmiTab = processIndex === TIGO_URL_INDEX;
-    // Para Tigo HDMI: el botón debe abrir el listener cuando el VPS ya está listo.
-    const tigoCanEmit = isTigoHdmiTab ? tigoSrtCanStart : true;
-    const tigoBlockedReason = isTigoHdmiTab && !tigoCanEmit
-      ? "El VPS HDMI todavía no está listo. Verificá que TIGO_USE_HDMI=true y que el panel superior muestre buffer listo."
-      : "";
 
     return (
       <div className="space-y-6">
-        {processIndex === TIGO_URL_INDEX && <TigoHdmiPanel />}
-        {processIndex === TIGO_URL_INDEX && <ProxyHealthBadge />}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Panel de configuración */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
@@ -898,19 +878,6 @@ export default function EmisorM3U8Panel() {
                   </div>
                 )}
               </>
-            ) : isTigoHdmiTab && tigoSrtEnabled ? (
-              // Tigo HDMI: no hay URL ni scraping, la fuente es la Cam Link 4K vía Pi5
-              <div className="mb-4 p-4 rounded-xl bg-card/50 border border-border space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-lg">📡</span>
-                  <span className="font-medium text-foreground">Fuente: HDMI vía Raspberry Pi 5</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  No requiere URL M3U8 ni scraping. La señal entra por la Elgato Cam Link 4K
-                  conectada al Pi5 y llega al VPS por SRT (puerto 9000/UDP). El panel superior
-                  muestra el estado en vivo del enlace.
-                </p>
-              </div>
             ) : (
               // Procesos M3U8 normales
               <>
@@ -950,7 +917,7 @@ export default function EmisorM3U8Panel() {
               </>
             )}
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
-              const hlsSlugs: Record<number, string> = { [FUTV_URL_INDEX]: 'futv', [TIGO_URL_INDEX]: 'Tigo' };
+              const hlsSlugs: Record<number, string> = { [FUTV_URL_INDEX]: 'futv' };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${window.location.protocol}//${window.location.host}/live/${hlsSlug}/playlist.m3u8`;
               return (
@@ -1004,18 +971,10 @@ export default function EmisorM3U8Panel() {
             <div className="flex gap-3 items-center flex-wrap">
               {!process.isEmitiendo ? (
                 <button
-                  onClick={() => tigoCanEmit && startEmitToRTMP(processIndex)}
-                  disabled={!tigoCanEmit}
-                  title={tigoBlockedReason}
-                  className={`px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl ${
-                    tigoCanEmit
-                      ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
-                      : 'bg-muted text-muted-foreground cursor-not-allowed opacity-60'
-                  }`}
+                  onClick={() => startEmitToRTMP(processIndex)}
+                  className="px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl bg-primary hover:bg-primary/90 text-primary-foreground"
                 >
-                  {isTigoHdmiTab && tigoSrtEnabled
-                    ? (tigoCanEmit ? '📺 Emitir HLS (VPS listo)' : '⏳ Preparando HDMI…')
-                    : HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
+                  {HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
                 </button>
               ) : (
                 <button 

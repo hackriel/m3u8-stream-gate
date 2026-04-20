@@ -12,11 +12,9 @@ import net from 'net';
 import http from 'http';
 import https from 'https';
 import { createClient } from '@supabase/supabase-js';
-import { SocksProxyAgent } from 'socks-proxy-agent';
 
-// (Fase 2 revertida — se eliminó el mini-proxy local de tokens. Tigo opera en
-// Fase 1 puro: proxychains4 → CDN. Mantenemos shims no-op para no romper
-// llamadas remanentes en el código (cleanup, exits, etc.).)
+// Tigo (ID 12) descartado por HDCP en HDMI + restricciones CDN.
+// Shims no-op preservados para que llamadas remanentes (cleanup/exits) no rompan.
 const tigoProxies = new Map();
 const stopTigoProxy = async (_process_id) => {};
 
@@ -253,13 +251,12 @@ const CHANNEL_MAP = {
   
   '6': { channelId: '664e5de58f089fa849a58697', channelName: 'Multimedios' },
   '11': { channelId: '641cba02e4b068d89b2344e3', channelName: 'FUTV URL' },
-  '12': { channelId: '664237788f085ac1f2a15f81', channelName: 'TIGO URL' },
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11', '12']);
+const HLS_OUTPUT_PROCESSES = new Set(['11']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
-const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo' };
+const HLS_SLUG_MAP = { '11': 'futv' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
@@ -369,7 +366,7 @@ const stopTigoKeepAlive = (process_id) => {
 // transcodea 720p CBR 2000k → /live/Tigo/playlist.m3u8 (lo que el TV consume).
 // Reversible con TIGO_USE_BUFFER=false (vuelve a modo single-FFmpeg legacy).
 const TIGO_USE_BUFFER = (process.env.TIGO_USE_BUFFER || 'true').toLowerCase() !== 'false';
-const TIGO_USE_HDMI = (process.env.TIGO_USE_HDMI || 'true').toLowerCase() !== 'false';
+const TIGO_USE_HDMI = false; // Descartado: HDCP en salida HDMI del decoder Tigo bloquea Cam Link
 const TIGO_SRT_PORT = parseInt(process.env.TIGO_SRT_PORT || '9000', 10);
 const TIGO_SRT_LATENCY_MS = parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10);
 const TIGO_SRT_LATENCY_US = TIGO_SRT_LATENCY_MS * 1000;
@@ -3826,49 +3823,7 @@ app.get('/api/metrics', (req, res) => {
   }
 });
 
-// Estado del proxy SOCKS5 (Pi5 CR) — usado por el dashboard.
-// Devuelve último ping, latencia, uptime % de las últimas 30 muestras.
-app.get('/api/proxy-status', (req, res) => {
-  const hist = proxyHealthState.history;
-  const total = hist.length;
-  const ok = hist.filter(h => h.reachable).length;
-  const uptimePct = total > 0 ? Math.round((ok / total) * 1000) / 10 : null;
-  const latencies = hist.filter(h => h.reachable && h.latencyMs != null).map(h => h.latencyMs);
-  const avgLatency = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null;
-  res.json({
-    proxyUrl: TIGO_PROXY_URL.replace(/:\/\/[^@]+@/, '://***@'), // ocultar credenciales
-    reachable: proxyHealthState.reachable,
-    latencyMs: proxyHealthState.latencyMs,
-    avgLatencyMs: avgLatency,
-    uptimePct,
-    samples: total,
-    lastCheck: proxyHealthState.lastCheck,
-    lastError: proxyHealthState.lastError,
-    ageSeconds: proxyHealthState.lastCheck ? Math.floor((Date.now() - proxyHealthState.lastCheck) / 1000) : null,
-  });
-});
-
-// Estado SRT del ingest HDMI Tigo (Pi5 → VPS) — para el dashboard del proceso 12.
-// Devuelve si el Pi5 está conectado, bitrate Rx, paquetes perdidos y edad del último frame.
-app.get('/api/tigo-srt-status', (req, res) => {
-  const m = tigoSrtMetrics.get('12') || {
-    connected: false, bitrateKbps: 0, pktsLost: 0, lastFrameAt: 0, since: 0,
-  };
-  const now = Date.now();
-  const lastFrameAgeMs = m.lastFrameAt ? (now - m.lastFrameAt) : null;
-  // Si pasaron > 5s sin frames, marcamos como desconectado lógico
-  const liveConnected = m.connected && lastFrameAgeMs !== null && lastFrameAgeMs < 5000;
-  res.json({
-    enabled: TIGO_USE_HDMI,
-    listenerPort: TIGO_SRT_PORT,
-    connected: liveConnected,
-    bitrateKbps: liveConnected ? m.bitrateKbps : 0,
-    pktsLost: m.pktsLost,
-    lastFrameAgeMs,
-    sinceMs: m.since ? (now - m.since) : null,
-    bufferReady: fs.existsSync(TIGO_BUFFER_PLAYLIST),
-  });
-});
+// Endpoints /api/proxy-status y /api/tigo-srt-status eliminados (Tigo descartado).
 app.use((req, res, next) => {
   // Solo servir index.html para rutas que no sean archivos estáticos
   if (!req.path.includes('.')) {
