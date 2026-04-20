@@ -184,42 +184,7 @@ export default function EmisorM3U8Panel() {
         if (data && data.length > 0) {
           const loadedProcesses: EmissionProcess[] = Array.from({ length: NUM_PROCESSES }, (_, index) => {
             const row = data.find(d => d.id === index);
-            if (row) {
-              const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
-              const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
-              let elapsedSeconds = row.elapsed || 0;
-
-              if (isRunning && startTimeMs > 0) {
-                elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
-              }
-
-              // (Tigo/Evento tabs removed - indices 2, 8, 9 are hidden)
-              // Solo cargar failure state si el proceso está activo
-              const loadFailure = isRunning || row.is_emitting;
-              return {
-                m3u8: row.m3u8 || '',
-                m3u8Backup: (row as any).m3u8_backup || '',
-                rtmp: row.rtmp || '',
-                previewSuffix: row.preview_suffix || '/video.m3u8',
-                isEmitiendo: row.is_emitting || isRunning,
-                elapsed: elapsedSeconds,
-                startTime: startTimeMs,
-                emitStatus: (row.emit_status as "idle" | "starting" | "running" | "stopping" | "error") || "idle",
-                emitMsg: row.emit_msg || '',
-                reconnectAttempts: 0,
-                lastReconnectTime: 0,
-                failureReason: loadFailure ? (row.failure_reason || undefined) : undefined,
-                failureDetails: loadFailure ? (row.failure_details || undefined) : undefined,
-                logs: [],
-                processLogsFromDB: row.process_logs || '',
-                recoveryCount: (isRunning || row.is_emitting) ? ((row as any).recovery_count || 0) : 0,
-                lastSignalDuration: (row as any).last_signal_duration || 0,
-                nightRest: (row as any).night_rest || false,
-                sourceUrl: (row as any).source_url || '',
-              };
-            } else {
-              return defaultProcess();
-            }
+            return row ? mapRowToProcess(row) : defaultProcess();
           });
           setProcesses(loadedProcesses);
           
@@ -278,38 +243,13 @@ export default function EmisorM3U8Panel() {
         (payload) => {
           console.log('🔄 Cambio detectado en base de datos:', payload);
           if (payload.eventType === 'UPDATE') {
-            const row = payload.new as any;
+            const row = payload.new as EmissionProcessRow;
             setProcesses(prev => {
               const newProcesses = [...prev];
               if (row.id >= 0 && row.id < NUM_PROCESSES) {
-                const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
-                const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
-                let elapsedSeconds = row.elapsed || 0;
-
-                if (isRunning && startTimeMs > 0) {
-                  elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
-                }
-
                 newProcesses[row.id] = {
-                  m3u8: row.m3u8,
-                  m3u8Backup: (row as any).m3u8_backup || '',
-                  rtmp: row.rtmp,
-                  previewSuffix: row.preview_suffix,
-                  isEmitiendo: row.is_emitting || isRunning,
-                  elapsed: elapsedSeconds,
-                  startTime: startTimeMs,
-                  emitStatus: row.emit_status,
-                  emitMsg: row.emit_msg,
-                  reconnectAttempts: 0,
-                  lastReconnectTime: 0,
-                  failureReason: row.failure_reason,
-                  failureDetails: row.failure_details,
+                  ...mapRowToProcess(row),
                   logs: prev[row.id]?.logs || [],
-                  processLogsFromDB: row.process_logs || '',
-                  recoveryCount: row.recovery_count || 0,
-                  lastSignalDuration: (row as any).last_signal_duration || 0,
-                  nightRest: (row as any).night_rest || false,
-                  sourceUrl: (row as any).source_url || '',
                 };
               }
               return newProcesses;
@@ -374,9 +314,10 @@ export default function EmisorM3U8Panel() {
         rtmp: processesRef.current[processIndex].rtmp || ''
       });
       toast.success(`✅ URL ${config.name} extraída correctamente`);
-    } catch (e: any) {
-      console.error(`Error obteniendo URL ${config.name}:`, e);
-      toast.error(`Error obteniendo URL ${config.name}: ${e.message}`);
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, 'Error desconocido');
+      console.error(`Error obteniendo URL ${config.name}:`, error);
+      toast.error(`Error obteniendo URL ${config.name}: ${message}`);
     } finally {
       setFetchingChannel(null);
     }
