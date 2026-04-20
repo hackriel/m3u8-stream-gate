@@ -6,9 +6,6 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
-import { ProxyHealthBadge } from "@/components/ProxyHealthBadge";
-import { TigoHdmiPanel } from "@/components/TigoHdmiPanel";
-import { useTigoSrtStatus } from "@/hooks/useTigoSrtStatus";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -22,12 +19,11 @@ const NUM_PROCESSES = 13;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
-const TIGO_URL_INDEX = 12; // "TIGO URL" process - HLS output
 
-// Procesos ocultos (Tigo fue descartado por restricciones del CDN)
-const HIDDEN_PROCESSES = new Set([2, 8, 9]);
+// Procesos ocultos (Tigo fue descartado por restricciones del CDN/HDCP)
+const HIDDEN_PROCESSES = new Set([2, 8, 9, 12]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -84,7 +80,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV URL", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
-  { name: "TIGO URL", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 Tigo" },
+  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 12: TIGO URL (descartado, HDCP)
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -107,12 +103,6 @@ const defaultProcess = (): EmissionProcess => ({
 
 export default function EmisorM3U8Panel() {
   const logContainerRefs = Array.from({ length: NUM_PROCESSES }, () => useRef<HTMLDivElement>(null));
-  const { status: tigoSrt } = useTigoSrtStatus(2000);
-  const tigoSrtConnected = tigoSrt.enabled && tigoSrt.connected;
-  const tigoSrtEnabled = tigoSrt.enabled;
-  // El botón Tigo se habilita cuando el VPS está listo (TIGO_USE_HDMI=true).
-  // El buffer se construye DESPUÉS de pulsar Emitir, así que no se requiere acá.
-  const tigoSrtCanStart = tigoSrtEnabled;
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
