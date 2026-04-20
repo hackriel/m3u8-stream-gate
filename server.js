@@ -460,10 +460,17 @@ const startTigoHdmiIngest = (process_id) => {
   cleanTigoBufferDir();
   resetTigoSrtMetric(process_id);
 
-  const srtUrl = `srt://0.0.0.0:${TIGO_SRT_PORT}?mode=listener&latency=${TIGO_SRT_LATENCY_US}&pkt_size=1316&streamid=tigo-cr`;
+  // SRT listener: aceptamos cualquier streamid (el caller del Pi5 envía 'tigo-cr',
+  // pero si hay mismatch FFmpeg rechaza el handshake en silencio). También
+  // bajamos la latencia a la mínima recomendada (1000ms) para reducir el ventana
+  // de buffering inicial — si el Pi5 estaba enviando con menos latencia, el
+  // handshake fallaba.
+  const srtUrl = `srt://0.0.0.0:${TIGO_SRT_PORT}?mode=listener&latency=${TIGO_SRT_LATENCY_US}&pkt_size=1316`;
   const args = [
     '-hide_banner',
-    '-loglevel', 'info',
+    // verbose para ver mensajes SRT del handshake en stderr (sin esto, los
+    // errores de "Connection rejected" son silenciosos hasta que muera FFmpeg).
+    '-loglevel', 'verbose',
     '-stats',
     '-fflags', '+genpts+discardcorrupt+nobuffer',
     // Subido x3: el stream MPEG-TS del Pi5 tarda en exponer SPS/PPS,
