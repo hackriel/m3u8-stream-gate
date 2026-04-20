@@ -38,13 +38,17 @@ while true; do
     -f v4l2 -input_format yuyv422 -framerate 30 -video_size 1280x720 -i "$VIDEO_DEV" \
     -thread_queue_size 1024 \
     -f alsa -ac 2 -ar 48000 -i "$AUDIO_DEV" \
+    -map 0:v:0 -map 1:a:0 \
     -c:v libx264 -preset veryfast -tune zerolatency \
     -profile:v main -level 4.0 \
     -b:v 2000k -maxrate 2000k -bufsize 4000k \
     -g 60 -keyint_min 60 -sc_threshold 0 \
+    -x264-params "keyint=60:min-keyint=60:scenecut=0:repeat-headers=1" \
     -pix_fmt yuv420p \
+    -flags +global_header \
     -c:a aac -b:a 128k -ar 48000 -ac 2 \
-    -f mpegts \
+    -f mpegts -mpegts_flags +resend_headers+initial_discontinuity \
+    -muxrate 2400k -pcr_period 20 \
     "srt://${VPS_HOST}:${VPS_PORT}?mode=caller&latency=${LATENCY_US}&pkt_size=1316&streamid=${STREAM_ID}"
 
   EXIT=$?
