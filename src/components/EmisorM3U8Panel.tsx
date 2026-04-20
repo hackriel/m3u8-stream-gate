@@ -334,6 +334,26 @@ export default function EmisorM3U8Panel() {
     }
   }, []);
 
+  useEffect(() => {
+    const canal6Preset = CHANNEL_CONFIGS[CANAL6_URL_INDEX]?.presetUrl;
+    if (!canal6Preset) return;
+
+    setProcesses(prev => {
+      if (prev[CANAL6_URL_INDEX]?.m3u8 === canal6Preset) return prev;
+      const next = [...prev];
+      next[CANAL6_URL_INDEX] = { ...next[CANAL6_URL_INDEX], m3u8: canal6Preset };
+      return next;
+    });
+
+    supabase
+      .from('emission_processes')
+      .update({ m3u8: canal6Preset })
+      .eq('id', CANAL6_URL_INDEX)
+      .then(({ error }) => {
+        if (error) console.error('Error guardando URL oficial de Canal 6:', error);
+      });
+  }, []);
+
 
 
   // Función para actualizar un proceso específico
@@ -635,7 +655,7 @@ export default function EmisorM3U8Panel() {
       
       updateProcess(processIndex, {
         emitStatus: "running",
-        emitMsg: "✅ Emitiendo a RTMP",
+        emitMsg: isHlsOutput ? "✅ Emitiendo HLS" : "✅ Emitiendo a RTMP",
         elapsed: 0,
         startTime: startTimeMs,
         isEmitiendo: true
@@ -925,9 +945,14 @@ export default function EmisorM3U8Panel() {
               </>
             )}
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
-              const hlsSlugs: Record<number, string> = { [FUTV_URL_INDEX]: 'futv' };
+              const hlsSlugs: Record<number, string> = {
+                [FUTV_URL_INDEX]: 'FUTV',
+                [TELETICA_URL_INDEX]: 'Teletica',
+                [TDMAS1_URL_INDEX]: 'Tdmas1',
+                [CANAL6_URL_INDEX]: 'Canal6',
+              };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
-              const hlsUrl = `${window.location.protocol}//${window.location.host}/live/${hlsSlug}/playlist.m3u8`;
+              const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
               return (
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
