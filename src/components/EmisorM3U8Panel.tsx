@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
@@ -60,8 +61,56 @@ interface LogEntry {
   timestamp: number;
   level: "info" | "success" | "warn" | "error";
   message: string;
-  details?: any;
+  details?: unknown;
 }
+
+type EmissionProcessRow = Tables<"emission_processes">;
+
+type EmitStatus = EmissionProcess["emitStatus"];
+
+interface LocalScrapeResponse {
+  success?: boolean;
+  error?: string;
+  url?: string;
+}
+
+interface FileUploadResponse {
+  start_time?: number;
+}
+
+const getErrorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
+
+const mapRowToProcess = (row: EmissionProcessRow): EmissionProcess => {
+  const isRunning = row.emit_status === "running" && Boolean(row.start_time && row.start_time > 0);
+  const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
+  const elapsedSeconds = isRunning && startTimeMs > 0
+    ? Math.floor((Date.now() - startTimeMs) / 1000)
+    : row.elapsed || 0;
+  const loadFailure = isRunning || row.is_emitting;
+
+  return {
+    m3u8: row.m3u8 || "",
+    m3u8Backup: row.m3u8_backup || "",
+    rtmp: row.rtmp || "",
+    previewSuffix: row.preview_suffix || "/video.m3u8",
+    isEmitiendo: row.is_emitting || isRunning,
+    elapsed: elapsedSeconds,
+    startTime: startTimeMs,
+    emitStatus: (row.emit_status as EmitStatus) || "idle",
+    emitMsg: row.emit_msg || "",
+    reconnectAttempts: 0,
+    lastReconnectTime: 0,
+    failureReason: loadFailure ? (row.failure_reason || undefined) : undefined,
+    failureDetails: loadFailure ? (row.failure_details || undefined) : undefined,
+    logs: [],
+    processLogsFromDB: row.process_logs || "",
+    recoveryCount: (isRunning || row.is_emitting) ? (row.recovery_count || 0) : 0,
+    lastSignalDuration: row.last_signal_duration || 0,
+    nightRest: row.night_rest || false,
+    sourceUrl: row.source_url || "",
+  };
+};
 
 // Channel config for scraping
 interface ChannelConfig {
@@ -135,42 +184,7 @@ export default function EmisorM3U8Panel() {
         if (data && data.length > 0) {
           const loadedProcesses: EmissionProcess[] = Array.from({ length: NUM_PROCESSES }, (_, index) => {
             const row = data.find(d => d.id === index);
-            if (row) {
-              const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
-              const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
-              let elapsedSeconds = row.elapsed || 0;
-
-              if (isRunning && startTimeMs > 0) {
-                elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
-              }
-
-              // (Tigo/Evento tabs removed - indices 2, 8, 9 are hidden)
-              // Solo cargar failure state si el proceso está activo
-              const loadFailure = isRunning || row.is_emitting;
-              return {
-                m3u8: row.m3u8 || '',
-                m3u8Backup: (row as any).m3u8_backup || '',
-                rtmp: row.rtmp || '',
-                previewSuffix: row.preview_suffix || '/video.m3u8',
-                isEmitiendo: row.is_emitting || isRunning,
-                elapsed: elapsedSeconds,
-                startTime: startTimeMs,
-                emitStatus: (row.emit_status as "idle" | "starting" | "running" | "stopping" | "error") || "idle",
-                emitMsg: row.emit_msg || '',
-                reconnectAttempts: 0,
-                lastReconnectTime: 0,
-                failureReason: loadFailure ? (row.failure_reason || undefined) : undefined,
-                failureDetails: loadFailure ? (row.failure_details || undefined) : undefined,
-                logs: [],
-                processLogsFromDB: row.process_logs || '',
-                recoveryCount: (isRunning || row.is_emitting) ? ((row as any).recovery_count || 0) : 0,
-                lastSignalDuration: (row as any).last_signal_duration || 0,
-                nightRest: (row as any).night_rest || false,
-                sourceUrl: (row as any).source_url || '',
-              };
-            } else {
-              return defaultProcess();
-            }
+            return row ? mapRowToProcess(row) : defaultProcess();
           });
           setProcesses(loadedProcesses);
           
@@ -229,38 +243,13 @@ export default function EmisorM3U8Panel() {
         (payload) => {
           console.log('🔄 Cambio detectado en base de datos:', payload);
           if (payload.eventType === 'UPDATE') {
-            const row = payload.new as any;
+            const row = payload.new as EmissionProcessRow;
             setProcesses(prev => {
               const newProcesses = [...prev];
               if (row.id >= 0 && row.id < NUM_PROCESSES) {
-                const isRunning = row.emit_status === 'running' && row.start_time && row.start_time > 0;
-                const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
-                let elapsedSeconds = row.elapsed || 0;
-
-                if (isRunning && startTimeMs > 0) {
-                  elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
-                }
-
                 newProcesses[row.id] = {
-                  m3u8: row.m3u8,
-                  m3u8Backup: (row as any).m3u8_backup || '',
-                  rtmp: row.rtmp,
-                  previewSuffix: row.preview_suffix,
-                  isEmitiendo: row.is_emitting || isRunning,
-                  elapsed: elapsedSeconds,
-                  startTime: startTimeMs,
-                  emitStatus: row.emit_status,
-                  emitMsg: row.emit_msg,
-                  reconnectAttempts: 0,
-                  lastReconnectTime: 0,
-                  failureReason: row.failure_reason,
-                  failureDetails: row.failure_details,
+                  ...mapRowToProcess(row),
                   logs: prev[row.id]?.logs || [],
-                  processLogsFromDB: row.process_logs || '',
-                  recoveryCount: row.recovery_count || 0,
-                  lastSignalDuration: (row as any).last_signal_duration || 0,
-                  nightRest: (row as any).night_rest || false,
-                  sourceUrl: (row as any).source_url || '',
                 };
               }
               return newProcesses;
@@ -325,9 +314,10 @@ export default function EmisorM3U8Panel() {
         rtmp: processesRef.current[processIndex].rtmp || ''
       });
       toast.success(`✅ URL ${config.name} extraída correctamente`);
-    } catch (e: any) {
-      console.error(`Error obteniendo URL ${config.name}:`, e);
-      toast.error(`Error obteniendo URL ${config.name}: ${e.message}`);
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, 'Error desconocido');
+      console.error(`Error obteniendo URL ${config.name}:`, error);
+      toast.error(`Error obteniendo URL ${config.name}: ${message}`);
     } finally {
       setFetchingChannel(null);
     }
@@ -362,7 +352,7 @@ export default function EmisorM3U8Panel() {
     ));
     
     if (updates.m3u8 !== undefined || updates.rtmp !== undefined || updates.m3u8Backup !== undefined) {
-      const dataToUpdate: any = {};
+      const dataToUpdate: Partial<Pick<EmissionProcessRow, 'm3u8' | 'rtmp' | 'm3u8_backup'>> = {};
       if (updates.m3u8 !== undefined) dataToUpdate.m3u8 = updates.m3u8;
       if (updates.rtmp !== undefined) dataToUpdate.rtmp = updates.rtmp;
       if (updates.m3u8Backup !== undefined) dataToUpdate.m3u8_backup = updates.m3u8Backup;
@@ -393,7 +383,7 @@ export default function EmisorM3U8Panel() {
         console.log(`✅ Estado de emisión ${index + 1} restaurado, elapsed:`, calculatedElapsed);
       }
     });
-  }, []);
+  }, [processes]);
 
   // Ref para acceder al estado actual de processes sin causar re-renders
   const processesRef = useRef(processes);
@@ -545,7 +535,7 @@ export default function EmisorM3U8Panel() {
         formData.append('target_rtmp', process.rtmp);
         formData.append('process_id', processIndex.toString());
         
-        const resp = await new Promise<any>((resolve, reject) => {
+        const resp = await new Promise<FileUploadResponse>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           
           xhr.upload.addEventListener('progress', (e) => {
@@ -601,10 +591,10 @@ export default function EmisorM3U8Panel() {
           .eq('id', processIndex);
         
         toast.success(`${CHANNEL_CONFIGS[processIndex].name} iniciado con archivos locales`);
-      } catch (e: any) {
-        console.error("Error emitiendo archivos locales:", e);
+       } catch (error: unknown) {
+         console.error("Error emitiendo archivos locales:", error);
         setUploadProgress(0);
-        const errorMsg = e.message || "Error al subir archivos";
+         const errorMsg = getErrorMessage(error, "Error al subir archivos");
         updateProcess(processIndex, {
           emitStatus: "error",
           emitMsg: errorMsg,
@@ -671,15 +661,15 @@ export default function EmisorM3U8Panel() {
         .eq('id', processIndex);
       
       toast.success(`${CHANNEL_CONFIGS[processIndex].name} iniciado`);
-    } catch (e: any) {
-      console.error("Error starting emit:", e);
-      const errorMsg = e.message || "Error al iniciar stream";
+    } catch (error: unknown) {
+      console.error("Error starting emit:", error);
+      const errorMsg = getErrorMessage(error, "Error al iniciar stream");
       updateProcess(processIndex, {
         emitStatus: "error",
         emitMsg: errorMsg,
         isEmitiendo: false,
         failureReason: "server",
-        failureDetails: `Error al iniciar stream M3U8: ${e.message}`
+        failureDetails: `Error al iniciar stream M3U8: ${errorMsg}`
       });
     }
   }
@@ -1038,7 +1028,7 @@ export default function EmisorM3U8Panel() {
                     try {
                       const { error } = await supabase
                         .from('emission_processes')
-                        .update({ night_rest: checked } as any)
+                        .update({ night_rest: checked })
                         .eq('id', processIndex);
                       if (error) throw error;
                       toast.success(`${checked ? '🌙' : '☀️'} Descanso nocturno ${checked ? 'activado' : 'desactivado'} para ${channelConfig.name}`);
