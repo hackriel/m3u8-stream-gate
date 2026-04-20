@@ -2289,15 +2289,22 @@ app.post('/api/emit', async (req, res) => {
       startTigoKeepAlive(process_id, effectiveSourceM3u8, sessionUserAgent);
     }
 
-    // ── Parser de métricas SRT (solo modo HDMI ID 12) ──
+    // ── Parser de métricas SRT + LOG CRUDO (solo modo HDMI ID 12) ──
     // El stderr de FFmpeg con -stats imprime cada ~1s una línea con bitrate y frame.
     // Cuando llega la primera línea con frame > 0 → marcamos `connected = true`.
+    // ADEMÁS: logueamos TODO stderr de Etapa 1 al log del proceso para diagnóstico
+    // de fallos de handshake SRT (que de otra forma serían silenciosos).
     if (isTigoHdmiMode) {
       ffmpegProcess.stderr.on('data', (data) => {
         const text = data.toString();
         for (const line of text.split('\n')) {
-          if (!line) continue;
-          const m = parseFfmpegProgress(line);
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          // Diagnóstico: loguear líneas relevantes (no spam de "frame=")
+          if (!/^frame=|^size=/.test(trimmed)) {
+            sendLog(process_id, 'info', `[ETAPA1-SRT] ${trimmed.substring(0, 220)}`);
+          }
+          const m = parseFfmpegProgress(trimmed);
           if (m.frame !== undefined && m.frame > 0) {
             updateTigoSrtMetric(process_id, {
               connected: true,
@@ -2306,13 +2313,13 @@ app.post('/api/emit', async (req, res) => {
             });
           }
           // Detectar paquetes perdidos en logs SRT (formato: "lost: N")
-          const lostMatch = line.match(/SRT.*lost\s*[:=]\s*(\d+)/i);
+          const lostMatch = trimmed.match(/SRT.*lost\s*[:=]\s*(\d+)/i);
           if (lostMatch) {
             const cur = tigoSrtMetrics.get(String(process_id))?.pktsLost || 0;
             updateTigoSrtMetric(process_id, { pktsLost: cur + parseInt(lostMatch[1], 10) });
           }
           // Detectar reset de conexión SRT
-          if (/Connection (lost|timed out)/i.test(line) || /SRT.*disconnect/i.test(line)) {
+          if (/Connection (lost|timed out)/i.test(trimmed) || /SRT.*disconnect/i.test(trimmed)) {
             updateTigoSrtMetric(process_id, { connected: false });
           }
         }
