@@ -352,7 +352,7 @@ export default function EmisorM3U8Panel() {
     ));
     
     if (updates.m3u8 !== undefined || updates.rtmp !== undefined || updates.m3u8Backup !== undefined) {
-      const dataToUpdate: any = {};
+      const dataToUpdate: Partial<Pick<EmissionProcessRow, 'm3u8' | 'rtmp' | 'm3u8_backup'>> = {};
       if (updates.m3u8 !== undefined) dataToUpdate.m3u8 = updates.m3u8;
       if (updates.rtmp !== undefined) dataToUpdate.rtmp = updates.rtmp;
       if (updates.m3u8Backup !== undefined) dataToUpdate.m3u8_backup = updates.m3u8Backup;
@@ -383,7 +383,7 @@ export default function EmisorM3U8Panel() {
         console.log(`✅ Estado de emisión ${index + 1} restaurado, elapsed:`, calculatedElapsed);
       }
     });
-  }, []);
+  }, [processes]);
 
   // Ref para acceder al estado actual de processes sin causar re-renders
   const processesRef = useRef(processes);
@@ -535,7 +535,7 @@ export default function EmisorM3U8Panel() {
         formData.append('target_rtmp', process.rtmp);
         formData.append('process_id', processIndex.toString());
         
-        const resp = await new Promise<any>((resolve, reject) => {
+        const resp = await new Promise<FileUploadResponse>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           
           xhr.upload.addEventListener('progress', (e) => {
@@ -591,10 +591,10 @@ export default function EmisorM3U8Panel() {
           .eq('id', processIndex);
         
         toast.success(`${CHANNEL_CONFIGS[processIndex].name} iniciado con archivos locales`);
-      } catch (e: any) {
-        console.error("Error emitiendo archivos locales:", e);
+       } catch (error: unknown) {
+         console.error("Error emitiendo archivos locales:", error);
         setUploadProgress(0);
-        const errorMsg = e.message || "Error al subir archivos";
+         const errorMsg = getErrorMessage(error, "Error al subir archivos");
         updateProcess(processIndex, {
           emitStatus: "error",
           emitMsg: errorMsg,
@@ -661,15 +661,15 @@ export default function EmisorM3U8Panel() {
         .eq('id', processIndex);
       
       toast.success(`${CHANNEL_CONFIGS[processIndex].name} iniciado`);
-    } catch (e: any) {
-      console.error("Error starting emit:", e);
-      const errorMsg = e.message || "Error al iniciar stream";
+    } catch (error: unknown) {
+      console.error("Error starting emit:", error);
+      const errorMsg = getErrorMessage(error, "Error al iniciar stream");
       updateProcess(processIndex, {
         emitStatus: "error",
         emitMsg: errorMsg,
         isEmitiendo: false,
         failureReason: "server",
-        failureDetails: `Error al iniciar stream M3U8: ${e.message}`
+        failureDetails: `Error al iniciar stream M3U8: ${errorMsg}`
       });
     }
   }
@@ -1028,7 +1028,7 @@ export default function EmisorM3U8Panel() {
                     try {
                       const { error } = await supabase
                         .from('emission_processes')
-                        .update({ night_rest: checked } as any)
+                        .update({ night_rest: checked })
                         .eq('id', processIndex);
                       if (error) throw error;
                       toast.success(`${checked ? '🌙' : '☀️'} Descanso nocturno ${checked ? 'activado' : 'desactivado'} para ${channelConfig.name}`);
