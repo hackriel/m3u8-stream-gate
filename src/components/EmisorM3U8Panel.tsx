@@ -20,15 +20,18 @@ const NUM_PROCESSES = 16;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
+const TIGO_URL_INDEX = 12;
 const TELETICA_URL_INDEX = 13;
 const TDMAS1_URL_INDEX = 14;
 const CANAL6_URL_INDEX = 15;
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
+const TIGO_OBS_INGEST_URL = "rtmp://167.17.69.116/live/tigo";
+const TIGO_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/tigo";
 
 // Procesos ocultos (Tigo fue descartado por restricciones del CDN/HDCP)
-const HIDDEN_PROCESSES = new Set([2, 8, 9, 12]);
+const HIDDEN_PROCESSES = new Set([2, 8, 9]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -134,7 +137,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV URL", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
-  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 12: TIGO URL (descartado, HDCP)
+  { name: "TIGO URL", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: TIGO_INTERNAL_SOURCE_URL },
   { name: "TELETICA URL", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "TDMAS 1 URL", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "CANAL 6 URL", scrapeFn: null, channelId: null, fetchLabel: "🏛️ Repretel", presetUrl: "https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8" },
