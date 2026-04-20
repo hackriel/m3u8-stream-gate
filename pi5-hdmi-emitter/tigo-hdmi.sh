@@ -7,6 +7,7 @@
 VPS_HOST="${VPS_HOST:-167.17.69.116}"
 VPS_PORT="${VPS_PORT:-9000}"
 LATENCY_MS="${LATENCY_MS:-2000}"
+LATENCY_US="$((LATENCY_MS * 1000))"
 VIDEO_DEV="${VIDEO_DEV:-/dev/video0}"
 AUDIO_DEV="${AUDIO_DEV:-hw:1,0}"
 STREAM_ID="${STREAM_ID:-tigo-cr}"
@@ -44,7 +45,7 @@ while true; do
     -pix_fmt yuv420p \
     -c:a aac -b:a 128k -ar 48000 -ac 2 \
     -f mpegts \
-    "srt://${VPS_HOST}:${VPS_PORT}?mode=caller&latency=${LATENCY_MS}&pkt_size=1316&streamid=${STREAM_ID}"
+    "srt://${VPS_HOST}:${VPS_PORT}?mode=caller&latency=${LATENCY_US}&pkt_size=1316&streamid=${STREAM_ID}"
 
   EXIT=$?
   echo "[$(date -Iseconds)] FFmpeg salió con código $EXIT. Reintentando en 2s..."

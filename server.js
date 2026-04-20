@@ -372,6 +372,7 @@ const TIGO_USE_BUFFER = (process.env.TIGO_USE_BUFFER || 'true').toLowerCase() !=
 const TIGO_USE_HDMI = (process.env.TIGO_USE_HDMI || 'true').toLowerCase() !== 'false';
 const TIGO_SRT_PORT = parseInt(process.env.TIGO_SRT_PORT || '9000', 10);
 const TIGO_SRT_LATENCY_MS = parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10);
+const TIGO_SRT_LATENCY_US = TIGO_SRT_LATENCY_MS * 1000;
 const TIGO_BUFFER_DIR = '/tmp/tigo-buffer-12';
 const TIGO_BUFFER_PLAYLIST = path.join(TIGO_BUFFER_DIR, 'buf.m3u8');
 const TIGO_BUFFER_MIN_SEGMENTS = 3; // HDMI no tiene jitter de CDN, 3 segs = ~30s buffer
@@ -459,7 +460,7 @@ const startTigoHdmiIngest = (process_id) => {
   cleanTigoBufferDir();
   resetTigoSrtMetric(process_id);
 
-  const srtUrl = `srt://0.0.0.0:${TIGO_SRT_PORT}?mode=listener&latency=${TIGO_SRT_LATENCY_MS}&pkt_size=1316&streamid=tigo-cr`;
+  const srtUrl = `srt://0.0.0.0:${TIGO_SRT_PORT}?mode=listener&latency=${TIGO_SRT_LATENCY_US}&pkt_size=1316&streamid=tigo-cr`;
   const args = [
     '-hide_banner',
     '-loglevel', 'info',
