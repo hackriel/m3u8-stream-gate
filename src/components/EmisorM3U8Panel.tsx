@@ -821,7 +821,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "(oculto)" },
       { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
       { bg: "bg-emerald-500", text: "text-emerald-500", stroke: "#10b981", name: "FUTV URL" },
-      { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "TIGO URL" },
+      { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "(oculto)" },
     ];
     return colors[processIndex];
   };
@@ -830,17 +830,9 @@ export default function EmisorM3U8Panel() {
   const renderProcessTab = (processIndex: number) => {
     const process = processes[processIndex];
     const channelConfig = CHANNEL_CONFIGS[processIndex];
-    const isTigoHdmiTab = processIndex === TIGO_URL_INDEX;
-    // Para Tigo HDMI: el botón debe abrir el listener cuando el VPS ya está listo.
-    const tigoCanEmit = isTigoHdmiTab ? tigoSrtCanStart : true;
-    const tigoBlockedReason = isTigoHdmiTab && !tigoCanEmit
-      ? "El VPS HDMI todavía no está listo. Verificá que TIGO_USE_HDMI=true y que el panel superior muestre buffer listo."
-      : "";
 
     return (
       <div className="space-y-6">
-        {processIndex === TIGO_URL_INDEX && <TigoHdmiPanel />}
-        {processIndex === TIGO_URL_INDEX && <ProxyHealthBadge />}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Panel de configuración */}
           <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-5 shadow-lg border border-broadcast-border/50 transition-all duration-300 hover:shadow-xl">
@@ -886,19 +878,6 @@ export default function EmisorM3U8Panel() {
                   </div>
                 )}
               </>
-            ) : isTigoHdmiTab && tigoSrtEnabled ? (
-              // Tigo HDMI: no hay URL ni scraping, la fuente es la Cam Link 4K vía Pi5
-              <div className="mb-4 p-4 rounded-xl bg-card/50 border border-border space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-lg">📡</span>
-                  <span className="font-medium text-foreground">Fuente: HDMI vía Raspberry Pi 5</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  No requiere URL M3U8 ni scraping. La señal entra por la Elgato Cam Link 4K
-                  conectada al Pi5 y llega al VPS por SRT (puerto 9000/UDP). El panel superior
-                  muestra el estado en vivo del enlace.
-                </p>
-              </div>
             ) : (
               // Procesos M3U8 normales
               <>
@@ -938,7 +917,7 @@ export default function EmisorM3U8Panel() {
               </>
             )}
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
-              const hlsSlugs: Record<number, string> = { [FUTV_URL_INDEX]: 'futv', [TIGO_URL_INDEX]: 'Tigo' };
+              const hlsSlugs: Record<number, string> = { [FUTV_URL_INDEX]: 'futv' };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${window.location.protocol}//${window.location.host}/live/${hlsSlug}/playlist.m3u8`;
               return (
