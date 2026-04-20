@@ -50,14 +50,74 @@ else
   ok "Node.js $(node -v) instalado"
 fi
 
-# ── Paso 3: Instalar FFmpeg ──
-echo "🎥 [3/8] Instalando FFmpeg..."
+# ── Paso 3: Instalar FFmpeg + NGINX RTMP ──
+echo "🎥 [3/8] Instalando FFmpeg y NGINX RTMP..."
 if command -v ffmpeg &>/dev/null; then
   ok "FFmpeg ya instalado"
 else
   apt install -y ffmpeg
   ok "FFmpeg instalado"
 fi
+
+apt install -y nginx libnginx-mod-rtmp
+
+mkdir -p /var/www/hls /var/www/hls/tigo
+
+cat > /etc/nginx/nginx.conf << 'EOF'
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+  worker_connections 1024;
+}
+
+rtmp {
+  server {
+    listen 1935;
+    chunk_size 4096;
+
+    application live {
+      live on;
+      record off;
+      allow publish all;
+      allow play all;
+    }
+  }
+}
+
+http {
+  sendfile on;
+  tcp_nopush on;
+  types_hash_max_size 2048;
+  include /etc/nginx/mime.types;
+  default_type application/octet-stream;
+
+  server {
+    listen 8081;
+    server_name _;
+
+    location /stat {
+      rtmp_stat all;
+      rtmp_stat_stylesheet stat.xsl;
+    }
+
+    location /stat.xsl {
+      root /usr/share/nginx/html;
+    }
+
+    location / {
+      return 200 'nginx-rtmp ok';
+      add_header Content-Type text/plain;
+    }
+  }
+}
+EOF
+
+systemctl enable nginx
+systemctl restart nginx
+ok "NGINX RTMP instalado y escuchando en :1935"
 
 # ── Paso 3b: Optimizar TCP keepalive para RTMP ──
 echo "🔧 [3b/8] Configurando TCP keepalive para estabilidad RTMP..."

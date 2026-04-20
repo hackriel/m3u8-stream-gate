@@ -60,6 +60,14 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
+## RTMP ingest para OBS
+
+- El panel web sigue en `:3001`.
+- La entrada RTMP para OBS corre como un servicio separado en `:1935`.
+- Para **TIGO URL**, publica desde OBS a: `rtmp://TU_IP/live/tigo`
+- La salida procesada queda disponible en: `http://TU_IP:3001/live/Tigo/playlist.m3u8`
+- El script `setup-vps.sh` instala también `nginx` + `libnginx-mod-rtmp` para habilitar esa entrada.
+
 ## How can I deploy this project?
 
 Simply open [Lovable](https://lovable.dev/projects/ef78eef3-8ca7-4db2-8aa6-33966fab7a5a) and click on Share -> Publish.
