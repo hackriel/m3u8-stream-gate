@@ -255,9 +255,9 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11', '13', '14', '15']);
+const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
-const HLS_SLUG_MAP = { '11': 'FUTV', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6' };
+const HLS_SLUG_MAP = { '11': 'FUTV', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
@@ -673,7 +673,7 @@ setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
 // Procesos manuales/estables: recovery reutiliza la URL guardada en DB
-const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '15']);
+const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '12', '15']);
 
 // Fuentes estables (watchdogs tolerantes + recovery lento) - canales con CDN fijo
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10', '15']);
