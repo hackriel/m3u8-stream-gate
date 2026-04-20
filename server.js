@@ -476,9 +476,8 @@ const startTigoHdmiIngest = (process_id) => {
     '-map', '0:v:0',
     '-map', '0:a:0',
     '-c', 'copy',
-    // Inyecta SPS/PPS en cada keyframe → la etapa 2 puede arrancar
-    // sin esperar el siguiente IDR del Pi5.
-    '-bsf:v', 'h264_mp4toannexb',
+    // NOTA: NO usar '-bsf:v h264_mp4toannexb' aquí — el stream MPEG-TS del Pi5
+    // ya viene en Annex B, y aplicar el filtro causa fallo fatal silencioso.
     '-f', 'hls',
     '-hls_time', '10',
     '-hls_list_size', '8',
