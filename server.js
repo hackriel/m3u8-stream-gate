@@ -255,9 +255,9 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11', '13', '14', '15']);
+const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
-const HLS_SLUG_MAP = { '11': 'FUTV', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6' };
+const HLS_SLUG_MAP = { '11': 'FUTV', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
@@ -673,7 +673,7 @@ setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
 // Procesos manuales/estables: recovery reutiliza la URL guardada en DB
-const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '15']);
+const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '12', '15']);
 
 // Fuentes estables (watchdogs tolerantes + recovery lento) - canales con CDN fijo
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10', '15']);
@@ -1509,6 +1509,7 @@ app.post('/api/emit', async (req, res) => {
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
+    const isManualObsIngest = process_id === '12';
 
     if (isTigoHdmiProcess && !effectiveSourceM3u8) {
       effectiveSourceM3u8 = `srt://pi5-hdmi:${TIGO_SRT_PORT}`;
@@ -1537,6 +1538,10 @@ app.post('/api/emit', async (req, res) => {
       return res.status(400).json({ 
         error: 'Faltan parámetros requeridos: source_m3u8 y target_rtmp' 
       });
+    }
+
+    if (isManualObsIngest) {
+      effectiveSourceM3u8 = 'rtmp://127.0.0.1/live/tigo';
     }
 
     // ── Refresco de token JIT para procesos con proxy (Tigo: wmsAuthSign dura 60s) ──
@@ -1722,6 +1727,7 @@ app.post('/api/emit', async (req, res) => {
       }
     })();
     const isProxyScrapedSource = PROXY_PROCESSES.has(String(process_id)) && isTeleticaSource;
+    const isRtmpInputSource = String(process_id) === '12';
 
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
@@ -1767,7 +1773,7 @@ app.post('/api/emit', async (req, res) => {
         '-thread_queue_size', '16384'
       );
       sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1 endurecida): max_reload=50, hold=50, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
-    } else if (isManualProcess || isScrapedChannel) {
+    } else if (isManualProcess || isScrapedChannel || isRtmpInputSource) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-max_reload', '1000',
@@ -1964,7 +1970,7 @@ app.post('/api/emit', async (req, res) => {
       } catch (err) {
         sendLog(process_id, 'warn', `⚠️ No se pudo analizar master HLS: ${err.message} — FFmpeg elegirá automáticamente`);
       }
-    } else if (isManualUrlProcess && !isUnivisionLikeSource && !isAkamaiSource) {
+    } else if (isManualUrlProcess && !isUnivisionLikeSource && !isAkamaiSource && !isRtmpInputSource) {
       // Canales manuales con tokens estables: resolver y pinnear URL hija directamente
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
         targetBandwidth: 0,
@@ -2089,7 +2095,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Nombre del proceso para logs
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL' };
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
@@ -2145,7 +2151,7 @@ app.post('/api/emit', async (req, res) => {
     // más abajo interceptamos el spawn para usar startTigoHdmiIngest() en vez
     // de proxychains/CDN.
     const isTigoHdmiMode = String(process_id) === '12' && TIGO_USE_HDMI;
-    const useTigoBuffer = isHlsOutput && String(process_id) === '12' && TIGO_USE_BUFFER && (isProxyScrapedSource || isTigoHdmiMode);
+    const useTigoBuffer = false;
 
     if (useTigoBuffer) {
       // Sobrescribir args de salida: NO transcodear aquí, solo remuxear a HLS local.

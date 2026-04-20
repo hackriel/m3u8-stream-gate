@@ -20,15 +20,18 @@ const NUM_PROCESSES = 16;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
+const TIGO_URL_INDEX = 12;
 const TELETICA_URL_INDEX = 13;
 const TDMAS1_URL_INDEX = 14;
 const CANAL6_URL_INDEX = 15;
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
+const TIGO_OBS_INGEST_URL = "rtmp://167.17.69.116/live/tigo";
+const TIGO_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/tigo";
 
 // Procesos ocultos (Tigo fue descartado por restricciones del CDN/HDCP)
-const HIDDEN_PROCESSES = new Set([2, 8, 9, 12]);
+const HIDDEN_PROCESSES = new Set([2, 8, 9]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -134,7 +137,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV URL", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
-  { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 12: TIGO URL (descartado, HDCP)
+  { name: "TIGO URL", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: TIGO_INTERNAL_SOURCE_URL },
   { name: "TELETICA URL", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "TDMAS 1 URL", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "CANAL 6 URL", scrapeFn: null, channelId: null, fetchLabel: "🏛️ Repretel", presetUrl: "https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8" },
@@ -325,14 +328,36 @@ export default function EmisorM3U8Panel() {
 
   useEffect(() => {
     const canal6Preset = CHANNEL_CONFIGS[CANAL6_URL_INDEX]?.presetUrl;
-    if (!canal6Preset) return;
-
+    const tigoPreset = CHANNEL_CONFIGS[TIGO_URL_INDEX]?.presetUrl;
+    const tigoRtmp = TIGO_OBS_INGEST_URL;
     setProcesses(prev => {
-      if (prev[CANAL6_URL_INDEX]?.m3u8 === canal6Preset) return prev;
+      let changed = false;
       const next = [...prev];
-      next[CANAL6_URL_INDEX] = { ...next[CANAL6_URL_INDEX], m3u8: canal6Preset };
-      return next;
+
+      if (tigoPreset && (next[TIGO_URL_INDEX]?.m3u8 !== tigoPreset || next[TIGO_URL_INDEX]?.rtmp !== tigoRtmp)) {
+        next[TIGO_URL_INDEX] = { ...next[TIGO_URL_INDEX], m3u8: tigoPreset, rtmp: tigoRtmp };
+        changed = true;
+      }
+
+      if (canal6Preset && next[CANAL6_URL_INDEX]?.m3u8 !== canal6Preset) {
+        next[CANAL6_URL_INDEX] = { ...next[CANAL6_URL_INDEX], m3u8: canal6Preset };
+        changed = true;
+      }
+
+      return changed ? next : prev;
     });
+
+    if (tigoPreset) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: tigoPreset, rtmp: tigoRtmp })
+        .eq('id', TIGO_URL_INDEX)
+        .then(({ error }) => {
+          if (error) console.error('Error guardando preset de TIGO URL:', error);
+        });
+    }
+
+    if (!canal6Preset) return;
 
     supabase
       .from('emission_processes')
@@ -940,6 +965,7 @@ export default function EmisorM3U8Panel() {
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
               const hlsSlugs: Record<number, string> = {
                 [FUTV_URL_INDEX]: 'FUTV',
+                [TIGO_URL_INDEX]: 'Tigo',
                 [TELETICA_URL_INDEX]: 'Teletica',
                 [TDMAS1_URL_INDEX]: 'Tdmas1',
                 [CANAL6_URL_INDEX]: 'Canal6',
@@ -950,8 +976,27 @@ export default function EmisorM3U8Panel() {
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
                 <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
-                  {process.isEmitiendo ? (
+                  {processIndex === TIGO_URL_INDEX || process.isEmitiendo ? (
                     <div className="space-y-2">
+                      {processIndex === TIGO_URL_INDEX && (
+                        <>
+                          <p className="text-xs text-muted-foreground">RTMP de entrada para OBS:</p>
+                          <div className="flex items-center gap-2">
+                            <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
+                              {process.rtmp || TIGO_OBS_INGEST_URL}
+                            </code>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(process.rtmp || TIGO_OBS_INGEST_URL);
+                                toast.success('RTMP copiada al portapapeles');
+                              }}
+                              className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
+                            >
+                              📋
+                            </button>
+                          </div>
+                        </>
+                      )}
                       <p className="text-xs text-muted-foreground">Tu URL estable para XUI:</p>
                       <div className="flex items-center gap-2">
                         <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
@@ -968,7 +1013,9 @@ export default function EmisorM3U8Panel() {
                         </button>
                       </div>
                       <p className="text-xs text-muted-foreground mt-2">
-                        💡 Esta URL es fija y no cambia. Agrégala directamente a XUI como source.
+                        {processIndex === TIGO_URL_INDEX
+                          ? '💡 Envía desde OBS a esa RTMP y tus clientes consumirán la HLS fija de abajo.'
+                          : '💡 Esta URL es fija y no cambia. Agrégala directamente a XUI como source.'}
                       </p>
                     </div>
                   ) : (
