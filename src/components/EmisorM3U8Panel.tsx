@@ -971,18 +971,10 @@ export default function EmisorM3U8Panel() {
             <div className="flex gap-3 items-center flex-wrap">
               {!process.isEmitiendo ? (
                 <button
-                  onClick={() => tigoCanEmit && startEmitToRTMP(processIndex)}
-                  disabled={!tigoCanEmit}
-                  title={tigoBlockedReason}
-                  className={`px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl ${
-                    tigoCanEmit
-                      ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
-                      : 'bg-muted text-muted-foreground cursor-not-allowed opacity-60'
-                  }`}
+                  onClick={() => startEmitToRTMP(processIndex)}
+                  className="px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl bg-primary hover:bg-primary/90 text-primary-foreground"
                 >
-                  {isTigoHdmiTab && tigoSrtEnabled
-                    ? (tigoCanEmit ? '📺 Emitir HLS (VPS listo)' : '⏳ Preparando HDMI…')
-                    : HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
+                  {HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
                 </button>
               ) : (
                 <button 
