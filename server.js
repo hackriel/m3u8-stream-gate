@@ -2766,24 +2766,33 @@ app.post('/api/emit', async (req, res) => {
                 // Para procesos con proxy (Tigo): re-scrapear URL vía Pi5 antes de reintentar,
                 // porque el token wmsAuthSign expira en 60s y la URL vieja ya está muerta.
                 if (PROXY_PROCESSES.has(String(process_id)) && CHANNEL_MAP[String(process_id)]) {
-                  const { channelId, channelName } = CHANNEL_MAP[String(process_id)];
-                  sendLog(process_id, 'info', `🔄 RETRY: refrescando URL via Pi5 (token expirado)...`);
-                  const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
-                  if (fresh.url) {
-                    // Cache-buster: forzar a Wowza/Nimble a tratar el master playlist como
-                    // request fresco y NO reutilizar el nimblesessionid de la sesión anterior
-                    // (que quedó invalidado al expirar el token original). Sin esto, los
-                    // sub-playlists (chunks.m3u8) heredan el sessionid muerto → 403 inmediato.
-                    const sep = fresh.url.includes('?') ? '&' : '?';
-                    retrySourceUrl = `${fresh.url}${sep}_t=${Date.now()}`;
-                    scrapeSessionCache.set(String(process_id), {
-                      cookies: fresh.cookies || null,
-                      accessToken: fresh.accessToken || null,
-                      timestamp: Date.now(),
-                    });
-                    sendLog(process_id, 'success', `✅ RETRY: URL fresca obtenida via Pi5 (con cache-buster anti nimblesessionid)`);
+                  // En modo HDMI (Tigo), la URL es siempre srt://pi5-hdmi:9000 y el Pi5
+                  // empuja el stream 24/7. NO debemos re-scrapear ni reemplazar la URL,
+                  // porque eso volvería al flujo legacy de scraping con tokens y rompería
+                  // la ingesta SRT.
+                  const isTigoHdmi = String(process_id) === '12' && TIGO_USE_HDMI;
+                  if (isTigoHdmi) {
+                    sendLog(process_id, 'info', '📡 RETRY HDMI: manteniendo srt://pi5-hdmi:9000 (sin re-scrape)');
                   } else {
-                    sendLog(process_id, 'warn', `⚠️ RETRY: scraping via Pi5 falló (${fresh.error || 'sin URL'}), usando URL guardada`);
+                    const { channelId, channelName } = CHANNEL_MAP[String(process_id)];
+                    sendLog(process_id, 'info', `🔄 RETRY: refrescando URL via Pi5 (token expirado)...`);
+                    const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
+                    if (fresh.url) {
+                      // Cache-buster: forzar a Wowza/Nimble a tratar el master playlist como
+                      // request fresco y NO reutilizar el nimblesessionid de la sesión anterior
+                      // (que quedó invalidado al expirar el token original). Sin esto, los
+                      // sub-playlists (chunks.m3u8) heredan el sessionid muerto → 403 inmediato.
+                      const sep = fresh.url.includes('?') ? '&' : '?';
+                      retrySourceUrl = `${fresh.url}${sep}_t=${Date.now()}`;
+                      scrapeSessionCache.set(String(process_id), {
+                        cookies: fresh.cookies || null,
+                        accessToken: fresh.accessToken || null,
+                        timestamp: Date.now(),
+                      });
+                      sendLog(process_id, 'success', `✅ RETRY: URL fresca obtenida via Pi5 (con cache-buster anti nimblesessionid)`);
+                    } else {
+                      sendLog(process_id, 'warn', `⚠️ RETRY: scraping via Pi5 falló (${fresh.error || 'sin URL'}), usando URL guardada`);
+                    }
                   }
                 }
                 rememberStreamState(process_id, { source_m3u8: retrySourceUrl, target_rtmp: retryTargetRtmp });
