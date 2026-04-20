@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
@@ -60,8 +61,56 @@ interface LogEntry {
   timestamp: number;
   level: "info" | "success" | "warn" | "error";
   message: string;
-  details?: any;
+  details?: unknown;
 }
+
+type EmissionProcessRow = Tables<"emission_processes">;
+
+type EmitStatus = EmissionProcess["emitStatus"];
+
+interface LocalScrapeResponse {
+  success?: boolean;
+  error?: string;
+  url?: string;
+}
+
+interface FileUploadResponse {
+  start_time?: number;
+}
+
+const getErrorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
+
+const mapRowToProcess = (row: EmissionProcessRow): EmissionProcess => {
+  const isRunning = row.emit_status === "running" && Boolean(row.start_time && row.start_time > 0);
+  const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
+  const elapsedSeconds = isRunning && startTimeMs > 0
+    ? Math.floor((Date.now() - startTimeMs) / 1000)
+    : row.elapsed || 0;
+  const loadFailure = isRunning || row.is_emitting;
+
+  return {
+    m3u8: row.m3u8 || "",
+    m3u8Backup: row.m3u8_backup || "",
+    rtmp: row.rtmp || "",
+    previewSuffix: row.preview_suffix || "/video.m3u8",
+    isEmitiendo: row.is_emitting || isRunning,
+    elapsed: elapsedSeconds,
+    startTime: startTimeMs,
+    emitStatus: (row.emit_status as EmitStatus) || "idle",
+    emitMsg: row.emit_msg || "",
+    reconnectAttempts: 0,
+    lastReconnectTime: 0,
+    failureReason: loadFailure ? (row.failure_reason || undefined) : undefined,
+    failureDetails: loadFailure ? (row.failure_details || undefined) : undefined,
+    logs: [],
+    processLogsFromDB: row.process_logs || "",
+    recoveryCount: (isRunning || row.is_emitting) ? (row.recovery_count || 0) : 0,
+    lastSignalDuration: row.last_signal_duration || 0,
+    nightRest: row.night_rest || false,
+    sourceUrl: row.source_url || "",
+  };
+};
 
 // Channel config for scraping
 interface ChannelConfig {
