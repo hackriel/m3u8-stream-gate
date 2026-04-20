@@ -3706,6 +3706,23 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+app.get('/api/rtmp-health', (req, res) => {
+  const socket = net.createConnection({ host: '127.0.0.1', port: 1935 });
+  let settled = false;
+
+  const finish = (payload, status = 200) => {
+    if (settled) return;
+    settled = true;
+    try { socket.destroy(); } catch (_) {}
+    return res.status(status).json(payload);
+  };
+
+  socket.setTimeout(2500);
+  socket.once('connect', () => finish({ healthy: true, host: '127.0.0.1', port: 1935 }));
+  socket.once('timeout', () => finish({ healthy: false, error: 'timeout', host: '127.0.0.1', port: 1935 }, 503));
+  socket.once('error', (error) => finish({ healthy: false, error: error.code || error.message, host: '127.0.0.1', port: 1935 }, 503));
+});
+
 // Endpoint para obtener la URL HLS de un proceso
 app.get('/api/hls-url', (req, res) => {
   const { process_id } = req.query;

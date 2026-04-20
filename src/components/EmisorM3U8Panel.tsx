@@ -927,11 +927,11 @@ export default function EmisorM3U8Panel() {
             ) : (
               // Procesos M3U8 normales
               <>
-                <label className="block text-sm mb-2 text-muted-foreground">URL M3U8 (fuente)</label>
+                <label className="block text-sm mb-2 text-muted-foreground">{processIndex === TIGO_URL_INDEX ? 'Entrada RTMP interna' : 'URL M3U8 (fuente)'}</label>
                 <div className="flex gap-2 mb-4">
                   <input
                     type="url"
-                    placeholder="https://servidor/origen/playlist.m3u8"
+                    placeholder={processIndex === TIGO_URL_INDEX ? 'rtmp://167.17.69.116/live/tigo' : 'https://servidor/origen/playlist.m3u8'}
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
