@@ -773,7 +773,9 @@ export default function EmisorM3U8Panel() {
           <h3 className="text-lg font-medium mb-3 text-accent">📋 Logs en Tiempo Real</h3>
           
           <div 
-            ref={logContainerRefs[processIndex]}
+            ref={(element) => {
+              logContainerRefs.current[processIndex] = element;
+            }}
             className="bg-card/50 border border-border rounded-xl p-4 h-64 overflow-y-auto font-mono text-xs space-y-1 scroll-smooth"
           >
             {/* Logs guardados en DB */}
