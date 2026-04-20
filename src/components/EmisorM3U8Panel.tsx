@@ -590,13 +590,11 @@ export default function EmisorM3U8Panel() {
 
     // Procesos M3U8 -> RTMP o HLS local
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
-    const isTigoHdmiProcess = processIndex === TIGO_URL_INDEX && tigoSrtEnabled;
-    const requiresSourceM3u8 = !isTigoHdmiProcess;
-    if ((requiresSourceM3u8 && !process.m3u8) || (!process.rtmp && !isHlsOutput)) {
+    if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
         emitMsg: isHlsOutput
-          ? (isTigoHdmiProcess ? "VPS HDMI no está listo para iniciar" : "Falta M3U8 (haz clic en Obtener URL)")
+          ? "Falta M3U8 (haz clic en Obtener URL)"
           : "Falta M3U8 o RTMP"
       });
       return;
@@ -616,7 +614,7 @@ export default function EmisorM3U8Panel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          source_m3u8: isTigoHdmiProcess ? `srt://pi5-hdmi:${tigoSrt.listenerPort}` : process.m3u8,
+          source_m3u8: process.m3u8,
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString()
         })
