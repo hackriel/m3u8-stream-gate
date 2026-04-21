@@ -1098,6 +1098,40 @@ const waitForProcessDeath = (proc, timeoutMs = 1500) => {
   });
 };
 
+const isPidAlive = (pid) => {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const killPidIfAlive = async (pid) => {
+  if (!isPidAlive(pid)) return false;
+
+  try { process.kill(pid, 'SIGTERM'); } catch {}
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 3000) {
+    if (!isPidAlive(pid)) return true;
+  }
+
+  try { process.kill(pid, 'SIGKILL'); } catch {}
+
+  const hardKillStartedAt = Date.now();
+  while (Date.now() - hardKillStartedAt < 2000) {
+    if (!isPidAlive(pid)) return true;
+  }
+
+  try {
+    execSync(`kill -9 ${pid}`, { timeout: 2000 });
+  } catch {}
+
+  return !isPidAlive(pid);
+};
+
 const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') => {
   // Verificar si hubo parada manual mientras se esperaba
   if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
