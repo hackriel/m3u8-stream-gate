@@ -4118,7 +4118,7 @@ server.listen(PORT, () => {
   if (supabase) {
     supabase
       .from('emission_processes')
-      .update({ m3u8: 'rtmp://127.0.0.1/live/tigo', rtmp: 'rtmp://167.17.69.116/live/tigo' })
+      .update({ m3u8: 'rtmp://127.0.0.1/live/tigo', rtmp: 'hls-local' })
       .eq('id', 12)
       .then(({ error }) => {
         if (error) console.error('Error fijando preset de TIGO URL al iniciar servidor:', error.message);
