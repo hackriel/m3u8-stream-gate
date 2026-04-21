@@ -4127,6 +4127,27 @@ server.listen(PORT, () => {
   sendLog('system', 'success', `Servidor iniciado en puerto ${PORT}`);
 
   if (supabase) {
+    const seedRows = Array.from({ length: 16 }, (_, id) => ({
+      id,
+      m3u8: '',
+      rtmp: '',
+      preview_suffix: '/video.m3u8',
+      is_emitting: false,
+      active_time: 0,
+      down_time: 0,
+      elapsed: 0,
+      start_time: 0,
+      emit_status: 'idle',
+      emit_msg: '',
+    }));
+
+    supabase
+      .from('emission_processes')
+      .upsert(seedRows, { onConflict: 'id' })
+      .then(({ error }) => {
+        if (error) console.error('Error creando filas base de emission_processes:', error.message);
+      });
+
     supabase
       .from('emission_processes')
       .update({ m3u8: 'rtmp://127.0.0.1/live/tigo', rtmp: 'hls-local' })
