@@ -1108,7 +1108,7 @@ const isPidAlive = (pid) => {
   }
 };
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const sleepForPidKill = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const killPidIfAlive = async (pid) => {
   if (!isPidAlive(pid)) return false;
@@ -1117,7 +1117,7 @@ const killPidIfAlive = async (pid) => {
 
   const startedAt = Date.now();
   while (Date.now() - startedAt < 3000) {
-    await sleep(150);
+    await sleepForPidKill(150);
     if (!isPidAlive(pid)) return true;
   }
 
@@ -1125,7 +1125,7 @@ const killPidIfAlive = async (pid) => {
 
   const hardKillStartedAt = Date.now();
   while (Date.now() - hardKillStartedAt < 2000) {
-    await sleep(150);
+    await sleepForPidKill(150);
     if (!isPidAlive(pid)) return true;
   }
 
