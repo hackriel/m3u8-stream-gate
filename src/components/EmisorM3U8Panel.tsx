@@ -346,7 +346,7 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     const canal6Preset = CHANNEL_CONFIGS[CANAL6_URL_INDEX]?.presetUrl;
     const tigoPreset = CHANNEL_CONFIGS[TIGO_URL_INDEX]?.presetUrl;
-    const tigoRtmp = TIGO_OBS_INGEST_URL;
+    const tigoRtmp = 'hls-local';
     setProcesses(prev => {
       let changed = false;
       const next = [...prev];
@@ -386,28 +386,10 @@ export default function EmisorM3U8Panel() {
   }, []);
 
   useEffect(() => {
-    if (isLoading) return;
-
-    const tigoProcess = processes[TIGO_URL_INDEX];
-    if (!tigoProcess || tigoProcess.isEmitiendo || tigoProcess.emitStatus === 'starting') return;
-
-    const now = Date.now();
-    if (now - lastTigoAutoStartRef.current < 15000) return;
-
-    const timer = setTimeout(() => {
-      lastTigoAutoStartRef.current = Date.now();
-      startEmitToRTMP(TIGO_URL_INDEX).catch((error) => {
-        console.error('Error auto-iniciando TIGO URL:', error);
-      });
-    }, 1200);
-
-    return () => clearTimeout(timer);
-  }, [
-    isLoading,
-    processes[TIGO_URL_INDEX]?.isEmitiendo,
-    processes[TIGO_URL_INDEX]?.emitStatus,
-    processes[TIGO_URL_INDEX]?.m3u8,
-  ]);
+    if (!isLoading) {
+      lastTigoAutoStartRef.current = 0;
+    }
+  }, [isLoading]);
 
 
 
