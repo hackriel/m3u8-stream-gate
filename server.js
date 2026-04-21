@@ -3765,7 +3765,7 @@ app.get('/api/status', (req, res) => {
   
   if (process_id) {
     // Estado de un proceso específico
-    const processData = ffmpegProcesses.get(process_id);
+    const processData = ffmpegProcesses.get(process_id) ?? ffmpegProcesses.get(String(process_id));
     const status = emissionStatuses.get(process_id) || 'idle';
     res.json({
       process_id,
@@ -3776,9 +3776,9 @@ app.get('/api/status', (req, res) => {
   } else {
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i <= 12; i++) {
+    for (let i = 0; i <= 15; i++) {
       const id = i.toString();
-      const processData = ffmpegProcesses.get(id);
+      const processData = ffmpegProcesses.get(id) ?? ffmpegProcesses.get(String(id));
       allStatuses[id] = {
         status: emissionStatuses.get(id) || 'idle',
         process_running: processData && processData.process && !processData.process.killed
