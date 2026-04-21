@@ -737,6 +737,7 @@ const SCRAPED_WATCHDOG_STALL_TIMEOUT = 75000; // Dejar que FFmpeg agote más rei
 const RECOVERY_SCRAPE_ATTEMPTS = 3;
 const RECOVERY_SCRAPE_BACKOFF_MS = 2500;
 const AUTO_INGEST_PROCESSES = new Set(['12']);
+const METRICS_TICK_INTERVAL = 1000;
 const HLS_INPUT_RESILIENCE_ARGS = [
   '-rw_timeout', '5000000', // 5 segundos - reducido de 10s para fallar rápido y no causar stalls de 10s
   '-reconnect', '1',
@@ -850,6 +851,41 @@ setInterval(() => {
     }
   }
 }, WATCHDOG_CHECK_INTERVAL);
+
+setInterval(async () => {
+  if (!supabase) return;
+
+  const runningIds = [];
+  const erroredIds = [];
+
+  for (const [processId, processData] of ffmpegProcesses.entries()) {
+    if (!processData.process || processData.process.killed) continue;
+
+    const status = emissionStatuses.get(processId);
+    if (status === 'running') {
+      runningIds.push(Number(processId));
+    } else if (status === 'error' || status === 'waiting_cdn') {
+      erroredIds.push(Number(processId));
+    }
+  }
+
+  try {
+    await Promise.all([
+      ...runningIds.map((processId) =>
+        supabase.rpc('increment_active_time', { process_id: processId }).catch((err) => {
+          console.error(`Error incrementando active_time para ${processId}:`, err.message);
+        })
+      ),
+      ...erroredIds.map((processId) =>
+        supabase.rpc('increment_down_time', { process_id: processId }).catch((err) => {
+          console.error(`Error incrementando down_time para ${processId}:`, err.message);
+        })
+      ),
+    ]);
+  } catch (err) {
+    console.error('Error en scheduler de métricas:', err.message);
+  }
+}, METRICS_TICK_INTERVAL);
 
 
 // ==================== SCRAPING ON-DEMAND ====================
@@ -1623,9 +1659,11 @@ app.post('/api/emit', async (req, res) => {
             ended_at: new Date().toISOString(),
             emit_status: 'stopped',
             start_time: 0,
-            elapsed: 0
+            elapsed: 0,
+            ffmpeg_pid: null,
           })
           .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', existingProcess.process.pid)
           .eq('is_emitting', true);
       }
     }
@@ -2296,6 +2334,17 @@ app.post('/api/emit', async (req, res) => {
     };
     ffmpegProcesses.set(process_id, processInfo);
 
+    if (supabase) {
+      await supabase
+        .from('emission_processes')
+        .update({
+          ffmpeg_pid: ffmpegProcess.pid,
+          start_time: dbRecord?.start_time || Math.floor(Date.now() / 1000),
+          ended_at: null,
+        })
+        .eq('id', parseInt(process_id));
+    }
+
     // ── Keep-alive del playlist Tigo (Opción B) ──
     // Mantiene caliente la sesión nimblesessionid para evitar que el CDN
     // la marque como idle y rote (causa probable de los reloads ciegos de 2-3s).
@@ -2661,8 +2710,14 @@ app.post('/api/emit', async (req, res) => {
           ended_at: new Date().toISOString(),
           process_logs: `[${new Date().toISOString()}] ${logMessage}${diagInfo}\n`,
           elapsed: runtimeSeconds,
-          start_time: 0
+          start_time: 0,
+          ffmpeg_pid: null,
         };
+
+        if (isManualStop) {
+          updateData.failure_reason = null;
+          updateData.failure_details = null;
+        }
         
         // Guardar failure_reason y failure_details si hubo error (no manual)
         if (!isManualStop) {
@@ -2689,7 +2744,8 @@ app.post('/api/emit', async (req, res) => {
         await supabase
           .from('emission_processes')
           .update(updateData)
-          .eq('id', parseInt(process_id));
+          .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', processInfo?.process?.pid || ffmpegProcess.pid);
       }
       
       emissionStatuses.set(process_id, 'idle');
@@ -3049,9 +3105,9 @@ app.post('/api/emit', async (req, res) => {
               } else {
                 sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} falló: ${emitResp.status}`);
               }
-              autoRecoveryInProgress.set(String(process_id), false);
             } catch (err) {
               sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
+            } finally {
               autoRecoveryInProgress.set(String(process_id), false);
             }
           });
@@ -3078,9 +3134,11 @@ app.post('/api/emit', async (req, res) => {
             failure_details: error.message,
             process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`,
             start_time: 0,
-            elapsed: 0
+            elapsed: 0,
+            ffmpeg_pid: null,
           })
-          .eq('id', parseInt(process_id));
+          .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', ffmpegProcess.pid);
       }
       
       emissionStatuses.set(process_id, 'error');
@@ -3170,9 +3228,11 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
             ended_at: new Date().toISOString(),
             emit_status: 'stopped',
             start_time: 0,
-            elapsed: 0
+            elapsed: 0,
+            ffmpeg_pid: null,
           })
           .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', existingProcess.process.pid)
           .eq('is_emitting', true);
       }
     }
@@ -3293,6 +3353,17 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     };
     ffmpegProcesses.set(process_id, processInfo);
 
+    if (supabase) {
+      await supabase
+        .from('emission_processes')
+        .update({
+          ffmpeg_pid: ffmpegProcess.pid,
+          start_time: dbRecord?.start_time || Math.floor(Date.now() / 1000),
+          ended_at: null,
+        })
+        .eq('id', parseInt(process_id));
+    }
+
     // Manejar salida (reutilizar lógica existente)
     ffmpegProcess.stdout.on('data', (data) => {
       const output = data.toString();
@@ -3377,9 +3448,11 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
             ended_at: new Date().toISOString(),
             process_logs: `[${new Date().toISOString()}] ${logMessage}\n`,
             elapsed: Math.floor(runtime / 1000),
-            start_time: 0
+            start_time: 0,
+            ffmpeg_pid: null,
           })
-          .eq('id', parseInt(process_id));
+          .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', processInfo?.process?.pid || ffmpegProcess.pid);
       }
       
       emissionStatuses.set(process_id, 'idle');
@@ -3403,9 +3476,11 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
             failure_details: error.message,
             process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`,
             start_time: 0,
-            elapsed: 0
+            elapsed: 0,
+            ffmpeg_pid: null,
           })
-          .eq('id', parseInt(process_id));
+          .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', ffmpegProcess.pid);
       }
       
       emissionStatuses.set(process_id, 'error');

@@ -259,13 +259,22 @@ export default function EmisorM3U8Panel() {
                 const mappedProcess = mapRowToProcess(row);
                 const sameLiveSession = Boolean(
                   previousProcess?.isEmitiendo &&
-                  mappedProcess.isEmitiendo &&
                   previousProcess.startTime > 0 &&
-                  previousProcess.startTime === mappedProcess.startTime
+                  row.start_time > 0 &&
+                  previousProcess.startTime === row.start_time * 1000
+                );
+
+                const shouldPreserveLiveSession = Boolean(
+                  sameLiveSession &&
+                  previousProcess.isEmitiendo &&
+                  (!mappedProcess.isEmitiendo || mappedProcess.startTime === 0) &&
+                  (row.emit_status === 'running' || row.emit_status === 'starting')
                 );
 
                 newProcesses[row.id] = {
                   ...mappedProcess,
+                  isEmitiendo: shouldPreserveLiveSession ? true : mappedProcess.isEmitiendo,
+                  startTime: shouldPreserveLiveSession ? previousProcess.startTime : mappedProcess.startTime,
                   elapsed: sameLiveSession ? Math.max(previousProcess.elapsed, mappedProcess.elapsed) : mappedProcess.elapsed,
                   logs: prev[row.id]?.logs || [],
                 };
