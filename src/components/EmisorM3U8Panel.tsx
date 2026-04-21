@@ -375,6 +375,21 @@ export default function EmisorM3U8Panel() {
       });
   }, []);
 
+  useEffect(() => {
+    if (isLoading) return;
+
+    const tigoProcess = processes[TIGO_URL_INDEX];
+    if (!tigoProcess || tigoProcess.isEmitiendo || tigoProcess.emitStatus === 'starting') return;
+
+    const timer = setTimeout(() => {
+      startEmitToRTMP(TIGO_URL_INDEX).catch((error) => {
+        console.error('Error auto-iniciando TIGO URL:', error);
+      });
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [isLoading, processes]);
+
 
 
   // Función para actualizar un proceso específico
@@ -1034,7 +1049,7 @@ export default function EmisorM3U8Panel() {
             )}
 
             <div className="flex gap-3 items-center flex-wrap">
-              {!process.isEmitiendo ? (
+              {processIndex === TIGO_URL_INDEX ? null : !process.isEmitiendo ? (
                 <button
                   onClick={() => startEmitToRTMP(processIndex)}
                   className="px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl bg-primary hover:bg-primary/90 text-primary-foreground"
