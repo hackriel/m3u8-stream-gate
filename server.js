@@ -736,7 +736,7 @@ const SCRAPED_WATCHDOG_START_TIMEOUT = 45000; // TDMax puede tardar más en reen
 const SCRAPED_WATCHDOG_STALL_TIMEOUT = 75000; // Dejar que FFmpeg agote más reintentos internos antes de matar
 const RECOVERY_SCRAPE_ATTEMPTS = 3;
 const RECOVERY_SCRAPE_BACKOFF_MS = 2500;
-const AUTO_INGEST_PROCESSES = new Set(['12']);
+const AUTO_INGEST_PROCESSES = new Set();
 const METRICS_TICK_INTERVAL = 1000;
 const HLS_INPUT_RESILIENCE_ARGS = [
   '-rw_timeout', '5000000', // 5 segundos - reducido de 10s para fallar rápido y no causar stalls de 10s
@@ -3112,6 +3112,17 @@ app.post('/api/emit', async (req, res) => {
               autoRecoveryInProgress.set(String(process_id), false);
             }
           });
+        } else if (String(process_id) === '12') {
+          sendLog(process_id, 'info', '🛑 TIGO URL quedó detenido: usa Emitir cuando OBS vuelva a enviar señal.');
+          if (supabase) {
+            await supabase.from('emission_processes').update({
+              is_active: false,
+              is_emitting: false,
+              emit_status: 'idle',
+              failure_reason: null,
+              failure_details: null,
+            }).eq('id', parseInt(process_id));
+          }
         }
         } // end circuit breaker else
       }
