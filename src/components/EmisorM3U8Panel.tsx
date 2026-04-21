@@ -28,7 +28,7 @@ const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "rtmp://167.17.69.116/live/tigo";
 const TIGO_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/tigo";
 
-// Procesos ocultos (Tigo fue descartado por restricciones del CDN/HDCP)
+// Procesos ocultos legacy
 const HIDDEN_PROCESSES = new Set([2, 8, 9]);
 // Procesos que emiten HLS local (sin RTMP)
 const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX]);
@@ -887,7 +887,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "(oculto)" },
       { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
       { bg: "bg-emerald-500", text: "text-emerald-500", stroke: "#10b981", name: "FUTV URL" },
-      { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "(oculto)" },
+      { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "TIGO URL" },
       { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "TELETICA URL" },
       { bg: "bg-lime-500", text: "text-lime-500", stroke: "#84cc16", name: "TDMAS 1 URL" },
       { bg: "bg-amber-500", text: "text-amber-500", stroke: "#f59e0b", name: "CANAL 6 URL" },
@@ -1046,7 +1046,9 @@ export default function EmisorM3U8Panel() {
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      La URL se generará al iniciar la emisión. Primero obtén la señal y presiona "Emitir HLS".
+                      {processIndex === TIGO_URL_INDEX
+                        ? 'La salida HLS se activa sola cuando OBS entra por la RTMP de Tigo; no requiere botón manual.'
+                        : 'La URL se generará al iniciar la emisión. Primero obtén la señal y presiona "Emitir HLS".'}
                     </p>
                   )}
                 </div>
@@ -1068,7 +1070,11 @@ export default function EmisorM3U8Panel() {
             )}
 
             <div className="flex gap-3 items-center flex-wrap">
-              {processIndex === TIGO_URL_INDEX ? null : !process.isEmitiendo ? (
+              {processIndex === TIGO_URL_INDEX ? (
+                <div className="px-4 py-3 rounded-xl border border-border bg-card/50 text-sm text-muted-foreground">
+                  Escucha automática RTMP → HLS activa
+                </div>
+              ) : !process.isEmitiendo ? (
                 <button
                   onClick={() => startEmitToRTMP(processIndex)}
                   className="px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl bg-primary hover:bg-primary/90 text-primary-foreground"
