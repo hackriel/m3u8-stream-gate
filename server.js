@@ -673,7 +673,7 @@ setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
 // Procesos manuales/estables: recovery reutiliza la URL guardada en DB
-const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '12', '15']);
+const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '15']);
 
 // Fuentes estables (watchdogs tolerantes + recovery lento) - canales con CDN fijo
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10', '15']);
@@ -736,6 +736,7 @@ const SCRAPED_WATCHDOG_START_TIMEOUT = 45000; // TDMax puede tardar más en reen
 const SCRAPED_WATCHDOG_STALL_TIMEOUT = 75000; // Dejar que FFmpeg agote más reintentos internos antes de matar
 const RECOVERY_SCRAPE_ATTEMPTS = 3;
 const RECOVERY_SCRAPE_BACKOFF_MS = 2500;
+const AUTO_INGEST_PROCESSES = new Set(['12']);
 const HLS_INPUT_RESILIENCE_ARGS = [
   '-rw_timeout', '5000000', // 5 segundos - reducido de 10s para fallar rápido y no causar stalls de 10s
   '-reconnect', '1',
@@ -1541,7 +1542,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     if (isManualObsIngest) {
-      effectiveSourceM3u8 = 'rtmp://167.17.69.116/live/tigo';
+      effectiveSourceM3u8 = 'rtmp://127.0.0.1/live/tigo';
     }
 
     // ── Refresco de token JIT para procesos con proxy (Tigo: wmsAuthSign dura 60s) ──
@@ -1684,7 +1685,8 @@ app.post('/api/emit', async (req, res) => {
     const probeSize      = isStableSource ? '2000000' : (isRecovery ? '500000'  : '1500000');
 
     // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
-    const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id));
+    const isRtmpInputSource = isManualObsIngest;
+    const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id)) && !isRtmpInputSource;
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
     let isUnivisionLikeSource = false;
@@ -1727,7 +1729,6 @@ app.post('/api/emit', async (req, res) => {
       }
     })();
     const isProxyScrapedSource = PROXY_PROCESSES.has(String(process_id)) && isTeleticaSource;
-    const isRtmpInputSource = String(process_id) === '12';
 
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
@@ -1773,7 +1774,7 @@ app.post('/api/emit', async (req, res) => {
         '-thread_queue_size', '16384'
       );
       sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1 endurecida): max_reload=50, hold=50, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
-    } else if (isManualProcess || isScrapedChannel || isRtmpInputSource) {
+    } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-max_reload', '1000',
@@ -1873,6 +1874,11 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_on_http_error', '4xx,5xx',
         '-reconnect_delay_max', '15',
       ];
+    } else if (isRtmpInputSource) {
+      effectiveResilienceArgs = [
+        '-rtmp_live', 'live',
+      ];
+      sendLog(process_id, 'info', `🛰️ TIGO URL: entrada RTMP local (sin flags de reconnect HTTP)`);
     } else {
       effectiveResilienceArgs = HLS_INPUT_RESILIENCE_ARGS;
     }
@@ -1902,19 +1908,21 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'info', `🎭 UA rotativo: ${sessionUserAgent.substring(0, 60)}...`);
     }
 
-    const inputArgs = [
-      ...effectiveResilienceArgs,
-      ...extraFfmpegInputArgs,
-      '-user_agent', sessionUserAgent,
-      '-headers', combinedHeaders,
-    ];
+    const inputArgs = isRtmpInputSource
+      ? [...effectiveResilienceArgs]
+      : [
+          ...effectiveResilienceArgs,
+          ...extraFfmpegInputArgs,
+          '-user_agent', sessionUserAgent,
+          '-headers', combinedHeaders,
+        ];
 
     // Para Tigo, FFmpeg ya apunta al proxy local, no necesita resolución de variante
     let inputSourceUrl = effectiveSourceM3u8;
 
     // ── PRE-CHECK DE SALUD EN ARRANQUE INICIAL ──
     // Verificar que la URL principal responda antes de lanzar FFmpeg.
-    if (MANUAL_URL_PROCESSES.has(String(process_id)) && !is_recovery && !isManualObsIngest) {
+    if (isManualProcess && !is_recovery) {
       sendLog(process_id, 'info', `🔍 Pre-check de salud antes de arrancar...`);
       const PRE_CHECK_ATTEMPTS = 3;
       const PRE_CHECK_INTERVAL = 3000;
@@ -1943,7 +1951,7 @@ app.post('/api/emit', async (req, res) => {
     // MEDIATIQUESTREAM (Canal 6): program mapping (tokens expiran, master playlist debe vivir)
     // SCRAPEADOS (TDMax): mantener master playlist vivo (token de 1min necesita renovación del CDN)
     //   pero forzar el programa 720p con -map 0:p:N para evitar cambios de calidad
-    const isManualUrlProcess = MANUAL_URL_PROCESSES.has(String(process_id));
+    const isManualUrlProcess = isManualProcess;
     let hlsProgramIndex = -1; // -1 = sin forzar programa específico
 
     if (isMediatiqueSource) {
@@ -2884,10 +2892,10 @@ app.post('/api/emit', async (req, res) => {
             }
             await autoRecoverChannel(process_id, channelId, channelName);
           });
-        } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
+        } else if (MANUAL_URL_PROCESSES.has(String(process_id)) || AUTO_INGEST_PROCESSES.has(String(process_id))) {
           // Procesos manuales (Disney 7, Disney 8, Canal 6): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
-          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8', '15': 'CANAL 6 URL' };
+          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8', '12': 'TIGO URL', '15': 'CANAL 6 URL' };
           const procLabel = manualLabels[String(process_id)] || 'Manual';
           
           const failureType = detectedErrors.get(process_id);
@@ -2895,7 +2903,7 @@ app.post('/api/emit', async (req, res) => {
           
           // Disney 7 (TUDN): recovery DIRECTO sin pre-checks (fuente super estable)
           // Canal 6 y Disney 8: mantienen pre-check con failover
-          const isDirectRecovery = String(process_id) === '0';
+          const isDirectRecovery = String(process_id) === '0' || AUTO_INGEST_PROCESSES.has(String(process_id));
           
           if (isDirectRecovery) {
             sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Recovery directo...`);
@@ -2942,7 +2950,7 @@ app.post('/api/emit', async (req, res) => {
                 // TUDN es super estable, no necesita health checks, solo relanzar
                 sendLog(procId, 'info', `🚀 ${procLabel}: Relanzando inmediatamente con misma URL...`);
               } else {
-                // ── CANAL 6 / DISNEY 8: PRE-FLIGHT HEALTH CHECK CON FAILOVER ──
+                 // ── CANAL 6 / DISNEY 8: PRE-FLIGHT HEALTH CHECK CON FAILOVER ──
                 const HEALTH_CHECK_INTERVAL = 5000;
                 const HEALTH_CHECK_MAX_ATTEMPTS = 4;
                 
@@ -4030,4 +4038,24 @@ server.listen(PORT, () => {
   console.log(`🔧 Asegúrate de tener FFmpeg instalado y accesible en PATH`);  
   console.log(`📋 WebSocket logs disponibles en: ws://localhost:${PORT}/ws`);
   sendLog('system', 'success', `Servidor iniciado en puerto ${PORT}`);
+
+  setTimeout(async () => {
+    try {
+      const tigoRunning = ffmpegProcesses.get('12');
+      if (tigoRunning?.process && !tigoRunning.process.killed) return;
+
+      sendLog('12', 'info', '🚀 Auto-arranque TIGO URL al iniciar servidor...');
+      await fetch(`http://localhost:${PORT}/api/emit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_m3u8: 'rtmp://127.0.0.1/live/tigo',
+          target_rtmp: 'hls-local',
+          process_id: '12'
+        })
+      });
+    } catch (error) {
+      console.error('Error auto-arrancando TIGO URL:', error);
+    }
+  }, 1500);
 });
