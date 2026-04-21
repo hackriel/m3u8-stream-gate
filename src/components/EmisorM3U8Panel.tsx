@@ -169,6 +169,7 @@ export default function EmisorM3U8Panel() {
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
+  const [clockNow, setClockNow] = useState(() => Date.now());
   const wsRef = useRef<WebSocket | null>(null);
   
   const [processes, setProcesses] = useState<EmissionProcess[]>(
@@ -253,8 +254,18 @@ export default function EmisorM3U8Panel() {
             setProcesses(prev => {
               const newProcesses = [...prev];
               if (row.id >= 0 && row.id < NUM_PROCESSES) {
+                const previousProcess = prev[row.id];
+                const mappedProcess = mapRowToProcess(row);
+                const sameLiveSession = Boolean(
+                  previousProcess?.isEmitiendo &&
+                  mappedProcess.isEmitiendo &&
+                  previousProcess.startTime > 0 &&
+                  previousProcess.startTime === mappedProcess.startTime
+                );
+
                 newProcesses[row.id] = {
-                  ...mapRowToProcess(row),
+                  ...mappedProcess,
+                  elapsed: sameLiveSession ? Math.max(previousProcess.elapsed, mappedProcess.elapsed) : mappedProcess.elapsed,
                   logs: prev[row.id]?.logs || [],
                 };
               }
@@ -270,17 +281,10 @@ export default function EmisorM3U8Panel() {
     };
   }, []);
   
-  // Timer para actualizar elapsed cada segundo desde startTime
+  // Reloj global para recalcular métricas vivas sin depender de escrituras en DB
   useEffect(() => {
     const interval = setInterval(() => {
-      setProcesses(prev => prev.map(p => {
-        // Timer funciona si está emitiendo Y tiene startTime válido, sin importar si es 'starting' o 'running'
-        if (p.isEmitiendo && (p.emitStatus === 'running' || p.emitStatus === 'starting') && p.startTime > 0) {
-          const newElapsed = Math.floor((Date.now() - p.startTime) / 1000);
-          return { ...p, elapsed: newElapsed };
-        }
-        return p;
-      }));
+      setClockNow(Date.now());
     }, 1000);
 
     return () => clearInterval(interval);
