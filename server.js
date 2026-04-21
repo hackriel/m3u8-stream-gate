@@ -4038,4 +4038,24 @@ server.listen(PORT, () => {
   console.log(`🔧 Asegúrate de tener FFmpeg instalado y accesible en PATH`);  
   console.log(`📋 WebSocket logs disponibles en: ws://localhost:${PORT}/ws`);
   sendLog('system', 'success', `Servidor iniciado en puerto ${PORT}`);
+
+  setTimeout(async () => {
+    try {
+      const tigoRunning = ffmpegProcesses.get('12');
+      if (tigoRunning?.process && !tigoRunning.process.killed) return;
+
+      sendLog('12', 'info', '🚀 Auto-arranque TIGO URL al iniciar servidor...');
+      await fetch(`http://localhost:${PORT}/api/emit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_m3u8: 'rtmp://127.0.0.1/live/tigo',
+          target_rtmp: 'hls-local',
+          process_id: '12'
+        })
+      });
+    } catch (error) {
+      console.error('Error auto-arrancando TIGO URL:', error);
+    }
+  }, 1500);
 });

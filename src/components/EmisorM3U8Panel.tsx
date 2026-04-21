@@ -26,7 +26,7 @@ const TDMAS1_URL_INDEX = 14;
 const CANAL6_URL_INDEX = 15;
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "rtmp://167.17.69.116/live/tigo";
-const TIGO_INTERNAL_SOURCE_URL = "rtmp://167.17.69.116/live/tigo";
+const TIGO_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/tigo";
 
 // Procesos ocultos (Tigo fue descartado por restricciones del CDN/HDCP)
 const HIDDEN_PROCESSES = new Set([2, 8, 9]);
@@ -166,6 +166,7 @@ const defaultProcess = (): EmissionProcess => ({
 
 export default function EmisorM3U8Panel() {
   const logContainerRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const lastTigoAutoStartRef = useRef(0);
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
@@ -381,14 +382,23 @@ export default function EmisorM3U8Panel() {
     const tigoProcess = processes[TIGO_URL_INDEX];
     if (!tigoProcess || tigoProcess.isEmitiendo || tigoProcess.emitStatus === 'starting') return;
 
+    const now = Date.now();
+    if (now - lastTigoAutoStartRef.current < 15000) return;
+
     const timer = setTimeout(() => {
+      lastTigoAutoStartRef.current = Date.now();
       startEmitToRTMP(TIGO_URL_INDEX).catch((error) => {
         console.error('Error auto-iniciando TIGO URL:', error);
       });
     }, 1200);
 
     return () => clearTimeout(timer);
-  }, [isLoading, processes]);
+  }, [
+    isLoading,
+    processes[TIGO_URL_INDEX]?.isEmitiendo,
+    processes[TIGO_URL_INDEX]?.emitStatus,
+    processes[TIGO_URL_INDEX]?.m3u8,
+  ]);
 
 
 
@@ -990,11 +1000,11 @@ export default function EmisorM3U8Panel() {
                           <p className="text-xs text-muted-foreground">RTMP de entrada para OBS:</p>
                           <div className="flex items-center gap-2">
                             <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
-                              {process.rtmp || TIGO_OBS_INGEST_URL}
+                              {TIGO_OBS_INGEST_URL}
                             </code>
                             <button
                               onClick={() => {
-                                navigator.clipboard.writeText(process.rtmp || TIGO_OBS_INGEST_URL);
+                                navigator.clipboard.writeText(TIGO_OBS_INGEST_URL);
                                 toast.success('RTMP copiada al portapapeles');
                               }}
                               className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
