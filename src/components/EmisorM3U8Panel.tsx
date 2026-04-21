@@ -167,7 +167,7 @@ const defaultProcess = (): EmissionProcess => ({
 export default function EmisorM3U8Panel() {
   const logContainerRefs = useRef<Array<HTMLDivElement | null>>([]);
   
-  const [activeTab, setActiveTab] = useState("0");
+  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem("emisor-active-tab") || "0");
   const [isLoading, setIsLoading] = useState(true);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const wsRef = useRef<WebSocket | null>(null);
@@ -176,8 +176,55 @@ export default function EmisorM3U8Panel() {
     Array.from({ length: NUM_PROCESSES }, defaultProcess)
   );
 
+  const reconcileWithServerStatus = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/status');
+      if (!resp.ok) return;
+
+      const data = await resp.json();
+      const serverProcesses = data?.processes as Record<string, { status?: string; process_running?: boolean }> | undefined;
+      if (!serverProcesses) return;
+
+      setProcesses(prev => prev.map((process, index) => {
+        const serverState = serverProcesses[index.toString()];
+        if (!serverState) return process;
+
+        const serverRunning = Boolean(serverState.process_running);
+        const serverStatus = (serverState.status as EmitStatus | undefined) || process.emitStatus;
+        const recoveredStartTime = serverRunning && process.startTime > 0 ? process.startTime : process.startTime;
+        const recoveredElapsed = serverRunning && recoveredStartTime > 0
+          ? Math.max(process.elapsed, Math.floor((Date.now() - recoveredStartTime) / 1000))
+          : process.elapsed;
+
+        if (serverRunning === process.isEmitiendo && serverStatus === process.emitStatus) {
+          return serverRunning && recoveredElapsed !== process.elapsed
+            ? { ...process, elapsed: recoveredElapsed }
+            : process;
+        }
+
+        return {
+          ...process,
+          isEmitiendo: serverRunning,
+          emitStatus: serverRunning
+            ? (serverStatus === 'idle' || serverStatus === 'stopped' ? 'running' : serverStatus)
+            : (serverStatus === 'running' ? 'idle' : serverStatus),
+          emitMsg: serverRunning
+            ? (process.emitMsg || '✅ Emitiendo')
+            : (process.emitStatus === 'running' ? '' : process.emitMsg),
+          elapsed: recoveredElapsed,
+        };
+      }));
+    } catch {
+      // Ignorar: la UI ya recibe estado por realtime y DB
+    }
+  }, []);
+
   
   // Cargar datos desde Supabase al montar el componente
+  useEffect(() => {
+    sessionStorage.setItem("emisor-active-tab", activeTab);
+  }, [activeTab]);
+
   useEffect(() => {
     const loadFromDatabase = async () => {
       try {
@@ -235,7 +282,9 @@ export default function EmisorM3U8Panel() {
       }
     };
     
-    loadFromDatabase();
+    loadFromDatabase().finally(() => {
+      void reconcileWithServerStatus();
+    });
     
     // Suscribirse a cambios en tiempo real
     const channel = supabase
@@ -288,7 +337,15 @@ export default function EmisorM3U8Panel() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [reconcileWithServerStatus]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void reconcileWithServerStatus();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [reconcileWithServerStatus]);
   
   // Reloj global para recalcular métricas vivas sin depender de escrituras en DB
   useEffect(() => {
