@@ -1659,9 +1659,11 @@ app.post('/api/emit', async (req, res) => {
             ended_at: new Date().toISOString(),
             emit_status: 'stopped',
             start_time: 0,
-            elapsed: 0
+            elapsed: 0,
+            ffmpeg_pid: null,
           })
           .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', existingProcess.process.pid)
           .eq('is_emitting', true);
       }
     }
@@ -2331,6 +2333,17 @@ app.post('/api/emit', async (req, res) => {
       source_m3u8: effectiveSourceM3u8
     };
     ffmpegProcesses.set(process_id, processInfo);
+
+    if (supabase) {
+      await supabase
+        .from('emission_processes')
+        .update({
+          ffmpeg_pid: ffmpegProcess.pid,
+          start_time: dbRecord?.start_time || Math.floor(Date.now() / 1000),
+          ended_at: null,
+        })
+        .eq('id', parseInt(process_id));
+    }
 
     // ── Keep-alive del playlist Tigo (Opción B) ──
     // Mantiene caliente la sesión nimblesessionid para evitar que el CDN
