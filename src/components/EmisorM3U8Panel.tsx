@@ -1131,7 +1131,7 @@ export default function EmisorM3U8Panel() {
                   <span className="text-sm text-muted-foreground">Estado:</span>
                   <div className="flex items-center gap-2">
                     <span className={`inline-flex h-3 w-3 rounded-full ${process.isEmitiendo ? "bg-status-live" : "bg-status-idle"} ${process.isEmitiendo ? 'animate-pulse' : ''}`}></span>
-                    <span className="font-semibold text-lg">{process.isEmitiendo ? "🔴 Activo" : "⚫ Inactivo"}</span>
+                    <span className="font-semibold text-lg">{process.isEmitiendo ? "🟢 Emitiendo" : "🔴 Caído"}</span>
                   </div>
                 </div>
                 
