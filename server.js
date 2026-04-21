@@ -3228,9 +3228,11 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
             ended_at: new Date().toISOString(),
             emit_status: 'stopped',
             start_time: 0,
-            elapsed: 0
+            elapsed: 0,
+            ffmpeg_pid: null,
           })
           .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', existingProcess.process.pid)
           .eq('is_emitting', true);
       }
     }
@@ -3351,6 +3353,17 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     };
     ffmpegProcesses.set(process_id, processInfo);
 
+    if (supabase) {
+      await supabase
+        .from('emission_processes')
+        .update({
+          ffmpeg_pid: ffmpegProcess.pid,
+          start_time: dbRecord?.start_time || Math.floor(Date.now() / 1000),
+          ended_at: null,
+        })
+        .eq('id', parseInt(process_id));
+    }
+
     // Manejar salida (reutilizar lógica existente)
     ffmpegProcess.stdout.on('data', (data) => {
       const output = data.toString();
@@ -3435,9 +3448,11 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
             ended_at: new Date().toISOString(),
             process_logs: `[${new Date().toISOString()}] ${logMessage}\n`,
             elapsed: Math.floor(runtime / 1000),
-            start_time: 0
+            start_time: 0,
+            ffmpeg_pid: null,
           })
-          .eq('id', parseInt(process_id));
+          .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', processInfo?.process?.pid || ffmpegProcess.pid);
       }
       
       emissionStatuses.set(process_id, 'idle');
@@ -3461,9 +3476,11 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
             failure_details: error.message,
             process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`,
             start_time: 0,
-            elapsed: 0
+            elapsed: 0,
+            ffmpeg_pid: null,
           })
-          .eq('id', parseInt(process_id));
+          .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', ffmpegProcess.pid);
       }
       
       emissionStatuses.set(process_id, 'error');
