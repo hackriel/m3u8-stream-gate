@@ -3559,9 +3559,24 @@ app.post('/api/emit/stop', async (req, res) => {
   try {
     const { process_id: rawProcessId = '0' } = req.body;
     const process_id = String(rawProcessId);
+    const numericProcessId = parseInt(process_id);
     sendLog(process_id, 'info', `Solicitada detención de emisión`);
     
     const processData = ffmpegProcesses.get(process_id) ?? ffmpegProcesses.get(Number(process_id));
+    let persistedPid = null;
+
+    if (supabase && Number.isInteger(numericProcessId)) {
+      const { data: persistedRow } = await supabase
+        .from('emission_processes')
+        .select('ffmpeg_pid, is_emitting')
+        .eq('id', numericProcessId)
+        .maybeSingle();
+
+      if (persistedRow?.ffmpeg_pid && persistedRow.is_emitting) {
+        persistedPid = persistedRow.ffmpeg_pid;
+      }
+    }
+
     if (processData && processData.process && !processData.process.killed) {
       emissionStatuses.set(process_id, 'stopping');
       manualStopProcesses.add(process_id); // Marcar como parada manual para evitar auto-recovery
@@ -3585,7 +3600,7 @@ app.post('/api/emit/stop', async (req, res) => {
             failure_details: null,
             process_logs: `[${new Date().toISOString()}] Emisión detenida manualmente\n`
           })
-          .eq('id', parseInt(process_id));
+          .eq('id', numericProcessId);
       }
       
       // Guardar referencia antes de borrar del mapa
@@ -3638,6 +3653,18 @@ app.post('/api/emit/stop', async (req, res) => {
       // para cancelar cualquier recovery programado (setTimeout pendiente)
       manualStopProcesses.add(process_id);
       manualStopProcesses.add(Number(process_id));
+
+      if (persistedPid) {
+        emissionStatuses.set(process_id, 'stopping');
+        const killedPersistedPid = await killPidIfAlive(persistedPid);
+        sendLog(
+          process_id,
+          killedPersistedPid ? 'success' : 'warn',
+          killedPersistedPid
+            ? `Proceso heredado PID ${persistedPid} detenido tras actualización`
+            : `No se pudo confirmar la detención del PID heredado ${persistedPid}`
+        );
+      }
       
       // Limpiar estado en DB por si quedó marcado como activo
       if (supabase) {
@@ -3650,12 +3677,13 @@ app.post('/api/emit/stop', async (req, res) => {
             ended_at: new Date().toISOString(),
             start_time: 0,
             elapsed: 0,
+            ffmpeg_pid: null,
             recovery_count: 0,
             last_signal_duration: 0,
             failure_reason: null,
             failure_details: null,
           })
-          .eq('id', parseInt(process_id));
+          .eq('id', numericProcessId);
       }
       
       emissionStatuses.set(process_id, 'idle');
