@@ -2699,6 +2699,11 @@ app.post('/api/emit', async (req, res) => {
           elapsed: runtimeSeconds,
           start_time: 0
         };
+
+        if (isManualStop) {
+          updateData.failure_reason = null;
+          updateData.failure_details = null;
+        }
         
         // Guardar failure_reason y failure_details si hubo error (no manual)
         if (!isManualStop) {
@@ -3085,9 +3090,9 @@ app.post('/api/emit', async (req, res) => {
               } else {
                 sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} falló: ${emitResp.status}`);
               }
-              autoRecoveryInProgress.set(String(process_id), false);
             } catch (err) {
               sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel} error: ${err.message}`);
+            } finally {
               autoRecoveryInProgress.set(String(process_id), false);
             }
           });
