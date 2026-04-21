@@ -4114,6 +4114,16 @@ server.listen(PORT, () => {
   console.log(`📋 WebSocket logs disponibles en: ws://localhost:${PORT}/ws`);
   sendLog('system', 'success', `Servidor iniciado en puerto ${PORT}`);
 
+  if (supabase) {
+    supabase
+      .from('emission_processes')
+      .update({ m3u8: 'rtmp://127.0.0.1/live/tigo', rtmp: 'rtmp://167.17.69.116/live/tigo' })
+      .eq('id', 12)
+      .then(({ error }) => {
+        if (error) console.error('Error fijando preset de TIGO URL al iniciar servidor:', error.message);
+      });
+  }
+
   setTimeout(async () => {
     try {
       const tigoRunning = ffmpegProcesses.get('12');
