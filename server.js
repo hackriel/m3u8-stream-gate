@@ -2710,7 +2710,8 @@ app.post('/api/emit', async (req, res) => {
           ended_at: new Date().toISOString(),
           process_logs: `[${new Date().toISOString()}] ${logMessage}${diagInfo}\n`,
           elapsed: runtimeSeconds,
-          start_time: 0
+          start_time: 0,
+          ffmpeg_pid: null,
         };
 
         if (isManualStop) {
@@ -2743,7 +2744,8 @@ app.post('/api/emit', async (req, res) => {
         await supabase
           .from('emission_processes')
           .update(updateData)
-          .eq('id', parseInt(process_id));
+          .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', processInfo?.process?.pid || ffmpegProcess.pid);
       }
       
       emissionStatuses.set(process_id, 'idle');
@@ -3132,9 +3134,11 @@ app.post('/api/emit', async (req, res) => {
             failure_details: error.message,
             process_logs: `[${new Date().toISOString()}] Error crítico: ${error.message}\n`,
             start_time: 0,
-            elapsed: 0
+            elapsed: 0,
+            ffmpeg_pid: null,
           })
-          .eq('id', parseInt(process_id));
+          .eq('id', parseInt(process_id))
+          .eq('ffmpeg_pid', ffmpegProcess.pid);
       }
       
       emissionStatuses.set(process_id, 'error');
