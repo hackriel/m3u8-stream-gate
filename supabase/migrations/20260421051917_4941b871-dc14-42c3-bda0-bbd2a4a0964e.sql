@@ -1,0 +1,2 @@
+ALTER TABLE public.emission_processes DROP CONSTRAINT IF EXISTS emission_processes_id_check;
+ALTER TABLE public.emission_processes ADD CONSTRAINT emission_processes_id_check CHECK (id >= 0 AND id <= 15);
