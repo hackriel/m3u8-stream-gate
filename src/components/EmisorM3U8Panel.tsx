@@ -43,6 +43,7 @@ interface EmissionProcess {
   previewSuffix: string;
   isEmitiendo: boolean;
   elapsed: number;
+  activeTime: number;
   startTime: number;
   emitStatus: "idle" | "starting" | "running" | "stopping" | "stopped" | "error" | "waiting_cdn";
   emitMsg: string;
@@ -92,7 +93,7 @@ const mapRowToProcess = (row: EmissionProcessRow): EmissionProcess => {
   const isRunning = (row.is_emitting || isLiveStatus) && hasStartTime;
   const elapsedSeconds = isRunning
     ? Math.max(0, Math.floor(Date.now() / 1000) - startTimeSeconds)
-    : row.elapsed || 0;
+    : Math.max(row.active_time || 0, row.elapsed || 0);
   const loadFailure = isRunning || row.is_emitting;
 
   return {
@@ -102,6 +103,7 @@ const mapRowToProcess = (row: EmissionProcessRow): EmissionProcess => {
     previewSuffix: row.preview_suffix || "/video.m3u8",
     isEmitiendo: row.is_emitting || isRunning,
     elapsed: elapsedSeconds,
+    activeTime: row.active_time || 0,
     startTime: startTimeMs,
     emitStatus: (row.emit_status as EmitStatus) || "idle",
     emitMsg: row.emit_msg || "",
@@ -153,6 +155,7 @@ const defaultProcess = (): EmissionProcess => ({
   previewSuffix: '/video.m3u8',
   isEmitiendo: false,
   elapsed: 0,
+  activeTime: 0,
   startTime: 0,
   emitStatus: "idle",
   emitMsg: '',
@@ -191,10 +194,12 @@ export default function EmisorM3U8Panel() {
 
         const serverRunning = Boolean(serverState.process_running);
         const serverStatus = (serverState.status as EmitStatus | undefined) || process.emitStatus;
-        const recoveredStartTime = serverRunning && process.startTime > 0 ? process.startTime : process.startTime;
-        const recoveredElapsed = serverRunning && recoveredStartTime > 0
-          ? Math.max(process.elapsed, Math.floor((Date.now() - recoveredStartTime) / 1000))
-          : process.elapsed;
+        const recoveredStartTime = process.startTime;
+        const recoveredElapsed = serverRunning
+          ? recoveredStartTime > 0
+            ? Math.max(process.activeTime, process.elapsed, Math.floor((Date.now() - recoveredStartTime) / 1000))
+            : Math.max(process.activeTime, process.elapsed)
+          : Math.max(process.activeTime, process.elapsed);
 
         if (serverRunning === process.isEmitiendo && serverStatus === process.emitStatus) {
           return serverRunning && recoveredElapsed !== process.elapsed
@@ -235,44 +240,36 @@ export default function EmisorM3U8Panel() {
         
         if (error) throw error;
         
+        const baseRows = Array.from({ length: NUM_PROCESSES }, (_, id) => ({
+          id,
+          m3u8: '',
+          rtmp: '',
+          preview_suffix: '/video.m3u8',
+          is_emitting: false,
+          elapsed: 0,
+          active_time: 0,
+          down_time: 0,
+          start_time: 0,
+          emit_status: 'idle',
+          emit_msg: '',
+        }));
+
         if (data && data.length > 0) {
           const loadedProcesses: EmissionProcess[] = Array.from({ length: NUM_PROCESSES }, (_, index) => {
             const row = data.find(d => d.id === index);
             return row ? mapRowToProcess(row) : defaultProcess();
           });
           setProcesses(loadedProcesses);
-          
-          // Crear filas faltantes en la base de datos
-          for (let i = 0; i < NUM_PROCESSES; i++) {
-            const exists = data.find(d => d.id === i);
-            if (!exists) {
-              await supabase.from('emission_processes').insert({
-                id: i,
-                m3u8: '',
-                rtmp: '',
-                preview_suffix: '/video.m3u8',
-                is_emitting: false,
-                elapsed: 0,
-                start_time: 0,
-                emit_status: 'idle',
-                emit_msg: ''
-              });
-            }
+
+          const existingIds = new Set(data.map(row => row.id));
+          const missingRows = baseRows.filter(row => !existingIds.has(row.id));
+          if (missingRows.length > 0) {
+            const { error: seedError } = await supabase.from('emission_processes').upsert(missingRows, { onConflict: 'id' });
+            if (seedError) throw seedError;
           }
         } else {
-          for (let i = 0; i < NUM_PROCESSES; i++) {
-            await supabase.from('emission_processes').insert({
-              id: i,
-              m3u8: '',
-              rtmp: '',
-              preview_suffix: '/video.m3u8',
-              is_emitting: false,
-              elapsed: 0,
-              start_time: 0,
-              emit_status: 'idle',
-              emit_msg: ''
-            });
-          }
+          const { error: seedError } = await supabase.from('emission_processes').upsert(baseRows, { onConflict: 'id' });
+          if (seedError) throw seedError;
         }
       } catch (error) {
         console.error('Error cargando procesos:', error);
@@ -322,8 +319,11 @@ export default function EmisorM3U8Panel() {
                 newProcesses[row.id] = {
                   ...mappedProcess,
                   isEmitiendo: shouldPreserveLiveSession ? true : mappedProcess.isEmitiendo,
+                  activeTime: Math.max(previousProcess.activeTime, mappedProcess.activeTime),
                   startTime: shouldPreserveLiveSession ? previousProcess.startTime : mappedProcess.startTime,
-                  elapsed: sameLiveSession ? Math.max(previousProcess.elapsed, mappedProcess.elapsed) : mappedProcess.elapsed,
+                  elapsed: sameLiveSession
+                    ? Math.max(previousProcess.activeTime, previousProcess.elapsed, mappedProcess.activeTime, mappedProcess.elapsed)
+                    : Math.max(mappedProcess.activeTime, mappedProcess.elapsed),
                   logs: prev[row.id]?.logs || [],
                 };
               }
