@@ -1677,7 +1677,7 @@ app.post('/api/emit', async (req, res) => {
       const upsertData = {
           id: parseInt(process_id),
           m3u8: effectiveSourceM3u8,
-          rtmp: process_id === '12' ? 'rtmp://167.17.69.116/live/tigo' : (isHlsOutput ? 'hls-local' : target_rtmp),
+          rtmp: isHlsOutput ? 'hls-local' : target_rtmp,
           source_url: effectiveSourceM3u8,
           is_active: true,
           is_emitting: true,
@@ -2989,9 +2989,10 @@ app.post('/api/emit', async (req, res) => {
                 .single();
               
               const sourceUrl = procData?.m3u8;
-              const targetRtmp = procData?.rtmp;
-              
-              const effectiveTarget = targetRtmp || (HLS_OUTPUT_PROCESSES.has(String(process_id)) ? 'hls-local' : '');
+               const targetRtmp = procData?.rtmp;
+               const effectiveTarget = HLS_OUTPUT_PROCESSES.has(String(process_id))
+                 ? 'hls-local'
+                 : (targetRtmp || '');
 
               if (!sourceUrl || !effectiveTarget) {
                 sendLog(procId, 'error', `❌ AUTO-RECOVERY ${procLabel}: No hay M3U8 o destino guardados`);
