@@ -166,7 +166,6 @@ const defaultProcess = (): EmissionProcess => ({
 
 export default function EmisorM3U8Panel() {
   const logContainerRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const lastTigoAutoStartRef = useRef(0);
   
   const [activeTab, setActiveTab] = useState("0");
   const [isLoading, setIsLoading] = useState(true);
@@ -384,14 +383,6 @@ export default function EmisorM3U8Panel() {
         if (error) console.error('Error guardando URL oficial de Canal 6:', error);
       });
   }, []);
-
-  useEffect(() => {
-    if (!isLoading) {
-      lastTigoAutoStartRef.current = 0;
-    }
-  }, [isLoading]);
-
-
 
   // Función para actualizar un proceso específico
   const updateProcess = (index: number, updates: Partial<EmissionProcess>) => {
@@ -1029,7 +1020,7 @@ export default function EmisorM3U8Panel() {
                   ) : (
                     <p className="text-sm text-muted-foreground">
                       {processIndex === TIGO_URL_INDEX
-                        ? 'La salida HLS se activa sola cuando OBS entra por la RTMP de Tigo; no requiere botón manual.'
+                        ? 'Usa Emitir para abrir la salida HLS y Detener cuando cortes OBS para evitar reinicios y ruido en logs.'
                         : 'La URL se generará al iniciar la emisión. Primero obtén la señal y presiona "Emitir HLS".'}
                     </p>
                   )}
@@ -1052,31 +1043,29 @@ export default function EmisorM3U8Panel() {
             )}
 
             <div className="flex gap-3 items-center flex-wrap">
-              {processIndex === TIGO_URL_INDEX ? (
-                <div className="px-4 py-3 rounded-xl border border-border bg-card/50 text-sm text-muted-foreground">
-                  Escucha automática RTMP → HLS activa
-                </div>
-              ) : !process.isEmitiendo ? (
+              {!process.isEmitiendo ? (
                 <button
                   onClick={() => startEmitToRTMP(processIndex)}
                   className="px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl bg-primary hover:bg-primary/90 text-primary-foreground"
                 >
-                  {HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
+                  {processIndex === TIGO_URL_INDEX ? '📺 Emitir' : HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
                 </button>
               ) : (
                 <button 
                   onClick={() => stopEmit(processIndex)} 
                   className="px-6 py-3 rounded-xl bg-warning hover:bg-warning/90 active:scale-[.98] transition-all duration-200 font-medium text-warning-foreground shadow-lg hover:shadow-xl"
                 >
-                  ⏹️ Detener emisión
+                  {processIndex === TIGO_URL_INDEX ? '⏹️ Detener' : '⏹️ Detener emisión'}
                 </button>
               )}
-              <button 
-                onClick={() => onBorrar(processIndex)} 
-                className="px-4 py-3 rounded-xl bg-destructive hover:bg-destructive/90 active:scale-[.98] transition-all duration-200 font-medium text-destructive-foreground shadow-lg hover:shadow-xl"
-              >
-                🗑️ Borrar
-              </button>
+              {processIndex !== TIGO_URL_INDEX && (
+                <button 
+                  onClick={() => onBorrar(processIndex)} 
+                  className="px-4 py-3 rounded-xl bg-destructive hover:bg-destructive/90 active:scale-[.98] transition-all duration-200 font-medium text-destructive-foreground shadow-lg hover:shadow-xl"
+                >
+                  🗑️ Borrar
+                </button>
+              )}
             </div>
 
             {/* Night Rest Toggle */}
