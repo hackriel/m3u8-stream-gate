@@ -737,6 +737,7 @@ const SCRAPED_WATCHDOG_STALL_TIMEOUT = 75000; // Dejar que FFmpeg agote más rei
 const RECOVERY_SCRAPE_ATTEMPTS = 3;
 const RECOVERY_SCRAPE_BACKOFF_MS = 2500;
 const AUTO_INGEST_PROCESSES = new Set(['12']);
+const METRICS_TICK_INTERVAL = 1000;
 const HLS_INPUT_RESILIENCE_ARGS = [
   '-rw_timeout', '5000000', // 5 segundos - reducido de 10s para fallar rápido y no causar stalls de 10s
   '-reconnect', '1',
@@ -850,6 +851,41 @@ setInterval(() => {
     }
   }
 }, WATCHDOG_CHECK_INTERVAL);
+
+setInterval(async () => {
+  if (!supabase) return;
+
+  const runningIds = [];
+  const erroredIds = [];
+
+  for (const [processId, processData] of ffmpegProcesses.entries()) {
+    if (!processData.process || processData.process.killed) continue;
+
+    const status = emissionStatuses.get(processId);
+    if (status === 'running') {
+      runningIds.push(Number(processId));
+    } else if (status === 'error' || status === 'waiting_cdn') {
+      erroredIds.push(Number(processId));
+    }
+  }
+
+  try {
+    await Promise.all([
+      ...runningIds.map((processId) =>
+        supabase.rpc('increment_active_time', { process_id: processId }).catch((err) => {
+          console.error(`Error incrementando active_time para ${processId}:`, err.message);
+        })
+      ),
+      ...erroredIds.map((processId) =>
+        supabase.rpc('increment_down_time', { process_id: processId }).catch((err) => {
+          console.error(`Error incrementando down_time para ${processId}:`, err.message);
+        })
+      ),
+    ]);
+  } catch (err) {
+    console.error('Error en scheduler de métricas:', err.message);
+  }
+}, METRICS_TICK_INTERVAL);
 
 
 // ==================== SCRAPING ON-DEMAND ====================
