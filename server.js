@@ -673,7 +673,7 @@ setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
 // (DIRECT_URL_CHANNELS eliminado — sin uso actual)
 
 // Procesos manuales/estables: recovery reutiliza la URL guardada en DB
-const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '12', '15']);
+const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '15']);
 
 // Fuentes estables (watchdogs tolerantes + recovery lento) - canales con CDN fijo
 const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10', '15']);
@@ -2892,10 +2892,10 @@ app.post('/api/emit', async (req, res) => {
             }
             await autoRecoverChannel(process_id, channelId, channelName);
           });
-        } else if (MANUAL_URL_PROCESSES.has(String(process_id))) {
+        } else if (MANUAL_URL_PROCESSES.has(String(process_id)) || AUTO_INGEST_PROCESSES.has(String(process_id))) {
           // Procesos manuales (Disney 7, Disney 8, Canal 6): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
-          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8', '15': 'CANAL 6 URL' };
+          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8', '12': 'TIGO URL', '15': 'CANAL 6 URL' };
           const procLabel = manualLabels[String(process_id)] || 'Manual';
           
           const failureType = detectedErrors.get(process_id);
@@ -2903,7 +2903,7 @@ app.post('/api/emit', async (req, res) => {
           
           // Disney 7 (TUDN): recovery DIRECTO sin pre-checks (fuente super estable)
           // Canal 6 y Disney 8: mantienen pre-check con failover
-          const isDirectRecovery = String(process_id) === '0';
+          const isDirectRecovery = String(process_id) === '0' || AUTO_INGEST_PROCESSES.has(String(process_id));
           
           if (isDirectRecovery) {
             sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Recovery directo...`);
@@ -2950,7 +2950,7 @@ app.post('/api/emit', async (req, res) => {
                 // TUDN es super estable, no necesita health checks, solo relanzar
                 sendLog(procId, 'info', `🚀 ${procLabel}: Relanzando inmediatamente con misma URL...`);
               } else {
-                // ── CANAL 6 / DISNEY 8: PRE-FLIGHT HEALTH CHECK CON FAILOVER ──
+                 // ── CANAL 6 / DISNEY 8: PRE-FLIGHT HEALTH CHECK CON FAILOVER ──
                 const HEALTH_CHECK_INTERVAL = 5000;
                 const HEALTH_CHECK_MAX_ATTEMPTS = 4;
                 
