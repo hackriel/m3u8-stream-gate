@@ -85,10 +85,13 @@ const getErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
 
 const mapRowToProcess = (row: EmissionProcessRow): EmissionProcess => {
-  const isRunning = row.emit_status === "running" && Boolean(row.start_time && row.start_time > 0);
-  const startTimeMs = row.start_time ? row.start_time * 1000 : 0;
-  const elapsedSeconds = isRunning && startTimeMs > 0
-    ? Math.floor((Date.now() - startTimeMs) / 1000)
+  const isLiveStatus = row.emit_status === "running" || row.emit_status === "starting";
+  const hasStartTime = Boolean(row.start_time && row.start_time > 0);
+  const startTimeSeconds = row.start_time || 0;
+  const startTimeMs = startTimeSeconds > 0 ? startTimeSeconds * 1000 : 0;
+  const isRunning = (row.is_emitting || isLiveStatus) && hasStartTime;
+  const elapsedSeconds = isRunning
+    ? Math.max(0, Math.floor(Date.now() / 1000) - startTimeSeconds)
     : row.elapsed || 0;
   const loadFailure = isRunning || row.is_emitting;
 
@@ -108,7 +111,7 @@ const mapRowToProcess = (row: EmissionProcessRow): EmissionProcess => {
     failureDetails: loadFailure ? (row.failure_details || undefined) : undefined,
     logs: [],
     processLogsFromDB: row.process_logs || "",
-    recoveryCount: (isRunning || row.is_emitting) ? (row.recovery_count || 0) : 0,
+    recoveryCount: row.recovery_count || 0,
     lastSignalDuration: row.last_signal_duration || 0,
     nightRest: row.night_rest || false,
     sourceUrl: row.source_url || "",
@@ -391,24 +394,6 @@ export default function EmisorM3U8Panel() {
         });
     }
   };
-
-  // Restaurar sesiones al cargar
-  useEffect(() => {
-    processes.forEach((process, index) => {
-      if (process.isEmitiendo && process.startTime > 0) {
-        const now = Math.floor(Date.now() / 1000);
-        const calculatedElapsed = now - process.startTime;
-        
-        updateProcess(index, {
-          elapsed: calculatedElapsed > 0 ? calculatedElapsed : 0,
-          emitStatus: "running",
-          emitMsg: "Emisión restaurada desde sesión persistente"
-        });
-        
-        console.log(`✅ Estado de emisión ${index + 1} restaurado, elapsed:`, calculatedElapsed);
-      }
-    });
-  }, [processes]);
 
   // Ref para acceder al estado actual de processes sin causar re-renders
   const processesRef = useRef(processes);
