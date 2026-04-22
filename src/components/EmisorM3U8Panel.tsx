@@ -481,6 +481,10 @@ export default function EmisorM3U8Panel() {
         throw new Error(typeof data?.error === 'string' ? data.error : 'No se pudo actualizar Encendido siempre');
       }
 
+      if (typeof data?.always_on !== 'boolean') {
+        throw new Error('Respuesta inválida del servidor al actualizar Encendido siempre');
+      }
+
       updateProcess(processIndex, { alwaysOn: Boolean(data?.always_on) });
       toast.success(`${checked ? '🔁' : '⏹️'} Encendido siempre ${checked ? 'activado' : 'desactivado'} para ${channelName}`);
     } catch (error) {
