@@ -56,6 +56,7 @@ interface EmissionProcess {
   recoveryCount: number;
   lastSignalDuration: number;
   nightRest: boolean;
+  alwaysOn: boolean;
   sourceUrl?: string;
 }
 
@@ -116,6 +117,7 @@ const mapRowToProcess = (row: EmissionProcessRow): EmissionProcess => {
     recoveryCount: row.recovery_count || 0,
     lastSignalDuration: row.last_signal_duration || 0,
     nightRest: row.night_rest || false,
+    alwaysOn: (row as unknown as { always_on?: boolean }).always_on || false,
     sourceUrl: row.source_url || "",
   };
 };
@@ -165,6 +167,7 @@ const defaultProcess = (): EmissionProcess => ({
   recoveryCount: 0,
   lastSignalDuration: 0,
   nightRest: false,
+  alwaysOn: false,
 });
 
 export default function EmisorM3U8Panel() {
