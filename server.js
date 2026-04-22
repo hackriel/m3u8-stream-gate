@@ -3561,10 +3561,24 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
 // Endpoint para detener emisión
 app.post('/api/emit/stop', async (req, res) => {
   try {
-    const { process_id: rawProcessId = '0' } = req.body;
+    const { process_id: rawProcessId = '0', internal_refresh = false } = req.body;
     const process_id = String(rawProcessId);
     const numericProcessId = parseInt(process_id);
-    sendLog(process_id, 'info', `Solicitada detención de emisión`);
+    sendLog(process_id, 'info', internal_refresh ? `Detención interna (refresh 10h)` : `Solicitada detención de emisión`);
+
+    // Si es un stop manual del usuario, desactivar always_on para que el server
+    // no relance el canal en el próximo arranque contra la voluntad del usuario.
+    if (!internal_refresh && supabase && Number.isInteger(numericProcessId)) {
+      try {
+        await supabase
+          .from('emission_processes')
+          .update({ always_on: false })
+          .eq('id', numericProcessId)
+          .eq('always_on', true);
+      } catch (e) {
+        // no-op
+      }
+    }
     
     const processData = ffmpegProcesses.get(process_id) ?? ffmpegProcesses.get(Number(process_id));
     let persistedPid = null;
