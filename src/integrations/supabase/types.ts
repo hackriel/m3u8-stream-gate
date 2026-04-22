@@ -17,6 +17,7 @@ export type Database = {
       emission_processes: {
         Row: {
           active_time: number
+          always_on: boolean
           created_at: string
           down_time: number
           elapsed: number
@@ -29,6 +30,7 @@ export type Database = {
           id: number
           is_active: boolean
           is_emitting: boolean
+          last_refresh_at: string | null
           last_signal_duration: number
           m3u8: string
           m3u8_backup: string | null
@@ -43,6 +45,7 @@ export type Database = {
         }
         Insert: {
           active_time?: number
+          always_on?: boolean
           created_at?: string
           down_time?: number
           elapsed?: number
@@ -55,6 +58,7 @@ export type Database = {
           id: number
           is_active?: boolean
           is_emitting?: boolean
+          last_refresh_at?: string | null
           last_signal_duration?: number
           m3u8?: string
           m3u8_backup?: string | null
@@ -69,6 +73,7 @@ export type Database = {
         }
         Update: {
           active_time?: number
+          always_on?: boolean
           created_at?: string
           down_time?: number
           elapsed?: number
@@ -81,6 +86,7 @@ export type Database = {
           id?: number
           is_active?: boolean
           is_emitting?: boolean
+          last_refresh_at?: string | null
           last_signal_duration?: number
           m3u8?: string
           m3u8_backup?: string | null

@@ -56,6 +56,7 @@ interface EmissionProcess {
   recoveryCount: number;
   lastSignalDuration: number;
   nightRest: boolean;
+  alwaysOn: boolean;
   sourceUrl?: string;
 }
 
@@ -116,6 +117,7 @@ const mapRowToProcess = (row: EmissionProcessRow): EmissionProcess => {
     recoveryCount: row.recovery_count || 0,
     lastSignalDuration: row.last_signal_duration || 0,
     nightRest: row.night_rest || false,
+    alwaysOn: (row as unknown as { always_on?: boolean }).always_on || false,
     sourceUrl: row.source_url || "",
   };
 };
@@ -165,6 +167,7 @@ const defaultProcess = (): EmissionProcess => ({
   recoveryCount: 0,
   lastSignalDuration: 0,
   nightRest: false,
+  alwaysOn: false,
 });
 
 export default function EmisorM3U8Panel() {
@@ -1148,6 +1151,34 @@ export default function EmisorM3U8Panel() {
                 <div className="flex flex-col">
                   <span className="text-sm font-medium text-foreground">🌙 Descanso nocturno</span>
                   <span className="text-xs text-muted-foreground">Apaga a la 1AM, enciende a las 5AM</span>
+                </div>
+              </div>
+            )}
+
+            {/* Always-On Toggle (excluye TIGO URL que depende de OBS local) */}
+            {processIndex !== FILE_UPLOAD_INDEX && processIndex !== TIGO_URL_INDEX && (
+              <div className="flex items-center gap-3 mt-3 p-3 rounded-xl bg-card/50 border border-primary/30">
+                <Switch
+                  checked={process.alwaysOn}
+                  onCheckedChange={async (checked) => {
+                    updateProcess(processIndex, { alwaysOn: checked });
+                    try {
+                      const resp = await fetch('/api/always-on', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ process_id: processIndex, enabled: checked }),
+                      });
+                      if (!resp.ok) throw new Error(await resp.text());
+                      toast.success(`${checked ? '🔁' : '⏹️'} Encendido siempre ${checked ? 'activado' : 'desactivado'} para ${channelConfig.name}`);
+                    } catch (e) {
+                      toast.error('Error al cambiar Encendido siempre');
+                      updateProcess(processIndex, { alwaysOn: !checked });
+                    }
+                  }}
+                />
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-foreground">🔁 Encendido siempre</span>
+                  <span className="text-xs text-muted-foreground">Auto-relanza tras reinicios y refresca URL cada 10h</span>
                 </div>
               </div>
             )}
