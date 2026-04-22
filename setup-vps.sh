@@ -77,12 +77,30 @@ rtmp {
   server {
     listen 1935;
     chunk_size 4096;
+    # ── Estabilidad RTMP (OBS publishers) ──
+    # timeout: tolera hasta 5 min de "silencio" TCP antes de cortar (default ~60s)
+    timeout 300s;
+    # ping/ping_timeout: keepalive RTMP nativo (detecta OBS muerto sin esperar TCP)
+    ping 30s;
+    ping_timeout 15s;
+    # buflen: buffer interno del servidor (3s = absorbe jitter de red sin cortar)
+    buflen 3000ms;
+    # max_message: permite frames keyframe grandes (1080p alto bitrate)
+    max_message 10M;
 
     application live {
       live on;
       record off;
       allow publish all;
       allow play all;
+      # Cortar publishers que no envían datos por 30s (OBS muerto/red caída)
+      drop_idle_publisher 30s;
+      # Sincronización de timestamps: tolera 300ms de drift sin desconectar
+      sync 300ms;
+      # Cola de mensajes por cliente (default 32, subido para alta tasa de keyframes)
+      publish_notify off;
+      wait_key on;
+      wait_video on;
     }
   }
 }
