@@ -198,10 +198,41 @@ cat > /etc/logrotate.d/${SERVICE_NAME} << EOF
 EOF
 ok "Logrotate configurado (7 días)"
 
-# ── Paso 8: Reinicio diario a las 3 AM ──
-echo "⏰ [8/8] Programando reinicio diario a las 3:00 AM..."
-(crontab -l 2>/dev/null | grep -v "$SERVICE_NAME"; echo "0 3 * * * systemctl restart $SERVICE_NAME") | crontab -
-ok "Cron configurado: reinicio a las 3:00 AM"
+# ── Paso 8: Reinicio diario a las 3 AM + limpieza de chromes zombies ──
+echo "⏰ [8/8] Programando mantenimiento diario a las 3:00 AM..."
+
+# Script de mantenimiento: mata chromes headless huérfanos y reinicia el servicio
+MAINT_SCRIPT="/usr/local/bin/${SERVICE_NAME}-maintenance.sh"
+cat > "$MAINT_SCRIPT" << 'MAINT_EOF'
+#!/bin/bash
+# Mantenimiento diario: limpia procesos chrome/chromium headless zombies
+# y reinicia el servicio m3u8-emitter
+
+LOG="/var/log/m3u8-emitter-maintenance.log"
+echo "===== $(date '+%Y-%m-%d %H:%M:%S') Inicio mantenimiento =====" >> "$LOG"
+
+# Contar chromes antes
+BEFORE=$(pgrep -af 'chrome.*--headless|chromium.*--headless' | wc -l)
+echo "Chromes headless detectados: $BEFORE" >> "$LOG"
+
+if [ "$BEFORE" -gt 0 ]; then
+  # Matar chromes headless huérfanos (no afecta FFmpeg ni Node)
+  pkill -9 -f 'chrome.*--headless' 2>/dev/null || true
+  pkill -9 -f 'chromium.*--headless' 2>/dev/null || true
+  sleep 2
+  AFTER=$(pgrep -af 'chrome.*--headless|chromium.*--headless' | wc -l)
+  echo "Chromes restantes tras limpieza: $AFTER" >> "$LOG"
+fi
+
+# Reiniciar servicio principal
+systemctl restart m3u8-emitter
+echo "Servicio m3u8-emitter reiniciado" >> "$LOG"
+echo "" >> "$LOG"
+MAINT_EOF
+chmod +x "$MAINT_SCRIPT"
+
+(crontab -l 2>/dev/null | grep -v "$SERVICE_NAME"; echo "0 3 * * * $MAINT_SCRIPT") | crontab -
+ok "Cron configurado: 3:00 AM → limpieza chromes zombies + reinicio servicio"
 
 # ── Iniciar servicio ──
 echo ""
