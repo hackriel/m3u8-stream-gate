@@ -4184,6 +4184,42 @@ app.post('/api/night-rest', async (req, res) => {
   }
 });
 
+// Endpoint para toggle always_on ("Encendido siempre")
+app.post('/api/always-on', async (req, res) => {
+  try {
+    const { process_id, enabled } = req.body;
+    if (process_id === undefined || enabled === undefined) {
+      return res.status(400).json({ error: 'Faltan parámetros: process_id, enabled' });
+    }
+    if (!supabase) {
+      return res.status(500).json({ error: 'Base de datos no disponible' });
+    }
+    if (String(process_id) === '12') {
+      return res.status(400).json({ error: 'TIGO URL no admite "Encendido siempre" (depende de OBS local)' });
+    }
+
+    const update = { always_on: !!enabled };
+    if (enabled) {
+      // Inicializar la marca de refresh para que el contador de 10h arranque desde ya
+      update.last_refresh_at = new Date().toISOString();
+    }
+
+    const { error } = await supabase
+      .from('emission_processes')
+      .update(update)
+      .eq('id', Number(process_id));
+
+    if (error) throw error;
+
+    const label = CHANNEL_CONFIGS_SERVER[String(process_id)] || `Proceso ${process_id}`;
+    sendLog(String(process_id), 'info', `${enabled ? '🔁' : '⏹️'} Encendido siempre ${enabled ? 'activado' : 'desactivado'} para ${label}`);
+
+    res.json({ success: true, always_on: !!enabled });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Iniciar el servidor HTTP (que incluye WebSocket)
 server.listen(PORT, () => {
   console.log(`🚀 Servidor HTTP+WebSocket iniciado en puerto ${PORT}`);
