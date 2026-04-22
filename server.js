@@ -4015,8 +4015,10 @@ app.get('/api/metrics', (req, res) => {
 
 // Endpoints /api/proxy-status y /api/tigo-srt-status eliminados (Tigo descartado).
 app.use((req, res, next) => {
-  // Solo servir index.html para rutas que no sean archivos estáticos
-  if (!req.path.includes('.')) {
+  // Solo servir index.html para rutas del frontend.
+  // Nunca interceptar APIs ni WebSocket upgrades, porque eso hace que
+  // endpoints como /api/always-on respondan 200 con HTML en vez de JSON.
+  if (!req.path.startsWith('/api') && !req.path.includes('.') && req.method === 'GET') {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
   } else {
     next();
