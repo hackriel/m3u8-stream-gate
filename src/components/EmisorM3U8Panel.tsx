@@ -1155,6 +1155,34 @@ export default function EmisorM3U8Panel() {
               </div>
             )}
 
+            {/* Always-On Toggle (excluye TIGO URL que depende de OBS local) */}
+            {processIndex !== FILE_UPLOAD_INDEX && processIndex !== TIGO_URL_INDEX && (
+              <div className="flex items-center gap-3 mt-3 p-3 rounded-xl bg-card/50 border border-primary/30">
+                <Switch
+                  checked={process.alwaysOn}
+                  onCheckedChange={async (checked) => {
+                    updateProcess(processIndex, { alwaysOn: checked });
+                    try {
+                      const resp = await fetch('/api/always-on', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ process_id: processIndex, enabled: checked }),
+                      });
+                      if (!resp.ok) throw new Error(await resp.text());
+                      toast.success(`${checked ? '🔁' : '⏹️'} Encendido siempre ${checked ? 'activado' : 'desactivado'} para ${channelConfig.name}`);
+                    } catch (e) {
+                      toast.error('Error al cambiar Encendido siempre');
+                      updateProcess(processIndex, { alwaysOn: !checked });
+                    }
+                  }}
+                />
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-foreground">🔁 Encendido siempre</span>
+                  <span className="text-xs text-muted-foreground">Auto-relanza tras reinicios y refresca URL cada 10h</span>
+                </div>
+              </div>
+            )}
+
             {process.emitStatus !== "idle" && process.emitStatus !== 'error' && (
               <div className={`mt-4 p-3 rounded-xl border ${
                 process.emitStatus === 'running' 
