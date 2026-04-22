@@ -1713,19 +1713,19 @@ app.post('/api/emit', async (req, res) => {
     if (supabase) {
       // Resetear recovery_count y failure state en inicio manual
       const upsertData = {
-          id: parseInt(process_id),
-          m3u8: effectiveSourceM3u8,
-          rtmp: isHlsOutput ? 'hls-local' : target_rtmp,
-          source_url: effectiveSourceM3u8,
-          is_active: true,
-          is_emitting: true,
-          emit_status: 'starting',
-          start_time: Math.floor(Date.now() / 1000),
-          process_logs: `[${new Date().toISOString()}] Iniciando emisión desde M3U8\n`,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          failure_reason: null,
-          failure_details: null,
+        id: parseInt(process_id),
+        m3u8: effectiveSourceM3u8,
+        rtmp: isHlsOutput ? 'hls-local' : target_rtmp,
+        source_url: effectiveSourceM3u8,
+        is_active: true,
+        is_emitting: true,
+        emit_status: 'starting',
+        start_time: Math.floor(Date.now() / 1000),
+        process_logs: `[${new Date().toISOString()}] Iniciando emisión desde M3U8\n`,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        failure_reason: null,
+        failure_details: null,
       };
       // Solo resetear contadores en inicio manual (no en recovery)
       if (!is_recovery) {
@@ -3309,7 +3309,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         process_logs: `[${new Date().toISOString()}] Iniciando emisión desde archivos locales: ${fileNames}\n`,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
-      }, { onConflict: 'id' })
+      }, { onConflict: 'id', ignoreDuplicates: false })
       .select()
       .single()).data : null;
     
@@ -4216,6 +4216,8 @@ app.post('/api/always-on', async (req, res) => {
     if (enabled) {
       // Inicializar la marca de refresh para que el contador de 10h arranque desde ya
       update.last_refresh_at = new Date().toISOString();
+    } else {
+      update.last_refresh_at = null;
     }
 
     const { error } = await supabase
@@ -4228,7 +4230,13 @@ app.post('/api/always-on', async (req, res) => {
     const label = CHANNEL_CONFIGS_SERVER[String(process_id)] || `Proceso ${process_id}`;
     sendLog(String(process_id), 'info', `${enabled ? '🔁' : '⏹️'} Encendido siempre ${enabled ? 'activado' : 'desactivado'} para ${label}`);
 
-    res.json({ success: true, always_on: !!enabled });
+    const { data: updatedRow } = await supabase
+      .from('emission_processes')
+      .select('always_on, last_refresh_at')
+      .eq('id', Number(process_id))
+      .single();
+
+    res.json({ success: true, always_on: Boolean(updatedRow?.always_on), last_refresh_at: updatedRow?.last_refresh_at ?? null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
