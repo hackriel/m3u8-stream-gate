@@ -4193,26 +4193,40 @@ server.listen(PORT, () => {
   sendLog('system', 'success', `Servidor iniciado en puerto ${PORT}`);
 
   if (supabase) {
-    const seedRows = Array.from({ length: 16 }, (_, id) => ({
-      id,
-      m3u8: '',
-      rtmp: '',
-      preview_suffix: '/video.m3u8',
-      is_emitting: false,
-      active_time: 0,
-      down_time: 0,
-      elapsed: 0,
-      start_time: 0,
-      emit_status: 'idle',
-      emit_msg: '',
-    }));
-
-    supabase
-      .from('emission_processes')
-      .upsert(seedRows, { onConflict: 'id' })
-      .then(({ error }) => {
-        if (error) console.error('Error creando filas base de emission_processes:', error.message);
-      });
+    // Crear SOLO las filas que no existen. NUNCA resetear estado de filas existentes
+    // (esto borraba is_emitting/always_on tras cada reinicio del servidor).
+    (async () => {
+      try {
+        const { data: existingRows } = await supabase
+          .from('emission_processes')
+          .select('id');
+        const existingIds = new Set((existingRows || []).map(r => r.id));
+        const missingRows = [];
+        for (let id = 0; id < 16; id++) {
+          if (!existingIds.has(id)) {
+            missingRows.push({
+              id,
+              m3u8: '',
+              rtmp: '',
+              preview_suffix: '/video.m3u8',
+              is_emitting: false,
+              active_time: 0,
+              down_time: 0,
+              elapsed: 0,
+              start_time: 0,
+              emit_status: 'idle',
+              emit_msg: '',
+            });
+          }
+        }
+        if (missingRows.length > 0) {
+          await supabase.from('emission_processes').insert(missingRows);
+          console.log(`✅ Creadas ${missingRows.length} filas faltantes en emission_processes`);
+        }
+      } catch (err) {
+        console.error('Error verificando filas base de emission_processes:', err.message);
+      }
+    })();
 
     supabase
       .from('emission_processes')
@@ -4221,6 +4235,134 @@ server.listen(PORT, () => {
       .then(({ error }) => {
         if (error) console.error('Error fijando preset de TIGO URL al iniciar servidor:', error.message);
       });
+
+    // ====== RECUPERACIÓN AL ARRANCAR: levantar canales con always_on=true ======
+    // Espera 8s para que el servidor esté completamente listo y luego relanza
+    // todas las emisiones marcadas como "Encendido siempre".
+    setTimeout(async () => {
+      try {
+        const { data: alwaysOnRows, error } = await supabase
+          .from('emission_processes')
+          .select('id, source_url, m3u8, rtmp, always_on')
+          .eq('always_on', true);
+
+        if (error || !alwaysOnRows || alwaysOnRows.length === 0) return;
+
+        sendLog('system', 'info', `🔁 Recuperando ${alwaysOnRows.length} emisión(es) con "Encendido siempre"...`);
+
+        for (const row of alwaysOnRows) {
+          const pid = String(row.id);
+          // TIGO URL (12) se autoarranca por su propio path; saltarlo aquí
+          if (pid === '12') continue;
+
+          // Limpiar manualStop por si quedó marcado
+          manualStopProcesses.delete(pid);
+          manualStopProcesses.delete(Number(pid));
+
+          try {
+            if (CHANNEL_MAP[pid]) {
+              // Canales scrapeados: obtener URL fresca
+              const { channelId, channelName } = CHANNEL_MAP[pid];
+              sendLog(pid, 'info', `🔁 Always-on: relanzando ${channelName} con scraping fresco...`);
+              await autoRecoverChannel(pid, channelId, channelName);
+            } else {
+              // Canales manuales (ej. ID 15 CANAL 6 URL): usar última URL guardada
+              const sourceUrl = row.source_url || row.m3u8;
+              const targetRtmp = row.rtmp;
+              if (sourceUrl && targetRtmp) {
+                sendLog(pid, 'info', `🔁 Always-on: relanzando con última URL guardada...`);
+                await fetch(`http://localhost:${PORT}/api/emit`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    source_m3u8: sourceUrl,
+                    target_rtmp: targetRtmp,
+                    process_id: pid,
+                    is_recovery: true,
+                  }),
+                });
+              } else {
+                sendLog(pid, 'warn', `⚠️ Always-on activo pero no hay URL guardada para relanzar`);
+              }
+            }
+            // Pequeño escalonamiento para no saturar
+            await new Promise(r => setTimeout(r, 2500));
+          } catch (e) {
+            sendLog(pid, 'error', `❌ Error relanzando always-on: ${e.message}`);
+          }
+        }
+      } catch (err) {
+        console.error('Error en recuperación always-on al arrancar:', err);
+      }
+    }, 8000);
+
+    // ====== AUTO-REFRESH 10h: reinicia canales always_on con URL fresca cada 10 horas ======
+    const REFRESH_INTERVAL_MS = 10 * 60 * 60 * 1000; // 10 horas
+    setInterval(async () => {
+      try {
+        const { data: rows } = await supabase
+          .from('emission_processes')
+          .select('id, source_url, m3u8, rtmp, always_on, last_refresh_at, is_emitting')
+          .eq('always_on', true);
+        if (!rows) return;
+
+        const now = Date.now();
+        for (const row of rows) {
+          const pid = String(row.id);
+          if (pid === '12') continue; // TIGO URL excluido
+
+          const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
+          if (now - lastRefresh < REFRESH_INTERVAL_MS) continue;
+
+          sendLog(pid, 'info', `⏰ Refresh 10h: reiniciando con URL fresca...`);
+
+          // Marcar refresh ahora para evitar loops si algo falla
+          await supabase
+            .from('emission_processes')
+            .update({ last_refresh_at: new Date().toISOString() })
+            .eq('id', row.id);
+
+          try {
+            // Detener proceso actual limpiamente
+            await fetch(`http://localhost:${PORT}/api/emit/stop`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ process_id: pid, internal_refresh: true }),
+            });
+            await new Promise(r => setTimeout(r, 3000));
+
+            // Limpiar manualStop ya que es un refresh interno, no un stop del usuario
+            manualStopProcesses.delete(pid);
+            manualStopProcesses.delete(Number(pid));
+
+            if (CHANNEL_MAP[pid]) {
+              const { channelId, channelName } = CHANNEL_MAP[pid];
+              await autoRecoverChannel(pid, channelId, channelName);
+            } else {
+              const sourceUrl = row.source_url || row.m3u8;
+              const targetRtmp = row.rtmp;
+              if (sourceUrl && targetRtmp) {
+                await fetch(`http://localhost:${PORT}/api/emit`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    source_m3u8: sourceUrl,
+                    target_rtmp: targetRtmp,
+                    process_id: pid,
+                    is_recovery: true,
+                  }),
+                });
+              }
+            }
+            sendLog(pid, 'success', `✅ Refresh 10h completado`);
+          } catch (e) {
+            sendLog(pid, 'error', `❌ Error en refresh 10h: ${e.message}`);
+          }
+        }
+      } catch (err) {
+        console.error('Error en scheduler refresh 10h:', err);
+      }
+    }, 5 * 60 * 1000); // chequea cada 5 min
   }
 
   setTimeout(async () => {
