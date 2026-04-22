@@ -466,6 +466,30 @@ export default function EmisorM3U8Panel() {
     }
   };
 
+  const toggleAlwaysOn = async (processIndex: number, checked: boolean, channelName: string) => {
+    updateProcess(processIndex, { alwaysOn: checked });
+
+    try {
+      const resp = await fetch('/api/always-on', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ process_id: processIndex, enabled: checked }),
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'No se pudo actualizar Encendido siempre');
+      }
+
+      updateProcess(processIndex, { alwaysOn: Boolean(data?.always_on) });
+      toast.success(`${checked ? '🔁' : '⏹️'} Encendido siempre ${checked ? 'activado' : 'desactivado'} para ${channelName}`);
+    } catch (error) {
+      console.error('Error al cambiar Encendido siempre:', error);
+      toast.error('Error al cambiar Encendido siempre');
+      updateProcess(processIndex, { alwaysOn: !checked });
+    }
+  };
+
   // Ref para acceder al estado actual de processes sin causar re-renders
   const processesRef = useRef(processes);
   
@@ -1128,53 +1152,12 @@ export default function EmisorM3U8Panel() {
               )}
             </div>
 
-            {/* Night Rest Toggle */}
-            {processIndex !== FILE_UPLOAD_INDEX && (
-              <div className="flex items-center gap-3 mt-4 p-3 rounded-xl bg-card/50 border border-border">
-                <Switch
-                  checked={process.nightRest}
-                  onCheckedChange={async (checked) => {
-                    updateProcess(processIndex, { nightRest: checked });
-                    try {
-                      const { error } = await supabase
-                        .from('emission_processes')
-                        .update({ night_rest: checked })
-                        .eq('id', processIndex);
-                      if (error) throw error;
-                      toast.success(`${checked ? '🌙' : '☀️'} Descanso nocturno ${checked ? 'activado' : 'desactivado'} para ${channelConfig.name}`);
-                    } catch (e) {
-                      toast.error('Error al cambiar descanso nocturno');
-                      updateProcess(processIndex, { nightRest: !checked });
-                    }
-                  }}
-                />
-                <div className="flex flex-col">
-                  <span className="text-sm font-medium text-foreground">🌙 Descanso nocturno</span>
-                  <span className="text-xs text-muted-foreground">Apaga a la 1AM, enciende a las 5AM</span>
-                </div>
-              </div>
-            )}
-
             {/* Always-On Toggle (excluye TIGO URL que depende de OBS local) */}
             {processIndex !== FILE_UPLOAD_INDEX && processIndex !== TIGO_URL_INDEX && (
-              <div className="flex items-center gap-3 mt-3 p-3 rounded-xl bg-card/50 border border-primary/30">
+              <div className="flex items-center gap-3 mt-4 p-3 rounded-xl bg-card/50 border border-primary/30">
                 <Switch
                   checked={process.alwaysOn}
-                  onCheckedChange={async (checked) => {
-                    updateProcess(processIndex, { alwaysOn: checked });
-                    try {
-                      const resp = await fetch('/api/always-on', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ process_id: processIndex, enabled: checked }),
-                      });
-                      if (!resp.ok) throw new Error(await resp.text());
-                      toast.success(`${checked ? '🔁' : '⏹️'} Encendido siempre ${checked ? 'activado' : 'desactivado'} para ${channelConfig.name}`);
-                    } catch (e) {
-                      toast.error('Error al cambiar Encendido siempre');
-                      updateProcess(processIndex, { alwaysOn: !checked });
-                    }
-                  }}
+                  onCheckedChange={(checked) => void toggleAlwaysOn(processIndex, checked, channelConfig.name)}
                 />
                 <div className="flex flex-col">
                   <span className="text-sm font-medium text-foreground">🔁 Encendido siempre</span>
