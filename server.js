@@ -1734,7 +1734,8 @@ app.post('/api/emit', async (req, res) => {
       }
       const { data, error: dbError } = await supabase
         .from('emission_processes')
-        .upsert(upsertData, { onConflict: 'id' })
+        .update(upsertData)
+        .eq('id', parseInt(process_id))
         .select()
         .single();
 
@@ -3298,7 +3299,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     
     const dbRecord = supabase ? (await supabase
       .from('emission_processes')
-      .upsert({
+      .update({
         id: parseInt(process_id),
         m3u8: `Archivos: ${fileNames}`,
         rtmp: target_rtmp,
@@ -3309,7 +3310,8 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         process_logs: `[${new Date().toISOString()}] Iniciando emisión desde archivos locales: ${fileNames}\n`,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
-      }, { onConflict: 'id', ignoreDuplicates: false })
+      })
+      .eq('id', parseInt(process_id))
       .select()
       .single()).data : null;
     
