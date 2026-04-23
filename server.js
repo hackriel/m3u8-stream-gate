@@ -4401,7 +4401,7 @@ server.listen(PORT, () => {
         const now = Date.now();
         for (const row of rows) {
           const pid = String(row.id);
-          if (pid === '12' || pid === '16') continue; // URLs locales (OBS) excluidas
+          if (pid === '12' || pid === '16' || pid === '17') continue; // URLs locales (OBS) y FUTV ALTERNO excluidas
 
           // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
