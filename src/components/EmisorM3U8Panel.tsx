@@ -1114,7 +1114,39 @@ export default function EmisorM3U8Panel() {
             ) : (
               // Procesos M3U8 normales
               <>
-                <label className="block text-sm mb-2 text-muted-foreground">{OBS_INGEST_PROCESSES.has(processIndex) ? 'Entrada RTMP interna' : 'URL M3U8 (fuente)'}</label>
+                <label className="block text-sm mb-2 text-muted-foreground">
+                  {OBS_INGEST_PROCESSES.has(processIndex)
+                    ? 'Entrada RTMP interna'
+                    : PASTE_URL_PROCESSES.has(processIndex)
+                      ? 'URL del player TDMax (pega aquí)'
+                      : 'URL M3U8 (fuente)'}
+                </label>
+                {PASTE_URL_PROCESSES.has(processIndex) && (
+                  <div className="flex gap-2 mb-2">
+                    <input
+                      type="url"
+                      placeholder="https://www.app.tdmax.com/player?id=XXXXX&type=channel"
+                      value={pasteUrls[processIndex] || ''}
+                      onChange={(e) => setPasteUrls(prev => ({ ...prev, [processIndex]: e.target.value }))}
+                      className="flex-1 bg-card border-2 border-amber-400/40 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400/50 transition-all duration-200"
+                    />
+                    <button
+                      onClick={() => fetchPastedChannelUrl(processIndex)}
+                      disabled={fetchingChannel !== null || !(pasteUrls[processIndex] || '').trim()}
+                      className="px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-500/90 active:scale-[.98] transition-all duration-200 font-medium text-amber-50 shadow-lg disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
+                      title="Extraer M3U8 de la URL del player"
+                    >
+                      {fetchingChannel === processIndex ? (
+                        <span className="flex items-center gap-2">
+                          <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-amber-50" />
+                          Extrayendo...
+                        </span>
+                      ) : (
+                        '🔄 Extraer'
+                      )}
+                    </button>
+                  </div>
+                )}
                 <div className="flex gap-2 mb-4">
                   <input
                     type="url"
@@ -1123,18 +1155,23 @@ export default function EmisorM3U8Panel() {
                         ? TIGO_OBS_INGEST_URL
                         : processIndex === DISNEY7_URL_INDEX
                           ? DISNEY7_OBS_INGEST_URL
-                          : 'https://servidor/origen/playlist.m3u8'
+                          : PASTE_URL_PROCESSES.has(processIndex)
+                            ? 'M3U8 extraído (auto-completado)'
+                            : 'https://servidor/origen/playlist.m3u8'
                     }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
+                    readOnly={PASTE_URL_PROCESSES.has(processIndex)}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
                         ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.4)]'
-                        : 'border-border'
+                        : PASTE_URL_PROCESSES.has(processIndex)
+                          ? 'border-border bg-muted/40'
+                          : 'border-border'
                     }`}
                   />
-                  {channelConfig.scrapeFn && (
+                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && (
                     <button
                       onClick={() => fetchChannelUrl(processIndex)}
                       disabled={fetchingChannel !== null}
