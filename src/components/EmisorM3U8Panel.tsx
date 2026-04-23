@@ -373,7 +373,55 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
+  // URL pegada por el usuario para canales tipo FUTV ALTERNO (eventuales)
+  const [pasteUrls, setPasteUrls] = useState<Record<number, string>>({});
   const { metricsHistory, latestMetrics } = useServerMetrics();
+
+  // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
+  // https://www.app.tdmax.com/player?id=689b81b08f08c8be77f8eb43&type=channel
+  const extractTdmaxChannelId = (raw: string): string | null => {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    // Acepta también un id "pelado" (24 hex chars de Mongo)
+    if (/^[a-f0-9]{24}$/i.test(trimmed)) return trimmed;
+    try {
+      const u = new URL(trimmed);
+      const id = u.searchParams.get('id');
+      if (id && /^[a-f0-9]{24}$/i.test(id)) return id;
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Scraping para FUTV ALTERNO: el channel_id viene de la URL pegada.
+  const fetchPastedChannelUrl = useCallback(async (processIndex: number) => {
+    const pasted = (pasteUrls[processIndex] || '').trim();
+    const channelId = extractTdmaxChannelId(pasted);
+    if (!channelId) {
+      toast.error('URL inválida. Pega una URL tipo https://www.app.tdmax.com/player?id=XXXX&type=channel');
+      return;
+    }
+
+    setFetchingChannel(processIndex);
+    try {
+      const resp = await fetch('/api/local-scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_id: channelId, process_id: processIndex }),
+      });
+      const data = await resp.json();
+      if (!data?.success) throw new Error(data?.error || 'Error desconocido');
+      const streamUrl = data.url;
+      updateProcess(processIndex, { m3u8: streamUrl, rtmp: 'hls-local' });
+      toast.success(`✅ URL alterna extraída (${channelId.substring(0, 8)}…)`);
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, 'Error desconocido');
+      toast.error(`Error obteniendo URL alterna: ${message}`);
+    } finally {
+      setFetchingChannel(null);
+    }
+  }, [pasteUrls]);
 
   // Función genérica para obtener URL de un canal automáticamente
   // Usa scraping LOCAL del VPS para que el token se genere con la IP correcta
