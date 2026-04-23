@@ -883,8 +883,8 @@ setInterval(() => {
     // En modo HDMI (Tigo): el flujo es Etapa 1 (SRT→HLS buffer) + espera ≥3 segs
     // (~30s) + Etapa 2 (transcoder que emite "frame="). 90s da margen para todo.
     const isTigoHdmiProcess = String(processId) === '12' && TIGO_USE_HDMI;
-    const isDisney7SrtProcess = String(processId) === '16';
-    const startTimeout = isTigoHdmiProcess || isDisney7SrtProcess
+    const isSrtIngestProc = isSrtIngestProcess(processId);
+    const startTimeout = isTigoHdmiProcess || isSrtIngestProc
       ? 120000 // 120s: OBS puede tardar en conectar (handshake SRT + buffer 30s + ETAPA 2)
       : isUnivisionProcess
       ? 90000  // 90s para Univision (CDN lento con datacenter IPs)
@@ -1701,26 +1701,28 @@ app.post('/api/emit', async (req, res) => {
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
-    const isManualObsIngest = process_id === '12' || process_id === '16';
-    // Disney 7 SRT: si el caller no provee source_m3u8 (o lo marca como srt://obs),
-    // arrancamos un listener SRT que recibe de OBS en el puerto 9001.
-    const isDisney7SrtIngest = process_id === '16' && (
+    // SRT ingest: si el caller no provee source_m3u8 (o lo marca como srt://obs),
+    // arrancamos un listener SRT que recibe de OBS en el puerto del proceso.
+    const isSrtIngest = isSrtIngestProcess(process_id) && (
       !source_m3u8 ||
       String(source_m3u8).startsWith('srt://obs') ||
       String(source_m3u8).startsWith('srt://0.0.0.0')
     );
+    // Procesos manuales OBS = todos los SRT ingest (12, 16, 18).
+    const isManualObsIngest = isSrtIngestProcess(process_id);
 
     if (isTigoHdmiProcess && !effectiveSourceM3u8) {
       effectiveSourceM3u8 = `srt://pi5-hdmi:${TIGO_SRT_PORT}`;
     }
-    if (isDisney7SrtIngest && !effectiveSourceM3u8) {
-      effectiveSourceM3u8 = `srt://obs:${DISNEY7_SRT_PORT}`;
+    if (isSrtIngest && !effectiveSourceM3u8) {
+      const cfg = getSrtConfig(process_id);
+      effectiveSourceM3u8 = `srt://obs:${cfg.port}`;
     }
 
-    // Validación de ID: debe ser un número entre 0 y 16
-    if (isNaN(numericId) || numericId < 0 || numericId > 17) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-17)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 17` });
+    // Validación de ID: debe ser un número entre 0 y 18
+    if (isNaN(numericId) || numericId < 0 || numericId > 18) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-18)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 18` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -1735,18 +1737,15 @@ app.post('/api/emit', async (req, res) => {
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
 
     // Validaciones
-    if ((!isTigoHdmiProcess && !isDisney7SrtIngest && !effectiveSourceM3u8) || (!target_rtmp && !isHlsOutput)) {
+    if ((!isTigoHdmiProcess && !isSrtIngest && !effectiveSourceM3u8) || (!target_rtmp && !isHlsOutput)) {
       sendLog(process_id, 'error', 'Faltan parámetros requeridos: source_m3u8 y target_rtmp');
       return res.status(400).json({ 
         error: 'Faltan parámetros requeridos: source_m3u8 y target_rtmp' 
       });
     }
 
-    if (isManualObsIngest && !isDisney7SrtIngest) {
-      effectiveSourceM3u8 = process_id === '16'
-        ? 'rtmp://127.0.0.1/live/Disney7'
-        : 'rtmp://127.0.0.1/live/tigo';
-    }
+    // (Antes había fallback RTMP para Tigo cuando no era ingest SRT — eliminado:
+    //  todos los procesos manuales OBS ahora usan SRT exclusivamente.)
 
     // ── Refresco de token JIT para procesos con proxy (Tigo: wmsAuthSign dura 60s) ──
     // El token de Teletica/Tigo expira en 1 minuto, así que re-scrapeamos vía Pi5
