@@ -904,6 +904,8 @@ export default function EmisorM3U8Panel() {
   async function onBorrar(processIndex: number) {
     const process = processes[processIndex];
 
+    // (función onReiniciar definida más abajo)
+
     // Marcar UI como deteniendo de inmediato para que el usuario vea feedback.
     updateProcess(processIndex, {
       emitStatus: "stopping",
@@ -1304,6 +1306,15 @@ export default function EmisorM3U8Panel() {
                   className="px-4 py-3 rounded-xl bg-destructive hover:bg-destructive/90 active:scale-[.98] transition-all duration-200 font-medium text-destructive-foreground shadow-lg hover:shadow-xl"
                 >
                   🗑️ Borrar
+                </button>
+              )}
+              {!OBS_INGEST_PROCESSES.has(processIndex) && process.isEmitiendo && (
+                <button
+                  onClick={() => onReiniciar(processIndex)}
+                  title="Cierra FFmpeg, limpia cookies/token y vuelve a abrir con User-Agent nuevo (sesión fresca)"
+                  className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl"
+                >
+                  🔄 Reiniciar
                 </button>
               )}
             </div>
