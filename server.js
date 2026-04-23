@@ -4184,7 +4184,7 @@ const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
   '11': 'FUTV URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
-  '16': 'DISNEY 7 URL',
+  '16': 'DISNEY 7 URL', '17': 'FUTV ALTERNO',
 };
 
 // Endpoint para toggle night_rest
@@ -4229,9 +4229,13 @@ app.post('/api/always-on', async (req, res) => {
     if (!supabase) {
       return res.status(500).json({ error: 'Base de datos no disponible' });
     }
-    if (String(process_id) === '12' || String(process_id) === '16') {
-      const label = String(process_id) === '16' ? 'DISNEY 7 URL' : 'TIGO URL';
-      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (depende de OBS local)` });
+    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '17') {
+      const labels = { '12': 'TIGO URL', '16': 'DISNEY 7 URL', '17': 'FUTV ALTERNO' };
+      const label = labels[String(process_id)];
+      const reason = String(process_id) === '17'
+        ? 'es un canal eventual; actívalo manualmente cuando lo necesites'
+        : 'depende de OBS local';
+      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (${reason})` });
     }
 
     const update = { always_on: !!enabled };
@@ -4332,8 +4336,8 @@ server.listen(PORT, () => {
 
         for (const row of alwaysOnRows) {
           const pid = String(row.id);
-          // TIGO URL (12) y DISNEY 7 URL (16) se autoarrancan por su propio path; saltarlos aquí
-          if (pid === '12' || pid === '16') continue;
+          // TIGO URL (12) y DISNEY 7 URL (16) se autoarrancan por su propio path; FUTV ALTERNO (17) es eventual.
+          if (pid === '12' || pid === '16' || pid === '17') continue;
 
           // Limpiar manualStop por si quedó marcado
           manualStopProcesses.delete(pid);
