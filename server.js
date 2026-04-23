@@ -1670,9 +1670,19 @@ app.post('/api/emit', async (req, res) => {
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
     const isManualObsIngest = process_id === '12' || process_id === '16';
+    // Disney 7 SRT: si el caller no provee source_m3u8 (o lo marca como srt://obs),
+    // arrancamos un listener SRT que recibe de OBS en el puerto 9001.
+    const isDisney7SrtIngest = process_id === '16' && (
+      !source_m3u8 ||
+      String(source_m3u8).startsWith('srt://obs') ||
+      String(source_m3u8).startsWith('srt://0.0.0.0')
+    );
 
     if (isTigoHdmiProcess && !effectiveSourceM3u8) {
       effectiveSourceM3u8 = `srt://pi5-hdmi:${TIGO_SRT_PORT}`;
+    }
+    if (isDisney7SrtIngest && !effectiveSourceM3u8) {
+      effectiveSourceM3u8 = `srt://obs:${DISNEY7_SRT_PORT}`;
     }
 
     // Validación de ID: debe ser un número entre 0 y 16
@@ -1693,7 +1703,7 @@ app.post('/api/emit', async (req, res) => {
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
 
     // Validaciones
-    if ((!isTigoHdmiProcess && !effectiveSourceM3u8) || (!target_rtmp && !isHlsOutput)) {
+    if ((!isTigoHdmiProcess && !isDisney7SrtIngest && !effectiveSourceM3u8) || (!target_rtmp && !isHlsOutput)) {
       sendLog(process_id, 'error', 'Faltan parámetros requeridos: source_m3u8 y target_rtmp');
       return res.status(400).json({ 
         error: 'Faltan parámetros requeridos: source_m3u8 y target_rtmp' 
