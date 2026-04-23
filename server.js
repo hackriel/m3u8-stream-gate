@@ -255,9 +255,9 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15']);
+const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
-const HLS_SLUG_MAP = { '11': 'FUTV', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6' };
+const HLS_SLUG_MAP = { '11': 'FUTV', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
@@ -1584,16 +1584,16 @@ app.post('/api/emit', async (req, res) => {
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
-    const isManualObsIngest = process_id === '12';
+    const isManualObsIngest = process_id === '12' || process_id === '16';
 
     if (isTigoHdmiProcess && !effectiveSourceM3u8) {
       effectiveSourceM3u8 = `srt://pi5-hdmi:${TIGO_SRT_PORT}`;
     }
 
-    // Validación de ID: debe ser un número entre 0 y 15
-    if (isNaN(numericId) || numericId < 0 || numericId > 15) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-15)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 15` });
+    // Validación de ID: debe ser un número entre 0 y 16
+    if (isNaN(numericId) || numericId < 0 || numericId > 16) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-16)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 16` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -1616,7 +1616,9 @@ app.post('/api/emit', async (req, res) => {
     }
 
     if (isManualObsIngest) {
-      effectiveSourceM3u8 = 'rtmp://127.0.0.1/live/tigo';
+      effectiveSourceM3u8 = process_id === '16'
+        ? 'rtmp://127.0.0.1/live/Disney7'
+        : 'rtmp://127.0.0.1/live/tigo';
     }
 
     // ── Refresco de token JIT para procesos con proxy (Tigo: wmsAuthSign dura 60s) ──
@@ -2180,7 +2182,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Nombre del proceso para logs
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL' };
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 URL' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
@@ -4159,6 +4161,7 @@ const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
   '11': 'FUTV URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
+  '16': 'DISNEY 7 URL',
 };
 
 // Endpoint para toggle night_rest
@@ -4203,8 +4206,9 @@ app.post('/api/always-on', async (req, res) => {
     if (!supabase) {
       return res.status(500).json({ error: 'Base de datos no disponible' });
     }
-    if (String(process_id) === '12') {
-      return res.status(400).json({ error: 'TIGO URL no admite "Encendido siempre" (depende de OBS local)' });
+    if (String(process_id) === '12' || String(process_id) === '16') {
+      const label = String(process_id) === '16' ? 'DISNEY 7 URL' : 'TIGO URL';
+      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (depende de OBS local)` });
     }
 
     const update = { always_on: !!enabled };
