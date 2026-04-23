@@ -2120,7 +2120,7 @@ app.post('/api/emit', async (req, res) => {
       effectiveResilienceArgs = [
         '-rtmp_live', 'live',
       ];
-      sendLog(process_id, 'info', `🛰️ TIGO URL: entrada RTMP local (sin flags de reconnect HTTP)`);
+      sendLog(process_id, 'info', `🛰️ TIGO SRT: entrada SRT local (sin flags de reconnect HTTP)`);
     } else {
       effectiveResilienceArgs = HLS_INPUT_RESILIENCE_ARGS;
     }
@@ -2347,7 +2347,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Nombre del proceso para logs
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 URL' };
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
@@ -3365,7 +3365,7 @@ app.post('/api/emit', async (req, res) => {
         } else if (MANUAL_URL_PROCESSES.has(String(process_id)) || AUTO_INGEST_PROCESSES.has(String(process_id))) {
           // Procesos manuales (Disney 7, Disney 8, Canal 6): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
-          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8', '12': 'TIGO URL', '15': 'CANAL 6 URL' };
+          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8', '12': 'TIGO SRT', '15': 'CANAL 6 URL' };
           const procLabel = manualLabels[String(process_id)] || 'Manual';
           
           const failureType = detectedErrors.get(process_id);
@@ -3527,7 +3527,7 @@ app.post('/api/emit', async (req, res) => {
             }
           });
         } else if (String(process_id) === '12') {
-          sendLog(process_id, 'info', '🛑 TIGO URL quedó detenido: usa Emitir cuando OBS vuelva a enviar señal.');
+          sendLog(process_id, 'info', '🛑 TIGO SRT quedó detenido: usa Emitir cuando OBS vuelva a enviar señal.');
           if (supabase) {
             await supabase.from('emission_processes').update({
               is_active: false,
@@ -4764,13 +4764,16 @@ server.listen(PORT, () => {
       }
     })();
 
-    supabase
-      .from('emission_processes')
-      .update({ m3u8: 'rtmp://127.0.0.1/live/tigo', rtmp: 'hls-local' })
-      .eq('id', 12)
-      .then(({ error }) => {
-        if (error) console.error('Error fijando preset de TIGO URL al iniciar servidor:', error.message);
-      });
+    // Fijar presets SRT al arrancar (Tigo, Disney 7, FUTV SRT)
+    for (const id of [12, 16, 18]) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: 'srt://obs', rtmp: 'hls-local' })
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) console.error(`Error fijando preset SRT (id=${id}) al iniciar servidor:`, error.message);
+        });
+    }
 
     // ====== RECUPERACIÓN AL ARRANCAR: levantar canales con always_on=true ======
     // Espera 8s para que el servidor esté completamente listo y luego relanza
@@ -4915,39 +4918,60 @@ server.listen(PORT, () => {
       const tigoRunning = ffmpegProcesses.get('12');
       if (tigoRunning?.process && !tigoRunning.process.killed) return;
 
-      sendLog('12', 'info', '🚀 Auto-arranque TIGO URL al iniciar servidor...');
+      sendLog('12', 'info', '🚀 Auto-arranque TIGO SRT al iniciar servidor...');
       await fetch(`http://localhost:${PORT}/api/emit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          source_m3u8: 'rtmp://127.0.0.1/live/tigo',
+          source_m3u8: 'srt://obs',
           target_rtmp: 'hls-local',
           process_id: '12'
         })
       });
     } catch (error) {
-      console.error('Error auto-arrancando TIGO URL:', error);
+      console.error('Error auto-arrancando TIGO SRT:', error);
     }
   }, 1500);
 
-  // Auto-arranque DISNEY 7 URL (id 16): salida HLS local lista para recibir RTMP de OBS
+  // Auto-arranque DISNEY 7 SRT (id 16): salida HLS local lista para recibir SRT de OBS
   setTimeout(async () => {
     try {
       const disneyRunning = ffmpegProcesses.get('16');
       if (disneyRunning?.process && !disneyRunning.process.killed) return;
 
-      sendLog('16', 'info', '🚀 Auto-arranque DISNEY 7 URL al iniciar servidor...');
+      sendLog('16', 'info', '🚀 Auto-arranque DISNEY 7 SRT al iniciar servidor...');
       await fetch(`http://localhost:${PORT}/api/emit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          source_m3u8: 'rtmp://127.0.0.1/live/Disney7',
+          source_m3u8: 'srt://obs',
           target_rtmp: 'hls-local',
           process_id: '16'
         })
       });
     } catch (error) {
-      console.error('Error auto-arrancando DISNEY 7 URL:', error);
+      console.error('Error auto-arrancando DISNEY 7 SRT:', error);
     }
   }, 2500);
+
+  // Auto-arranque FUTV SRT (id 18): salida HLS local lista para recibir SRT de OBS
+  setTimeout(async () => {
+    try {
+      const futvSrtRunning = ffmpegProcesses.get('18');
+      if (futvSrtRunning?.process && !futvSrtRunning.process.killed) return;
+
+      sendLog('18', 'info', '🚀 Auto-arranque FUTV SRT al iniciar servidor...');
+      await fetch(`http://localhost:${PORT}/api/emit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_m3u8: 'srt://obs',
+          target_rtmp: 'hls-local',
+          process_id: '18'
+        })
+      });
+    } catch (error) {
+      console.error('Error auto-arrancando FUTV SRT:', error);
+    }
+  }, 3500);
 });
