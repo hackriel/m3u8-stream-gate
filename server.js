@@ -255,9 +255,9 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15']);
+const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
-const HLS_SLUG_MAP = { '11': 'FUTV', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6' };
+const HLS_SLUG_MAP = { '11': 'FUTV', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
@@ -1584,16 +1584,16 @@ app.post('/api/emit', async (req, res) => {
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
-    const isManualObsIngest = process_id === '12';
+    const isManualObsIngest = process_id === '12' || process_id === '16';
 
     if (isTigoHdmiProcess && !effectiveSourceM3u8) {
       effectiveSourceM3u8 = `srt://pi5-hdmi:${TIGO_SRT_PORT}`;
     }
 
-    // Validación de ID: debe ser un número entre 0 y 15
-    if (isNaN(numericId) || numericId < 0 || numericId > 15) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-15)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 15` });
+    // Validación de ID: debe ser un número entre 0 y 16
+    if (isNaN(numericId) || numericId < 0 || numericId > 16) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-16)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 16` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -1616,7 +1616,9 @@ app.post('/api/emit', async (req, res) => {
     }
 
     if (isManualObsIngest) {
-      effectiveSourceM3u8 = 'rtmp://127.0.0.1/live/tigo';
+      effectiveSourceM3u8 = process_id === '16'
+        ? 'rtmp://127.0.0.1/live/Disney7'
+        : 'rtmp://127.0.0.1/live/tigo';
     }
 
     // ── Refresco de token JIT para procesos con proxy (Tigo: wmsAuthSign dura 60s) ──
@@ -2180,7 +2182,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Nombre del proceso para logs
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL' };
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 URL' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
@@ -4159,6 +4161,7 @@ const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
   '11': 'FUTV URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
+  '16': 'DISNEY 7 URL',
 };
 
 // Endpoint para toggle night_rest
@@ -4203,8 +4206,9 @@ app.post('/api/always-on', async (req, res) => {
     if (!supabase) {
       return res.status(500).json({ error: 'Base de datos no disponible' });
     }
-    if (String(process_id) === '12') {
-      return res.status(400).json({ error: 'TIGO URL no admite "Encendido siempre" (depende de OBS local)' });
+    if (String(process_id) === '12' || String(process_id) === '16') {
+      const label = String(process_id) === '16' ? 'DISNEY 7 URL' : 'TIGO URL';
+      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (depende de OBS local)` });
     }
 
     const update = { always_on: !!enabled };
@@ -4305,8 +4309,8 @@ server.listen(PORT, () => {
 
         for (const row of alwaysOnRows) {
           const pid = String(row.id);
-          // TIGO URL (12) se autoarranca por su propio path; saltarlo aquí
-          if (pid === '12') continue;
+          // TIGO URL (12) y DISNEY 7 URL (16) se autoarrancan por su propio path; saltarlos aquí
+          if (pid === '12' || pid === '16') continue;
 
           // Limpiar manualStop por si quedó marcado
           manualStopProcesses.delete(pid);
@@ -4349,25 +4353,34 @@ server.listen(PORT, () => {
       }
     }, 8000);
 
-    // ====== AUTO-REFRESH 10h: reinicia canales always_on con URL fresca cada 10 horas ======
-    const REFRESH_INTERVAL_MS = 10 * 60 * 60 * 1000; // 10 horas
+    // ====== AUTO-REFRESH HORARIO FIJO: reinicia canales always_on a las 00:00 y 05:00 hora Costa Rica ======
+    // Solo afecta filas con always_on=true Y is_emitting=true (no relanza canales que el usuario apagó).
+    // Usamos last_refresh_at como guard para no disparar dos veces en la misma ventana horaria (60 min).
+    const REFRESH_HOURS_CR = [0, 5]; // 12:00 AM y 5:00 AM hora Costa Rica
+    const REFRESH_GUARD_MS = 60 * 60 * 1000; // no re-disparar dentro de la misma hora
     setInterval(async () => {
       try {
+        const { hour: crHour, minute: crMinute } = getCostaRicaHour();
+        // Solo actuar en los primeros 5 minutos de la hora objetivo
+        if (!REFRESH_HOURS_CR.includes(crHour) || crMinute >= 5) return;
+
         const { data: rows } = await supabase
           .from('emission_processes')
           .select('id, source_url, m3u8, rtmp, always_on, last_refresh_at, is_emitting')
-          .eq('always_on', true);
-        if (!rows) return;
+          .eq('always_on', true)
+          .eq('is_emitting', true);
+        if (!rows || rows.length === 0) return;
 
         const now = Date.now();
         for (const row of rows) {
           const pid = String(row.id);
-          if (pid === '12') continue; // TIGO URL excluido
+          if (pid === '12' || pid === '16') continue; // URLs locales (OBS) excluidas
 
+          // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
-          if (now - lastRefresh < REFRESH_INTERVAL_MS) continue;
+          if (now - lastRefresh < REFRESH_GUARD_MS) continue;
 
-          sendLog(pid, 'info', `⏰ Refresh 10h: reiniciando con URL fresca...`);
+          sendLog(pid, 'info', `⏰ Refresh programado (${String(crHour).padStart(2, '0')}:00 CR): reiniciando con URL fresca...`);
 
           // Marcar refresh ahora para evitar loops si algo falla
           await supabase
@@ -4407,15 +4420,15 @@ server.listen(PORT, () => {
                 });
               }
             }
-            sendLog(pid, 'success', `✅ Refresh 10h completado`);
+            sendLog(pid, 'success', `✅ Refresh programado completado`);
           } catch (e) {
-            sendLog(pid, 'error', `❌ Error en refresh 10h: ${e.message}`);
+            sendLog(pid, 'error', `❌ Error en refresh programado: ${e.message}`);
           }
         }
       } catch (err) {
-        console.error('Error en scheduler refresh 10h:', err);
+        console.error('Error en scheduler refresh programado:', err);
       }
-    }, 5 * 60 * 1000); // chequea cada 5 min
+    }, 60 * 1000); // chequea cada 1 min (ventana de actuación de 5 min al inicio de la hora objetivo)
   }
 
   setTimeout(async () => {
@@ -4437,4 +4450,25 @@ server.listen(PORT, () => {
       console.error('Error auto-arrancando TIGO URL:', error);
     }
   }, 1500);
+
+  // Auto-arranque DISNEY 7 URL (id 16): salida HLS local lista para recibir RTMP de OBS
+  setTimeout(async () => {
+    try {
+      const disneyRunning = ffmpegProcesses.get('16');
+      if (disneyRunning?.process && !disneyRunning.process.killed) return;
+
+      sendLog('16', 'info', '🚀 Auto-arranque DISNEY 7 URL al iniciar servidor...');
+      await fetch(`http://localhost:${PORT}/api/emit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_m3u8: 'rtmp://127.0.0.1/live/Disney7',
+          target_rtmp: 'hls-local',
+          process_id: '16'
+        })
+      });
+    } catch (error) {
+      console.error('Error auto-arrancando DISNEY 7 URL:', error);
+    }
+  }, 2500);
 });

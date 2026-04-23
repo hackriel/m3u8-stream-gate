@@ -16,7 +16,7 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 16;
+const NUM_PROCESSES = 17;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
@@ -24,14 +24,19 @@ const TIGO_URL_INDEX = 12;
 const TELETICA_URL_INDEX = 13;
 const TDMAS1_URL_INDEX = 14;
 const CANAL6_URL_INDEX = 15;
+const DISNEY7_URL_INDEX = 16;
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "rtmp://167.17.69.116/live/tigo";
 const TIGO_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/tigo";
+const DISNEY7_OBS_INGEST_URL = "rtmp://167.17.69.116/live/Disney7";
+const DISNEY7_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/Disney7";
 
 // Procesos ocultos legacy
 const HIDDEN_PROCESSES = new Set([2, 8, 9]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX]);
+// Procesos que reciben RTMP local desde OBS (entrada manual interna)
+const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -148,6 +153,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "TELETICA URL", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "TDMAS 1 URL", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "CANAL 6 URL", scrapeFn: null, channelId: null, fetchLabel: "🏛️ Repretel", presetUrl: "https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8" },
+  { name: "DISNEY 7 URL", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: DISNEY7_INTERNAL_SOURCE_URL },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -405,6 +411,7 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     const canal6Preset = CHANNEL_CONFIGS[CANAL6_URL_INDEX]?.presetUrl;
     const tigoPreset = CHANNEL_CONFIGS[TIGO_URL_INDEX]?.presetUrl;
+    const disney7Preset = CHANNEL_CONFIGS[DISNEY7_URL_INDEX]?.presetUrl;
     const tigoRtmp = 'hls-local';
     setProcesses(prev => {
       let changed = false;
@@ -412,6 +419,11 @@ export default function EmisorM3U8Panel() {
 
       if (tigoPreset && (next[TIGO_URL_INDEX]?.m3u8 !== tigoPreset || next[TIGO_URL_INDEX]?.rtmp !== tigoRtmp)) {
         next[TIGO_URL_INDEX] = { ...next[TIGO_URL_INDEX], m3u8: tigoPreset, rtmp: tigoRtmp };
+        changed = true;
+      }
+
+      if (disney7Preset && (next[DISNEY7_URL_INDEX]?.m3u8 !== disney7Preset || next[DISNEY7_URL_INDEX]?.rtmp !== tigoRtmp)) {
+        next[DISNEY7_URL_INDEX] = { ...next[DISNEY7_URL_INDEX], m3u8: disney7Preset, rtmp: tigoRtmp };
         changed = true;
       }
 
@@ -430,6 +442,16 @@ export default function EmisorM3U8Panel() {
         .eq('id', TIGO_URL_INDEX)
         .then(({ error }) => {
           if (error) console.error('Error guardando preset de TIGO URL:', error);
+        });
+    }
+
+    if (disney7Preset) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: disney7Preset, rtmp: tigoRtmp })
+        .eq('id', DISNEY7_URL_INDEX)
+        .then(({ error }) => {
+          if (error) console.error('Error guardando preset de DISNEY 7 URL:', error);
         });
     }
 
@@ -952,6 +974,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "TELETICA URL" },
       { bg: "bg-lime-500", text: "text-lime-500", stroke: "#84cc16", name: "TDMAS 1 URL" },
       { bg: "bg-amber-500", text: "text-amber-500", stroke: "#f59e0b", name: "CANAL 6 URL" },
+      { bg: "bg-gray-400", text: "text-gray-300", stroke: "#d1d5db", name: "DISNEY 7 URL" },
     ];
     return colors[processIndex];
   };
@@ -1014,11 +1037,17 @@ export default function EmisorM3U8Panel() {
             ) : (
               // Procesos M3U8 normales
               <>
-                <label className="block text-sm mb-2 text-muted-foreground">{processIndex === TIGO_URL_INDEX ? 'Entrada RTMP interna' : 'URL M3U8 (fuente)'}</label>
+                <label className="block text-sm mb-2 text-muted-foreground">{OBS_INGEST_PROCESSES.has(processIndex) ? 'Entrada RTMP interna' : 'URL M3U8 (fuente)'}</label>
                 <div className="flex gap-2 mb-4">
                   <input
                     type="url"
-                    placeholder={processIndex === TIGO_URL_INDEX ? 'rtmp://167.17.69.116/live/tigo' : 'https://servidor/origen/playlist.m3u8'}
+                    placeholder={
+                      processIndex === TIGO_URL_INDEX
+                        ? TIGO_OBS_INGEST_URL
+                        : processIndex === DISNEY7_URL_INDEX
+                          ? DISNEY7_OBS_INGEST_URL
+                          : 'https://servidor/origen/playlist.m3u8'
+                    }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
@@ -1056,25 +1085,32 @@ export default function EmisorM3U8Panel() {
                 [TELETICA_URL_INDEX]: 'Teletica',
                 [TDMAS1_URL_INDEX]: 'Tdmas1',
                 [CANAL6_URL_INDEX]: 'Canal6',
+                [DISNEY7_URL_INDEX]: 'Disney7',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
+              const isObsIngest = OBS_INGEST_PROCESSES.has(processIndex);
+              const obsIngestUrl = processIndex === TIGO_URL_INDEX
+                ? TIGO_OBS_INGEST_URL
+                : processIndex === DISNEY7_URL_INDEX
+                  ? DISNEY7_OBS_INGEST_URL
+                  : '';
               return (
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
                 <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
-                  {processIndex === TIGO_URL_INDEX || process.isEmitiendo ? (
+                  {isObsIngest || process.isEmitiendo ? (
                     <div className="space-y-2">
-                      {processIndex === TIGO_URL_INDEX && (
+                      {isObsIngest && (
                         <>
                           <p className="text-xs text-muted-foreground">RTMP de entrada para OBS:</p>
                           <div className="flex items-center gap-2">
                             <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
-                              {TIGO_OBS_INGEST_URL}
+                              {obsIngestUrl}
                             </code>
                             <button
                               onClick={() => {
-                                navigator.clipboard.writeText(TIGO_OBS_INGEST_URL);
+                                navigator.clipboard.writeText(obsIngestUrl);
                                 toast.success('RTMP copiada al portapapeles');
                               }}
                               className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
@@ -1100,14 +1136,14 @@ export default function EmisorM3U8Panel() {
                         </button>
                       </div>
                       <p className="text-xs text-muted-foreground mt-2">
-                        {processIndex === TIGO_URL_INDEX
+                        {isObsIngest
                           ? '💡 Envía desde OBS a esa RTMP y tus clientes consumirán la HLS fija de abajo.'
                           : '💡 Esta URL es fija y no cambia. Agrégala directamente a XUI como source.'}
                       </p>
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      {processIndex === TIGO_URL_INDEX
+                      {isObsIngest
                         ? 'Usa Emitir para abrir la salida HLS y Detener cuando cortes OBS para evitar reinicios y ruido en logs.'
                         : 'La URL se generará al iniciar la emisión. Primero obtén la señal y presiona "Emitir HLS".'}
                     </p>
@@ -1136,17 +1172,17 @@ export default function EmisorM3U8Panel() {
                   onClick={() => startEmitToRTMP(processIndex)}
                   className="px-6 py-3 rounded-xl active:scale-[.98] transition-all duration-200 font-medium shadow-lg hover:shadow-xl bg-primary hover:bg-primary/90 text-primary-foreground"
                 >
-                  {processIndex === TIGO_URL_INDEX ? '📺 Emitir' : HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
+                  {OBS_INGEST_PROCESSES.has(processIndex) ? '📺 Emitir' : HLS_OUTPUT_PROCESSES.has(processIndex) ? '📺 Emitir HLS' : '🚀 Emitir a RTMP'}
                 </button>
               ) : (
                 <button 
                   onClick={() => stopEmit(processIndex)} 
                   className="px-6 py-3 rounded-xl bg-warning hover:bg-warning/90 active:scale-[.98] transition-all duration-200 font-medium text-warning-foreground shadow-lg hover:shadow-xl"
                 >
-                  {processIndex === TIGO_URL_INDEX ? '⏹️ Detener' : '⏹️ Detener emisión'}
+                  {OBS_INGEST_PROCESSES.has(processIndex) ? '⏹️ Detener' : '⏹️ Detener emisión'}
                 </button>
               )}
-              {processIndex !== TIGO_URL_INDEX && (
+              {!OBS_INGEST_PROCESSES.has(processIndex) && (
                 <button 
                   onClick={() => onBorrar(processIndex)} 
                   className="px-4 py-3 rounded-xl bg-destructive hover:bg-destructive/90 active:scale-[.98] transition-all duration-200 font-medium text-destructive-foreground shadow-lg hover:shadow-xl"
@@ -1156,8 +1192,8 @@ export default function EmisorM3U8Panel() {
               )}
             </div>
 
-            {/* Always-On Toggle (excluye TIGO URL que depende de OBS local) */}
-            {processIndex !== FILE_UPLOAD_INDEX && processIndex !== TIGO_URL_INDEX && (
+            {/* Always-On Toggle (excluye TIGO URL y DISNEY 7 URL que dependen de OBS local) */}
+            {processIndex !== FILE_UPLOAD_INDEX && !OBS_INGEST_PROCESSES.has(processIndex) && (
               <div className="flex items-center gap-3 mt-4 p-3 rounded-xl bg-card/50 border border-primary/30">
                 <Switch
                   checked={process.alwaysOn}
@@ -1165,7 +1201,7 @@ export default function EmisorM3U8Panel() {
                 />
                 <div className="flex flex-col">
                   <span className="text-sm font-medium text-foreground">🔁 Encendido siempre</span>
-                  <span className="text-xs text-muted-foreground">Auto-relanza tras reinicios y refresca URL cada 10h</span>
+                  <span className="text-xs text-muted-foreground">Auto-relanza tras reinicios y refresca URL a las 12:00 AM y 5:00 AM (hora CR)</span>
                 </div>
               </div>
             )}
