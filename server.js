@@ -1879,9 +1879,20 @@ app.post('/api/emit', async (req, res) => {
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
-        '-max_reload', '1000',
-        '-m3u8_hold_counters', '1000'
+        // ⚡ ANTI-STALL (Apr 2026): bajamos drásticamente max_reload.
+        // Antes 1000 = FFmpeg reintentaba el MISMO segmento muerto cientos
+        // de veces, congelando el output RTMP (frame= dejaba de avanzar y
+        // el cliente veía solo ~10s antes del corte). Con 6 reintentos
+        // (~6s) FFmpeg salta el segmento corrupto y sigue leyendo nuevos
+        // chunks → cadencia de salida estable hacia el RTMP.
+        '-max_reload', '6',
+        '-m3u8_hold_counters', '10',
+        // +discardcorrupt: descarta paquetes corruptos (token rotado a
+        // mitad de descarga) en vez de bloquear; +genpts: regenera PTS
+        // si el segmento saltado deja huecos en el timestamp.
+        '-fflags', '+genpts+discardcorrupt'
       );
+      sendLog(process_id, 'info', `🛡️ Anti-stall: max_reload=6, hold=10, +discardcorrupt`);
     }
     // Mantener -re como pacing de entrada para HLS live.
     // Quitar -re hace que FFmpeg lea a velocidad CPU, agote segmentos y termine en EOF.
@@ -2572,7 +2583,22 @@ app.post('/api/emit', async (req, res) => {
     // Buffer para capturar las últimas líneas de stderr (diagnóstico de crashes)
     const stderrBuffer = [];
     const MAX_STDERR_LINES = 15;
-    
+
+    // ── Throttle + detector de stall para "Failed to open segment" ──
+    // Cuenta failures en una ventana de 10s. Si pasan >25 sin avance de
+    // frame, dispara restart automático (re-login + UA fresco) en vez de
+    // esperar 45s al watchdog. Además agrupa el spam de logs.
+    const segFailState = {
+      count: 0,
+      windowStart: Date.now(),
+      lastFlush: 0,
+      lastFrameAtCheck: 0,
+      restartTriggered: false,
+    };
+    const SEG_FAIL_WINDOW_MS = 10_000;
+    const SEG_FAIL_STALL_THRESHOLD = 25;
+    const SEG_FAIL_FLUSH_INTERVAL = 5_000;
+
     // Manejar errores con análisis mejorado
     ffmpegProcess.stderr.on('data', (data) => {
       const output = data.toString();
@@ -2582,6 +2608,51 @@ app.post('/api/emit', async (req, res) => {
       for (const line of lines) {
         stderrBuffer.push(line.trim());
         if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
+      }
+
+      // ── Interceptar "Failed to open segment" ANTES del logging normal ──
+      if (output.includes('Failed to open segment')) {
+        const now = Date.now();
+        // Reset ventana cada 10s
+        if (now - segFailState.windowStart > SEG_FAIL_WINDOW_MS) {
+          segFailState.windowStart = now;
+          segFailState.count = 0;
+          segFailState.lastFrameAtCheck = lastFrameTime.get(process_id) || 0;
+        }
+        segFailState.count += (output.match(/Failed to open segment/g) || []).length;
+
+        // Flush agrupado cada 5s (evita spam visual)
+        if (now - segFailState.lastFlush >= SEG_FAIL_FLUSH_INTERVAL && segFailState.count > 0) {
+          sendLog(process_id, 'warn', `⚠️ HLS: ${segFailState.count} segmentos fallidos en ${Math.round((now - segFailState.windowStart)/1000)}s (CDN inestable, FFmpeg saltando)`);
+          segFailState.lastFlush = now;
+        }
+
+        // Detector de stall: muchos failures + frame= no avanzó → restart auto
+        if (
+          segFailState.count >= SEG_FAIL_STALL_THRESHOLD &&
+          !segFailState.restartTriggered &&
+          CHANNEL_MAP[process_id] // solo canales scrapeados
+        ) {
+          const lastFrame = lastFrameTime.get(process_id) || 0;
+          const frameStalledMs = now - lastFrame;
+          if (frameStalledMs > 8000) {
+            segFailState.restartTriggered = true;
+            sendLog(process_id, 'error', `🚨 STALL detectado: ${segFailState.count} fails + frame congelado ${Math.round(frameStalledMs/1000)}s → restart automático`);
+            // Disparar restart asíncrono (re-login + UA fresco)
+            try {
+              scrapeSessionCache.delete(process_id);
+              if (typeof ffmpegProcess.kill === 'function') {
+                ffmpegProcess.kill('SIGTERM');
+                setTimeout(() => {
+                  try { ffmpegProcess.kill('SIGKILL'); } catch (_) {}
+                }, 3000);
+              }
+            } catch (e) {
+              console.error('Error en stall-restart:', e);
+            }
+          }
+        }
+        return; // No pasar al logger normal (ya lo agrupamos)
       }
 
       // ── Logging quirúrgico Tigo: clasificar micro-cortes silenciosos ──
