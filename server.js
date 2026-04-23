@@ -4286,7 +4286,7 @@ server.listen(PORT, () => {
           .select('id');
         const existingIds = new Set((existingRows || []).map(r => r.id));
         const missingRows = [];
-        for (let id = 0; id < 16; id++) {
+        for (let id = 0; id <= 17; id++) {
           if (!existingIds.has(id)) {
             missingRows.push({
               id,
