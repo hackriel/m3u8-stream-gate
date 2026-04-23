@@ -1834,6 +1834,10 @@ app.post('/api/emit', async (req, res) => {
 
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
+    // FUTV ALTERNO (17) NO está en CHANNEL_MAP (para no chocar en recovery con FUTV/11),
+    // pero recibe la misma URL master de TDMax → necesita Variant Pinning igual que los scrapeados.
+    // CANAL 6 URL (15) idem.
+    const needsTdmaxLikePinning = isScrapedChannel || process_id === '17' || process_id === '15';
 
     if (isUnivisionLikeSource) {
       // Univision: minimal HLS flags, let the HLS demuxer handle everything internally.
@@ -1876,7 +1880,7 @@ app.post('/api/emit', async (req, res) => {
         '-thread_queue_size', '16384'
       );
       sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1 endurecida): max_reload=50, hold=50, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
-    } else if (isManualProcess || isScrapedChannel) {
+    } else if (isManualProcess || needsTdmaxLikePinning) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         // ⚡ ANTI-STALL (Apr 2026): bajamos drásticamente max_reload.
@@ -2183,7 +2187,7 @@ app.post('/api/emit', async (req, res) => {
       } catch (err) {
         sendLog(process_id, 'warn', `⚠️ Tigo Variant Pinning falló (${err.message}) — usando URL original`);
       }
-    } else if (isScrapedChannel) {
+    } else if (needsTdmaxLikePinning) {
       // Canales scrapeados (NO proxy): mantener master playlist vivo (token de 1min necesita renovación del CDN)
       // pero sí identificar el programa 720p para forzarlo con -map
       try {
@@ -2199,10 +2203,12 @@ app.post('/api/emit', async (req, res) => {
 
         const validVariants = (allVariants || []).filter(v => v.bandwidth > 0 && v.resolution);
         if (validVariants.length > 0) {
+          // Política: SOLO 720p preferido, 1080p como fallback. Sin saltos dinámicos posteriores.
           const target720 = validVariants.find(v => v.resolution && v.resolution.includes('720'));
-          const best = target720 || validVariants[validVariants.length - 1];
+          const target1080 = validVariants.find(v => v.resolution && v.resolution.includes('1080'));
+          const best = target720 || target1080 || validVariants[validVariants.length - 1];
           hlsProgramIndex = best.programIndex;
-          sendLog(process_id, 'success', `📺 Programa HLS fijado → p:${hlsProgramIndex} (${best.resolution} @ ${Math.round(best.bandwidth / 1000)}kbps) [master vivo]`);
+          sendLog(process_id, 'success', `📌 Variant Pinning → p:${hlsProgramIndex} (${best.resolution} @ ${Math.round(best.bandwidth / 1000)}kbps) [SIN ABR]`);
         } else if (allVariants && allVariants.length > 0) {
           const sorted = [...allVariants].filter(v => v.bandwidth > 0).sort((a,b) => b.bandwidth - a.bandwidth);
           if (sorted.length > 0) {
@@ -2631,7 +2637,7 @@ app.post('/api/emit', async (req, res) => {
         if (
           segFailState.count >= SEG_FAIL_STALL_THRESHOLD &&
           !segFailState.restartTriggered &&
-          CHANNEL_MAP[process_id] // solo canales scrapeados
+          (CHANNEL_MAP[process_id] || process_id === '17' || process_id === '15')
         ) {
           const lastFrame = lastFrameTime.get(process_id) || 0;
           const frameStalledMs = now - lastFrame;
