@@ -373,19 +373,47 @@ const TIGO_BUFFER_MIN_SEGMENTS = 3; // HDMI no tiene jitter de CDN, 3 segs = ~30
 const TIGO_BUFFER_WAIT_TIMEOUT_MS = 60000; // Máx 60s esperando primer buffer
 
 // ── Disney 7 (ID 16) SRT INGEST desde OBS ──────────────────────────
-// Recibe SRT desde OBS (caller) → buffer HLS local → ETAPA 2 transcoder
-// → /live/Disney7/playlist.m3u8. Independiente del flujo Tigo.
-// Para activar: OBS apunta a srt://VPS_IP:9001?streamid=disney7&passphrase=...
-// Cuando el dashboard arranca Disney 7 (ID 16) sin URL de origen, el sistema
-// arranca automáticamente el listener SRT en este puerto.
-const DISNEY7_SRT_PORT = parseInt(process.env.DISNEY7_SRT_PORT || '9001', 10);
-const DISNEY7_SRT_LATENCY_MS = parseInt(process.env.DISNEY7_SRT_LATENCY_MS || '2000', 10);
-const DISNEY7_SRT_LATENCY_US = DISNEY7_SRT_LATENCY_MS * 1000;
-const DISNEY7_SRT_PASSPHRASE = process.env.DISNEY7_SRT_PASSPHRASE || ''; // vacío = sin encriptación
-const DISNEY7_BUFFER_DIR = '/tmp/disney7-buffer-16';
-const DISNEY7_BUFFER_PLAYLIST = path.join(DISNEY7_BUFFER_DIR, 'buf.m3u8');
-const DISNEY7_BUFFER_MIN_SEGMENTS = 3;
-const DISNEY7_BUFFER_WAIT_TIMEOUT_MS = 60000;
+// ── SRT INGEST genérico (OBS → VPS) ────────────────────────────────
+// Patrón unificado para procesos que reciben señal SRT desde OBS:
+//   Disney 7 (ID 16, puerto 9001), Tigo (ID 12, puerto 9000),
+//   FUTV SRT (ID 18, puerto 9002).
+// Para activar: OBS apunta a srt://VPS_IP:<port>?streamid=<id>&passphrase=...
+// Cuando el dashboard arranca un proceso SRT sin URL de origen, el sistema
+// arranca automáticamente el listener SRT en su puerto correspondiente.
+const SRT_INGEST_CONFIGS = {
+  '12': {
+    label: 'TIGO SRT',
+    slug: 'Tigo',
+    port: parseInt(process.env.TIGO_SRT_PORT || '9000', 10),
+    latencyMs: parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10),
+    passphrase: process.env.TIGO_SRT_PASSPHRASE || '',
+    bufferDir: '/tmp/tigo-srt-buffer-12',
+  },
+  '16': {
+    label: 'DISNEY 7 SRT',
+    slug: 'Disney7',
+    port: parseInt(process.env.DISNEY7_SRT_PORT || '9001', 10),
+    latencyMs: parseInt(process.env.DISNEY7_SRT_LATENCY_MS || '2000', 10),
+    passphrase: process.env.DISNEY7_SRT_PASSPHRASE || '',
+    bufferDir: '/tmp/disney7-buffer-16',
+  },
+  '18': {
+    label: 'FUTV SRT',
+    slug: 'FutvSrt',
+    port: parseInt(process.env.FUTV_SRT_PORT || '9002', 10),
+    latencyMs: parseInt(process.env.FUTV_SRT_LATENCY_MS || '2000', 10),
+    passphrase: process.env.FUTV_SRT_PASSPHRASE || '',
+    bufferDir: '/tmp/futv-srt-buffer-18',
+  },
+};
+for (const cfg of Object.values(SRT_INGEST_CONFIGS)) {
+  cfg.latencyUs = cfg.latencyMs * 1000;
+  cfg.bufferPlaylist = path.join(cfg.bufferDir, 'buf.m3u8');
+  cfg.minSegments = 3;
+  cfg.waitTimeoutMs = 60000;
+}
+const isSrtIngestProcess = (process_id) => Object.prototype.hasOwnProperty.call(SRT_INGEST_CONFIGS, String(process_id));
+const getSrtConfig = (process_id) => SRT_INGEST_CONFIGS[String(process_id)];
 
 // ── Métricas SRT en vivo (para dashboard) ──
 // Mapa<process_id, { connected, bitrateKbps, pktsLost, lastFrameAt, since }>
