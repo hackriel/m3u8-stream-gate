@@ -852,8 +852,9 @@ setInterval(() => {
     // En modo HDMI (Tigo): el flujo es Etapa 1 (SRT→HLS buffer) + espera ≥3 segs
     // (~30s) + Etapa 2 (transcoder que emite "frame="). 90s da margen para todo.
     const isTigoHdmiProcess = String(processId) === '12' && TIGO_USE_HDMI;
-    const startTimeout = isTigoHdmiProcess
-      ? 90000  // 90s: 30s buffer + 30s arranque etapa 2 + margen
+    const isDisney7SrtProcess = String(processId) === '16';
+    const startTimeout = isTigoHdmiProcess || isDisney7SrtProcess
+      ? 120000 // 120s: OBS puede tardar en conectar (handshake SRT + buffer 30s + ETAPA 2)
       : isUnivisionProcess
       ? 90000  // 90s para Univision (CDN lento con datacenter IPs)
       : STABLE_SOURCE_PROCESSES.has(String(processId))
