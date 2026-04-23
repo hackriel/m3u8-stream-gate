@@ -2637,7 +2637,7 @@ app.post('/api/emit', async (req, res) => {
         if (
           segFailState.count >= SEG_FAIL_STALL_THRESHOLD &&
           !segFailState.restartTriggered &&
-          CHANNEL_MAP[process_id] // solo canales scrapeados
+          (CHANNEL_MAP[process_id] || process_id === '17' || process_id === '15')
         ) {
           const lastFrame = lastFrameTime.get(process_id) || 0;
           const frameStalledMs = now - lastFrame;
