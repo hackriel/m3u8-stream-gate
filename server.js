@@ -258,7 +258,7 @@ const CHANNEL_MAP = {
 const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16', '17']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 // FUTV (11) y FUTV ALTERNO (17) comparten slug 'FUTV' a propósito (mismo destino RTMP/HLS)
-const HLS_SLUG_MAP = { '11': 'FUTV', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'FUTV' };
+const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
