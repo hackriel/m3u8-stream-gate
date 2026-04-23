@@ -1879,9 +1879,20 @@ app.post('/api/emit', async (req, res) => {
     } else if (isManualProcess || isScrapedChannel) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
-        '-max_reload', '1000',
-        '-m3u8_hold_counters', '1000'
+        // ⚡ ANTI-STALL (Apr 2026): bajamos drásticamente max_reload.
+        // Antes 1000 = FFmpeg reintentaba el MISMO segmento muerto cientos
+        // de veces, congelando el output RTMP (frame= dejaba de avanzar y
+        // el cliente veía solo ~10s antes del corte). Con 6 reintentos
+        // (~6s) FFmpeg salta el segmento corrupto y sigue leyendo nuevos
+        // chunks → cadencia de salida estable hacia el RTMP.
+        '-max_reload', '6',
+        '-m3u8_hold_counters', '10',
+        // +discardcorrupt: descarta paquetes corruptos (token rotado a
+        // mitad de descarga) en vez de bloquear; +genpts: regenera PTS
+        // si el segmento saltado deja huecos en el timestamp.
+        '-fflags', '+genpts+discardcorrupt'
       );
+      sendLog(process_id, 'info', `🛡️ Anti-stall: max_reload=6, hold=10, +discardcorrupt`);
     }
     // Mantener -re como pacing de entrada para HLS live.
     // Quitar -re hace que FFmpeg lea a velocidad CPU, agote segmentos y termine en EOF.
