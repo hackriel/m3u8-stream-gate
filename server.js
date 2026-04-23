@@ -3743,6 +3743,111 @@ app.post('/api/emit/stop', async (req, res) => {
 
 // Nuevo endpoint para eliminar completamente un proceso específico de la base de datos
 app.delete('/api/emit/:process_id', async (req, res) => {
+
+// ── Endpoint /api/emit/restart ────────────────────────────────────────
+// Reinicio MANUAL en caliente: detiene FFmpeg actual, invalida la cache de
+// sesión de scraping (cookies/token) para forzar un re-login completo, y
+// vuelve a arrancar la emisión. El nuevo arranque elige automáticamente un
+// User-Agent rotativo distinto (ver pickRandomUserAgent en /api/emit), lo
+// que equivale a "abrir una sesión fresca como cliente nuevo".
+// ESTE FLUJO ES INDEPENDIENTE DEL "Encendido siempre": no toca always_on.
+app.post('/api/emit/restart', async (req, res) => {
+  // Movido fuera del DELETE de abajo. Este handler debería declararse antes
+  // del app.delete, pero lo ubicamos aquí mediante app.post.
+  try {
+    const { process_id: rawProcessId = '0', source_m3u8, target_rtmp } = req.body;
+    const process_id = String(rawProcessId);
+    const numericProcessId = parseInt(process_id, 10);
+
+    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 17) {
+      return res.status(400).json({ error: `ID inválido: ${rawProcessId}` });
+    }
+
+    sendLog(process_id, 'info', `🔄 Reinicio manual solicitado — preparando sesión fresca`);
+
+    // 1) Detener FFmpeg actual (sin tocar always_on, sin marcar parada manual permanente).
+    const processData = ffmpegProcesses.get(process_id) ?? ffmpegProcesses.get(Number(process_id));
+    if (processData && processData.process && !processData.process.killed) {
+      emissionStatuses.set(process_id, 'stopping');
+      const procRef = processData.process;
+      procRef.kill('SIGTERM');
+      await waitForProcessDeath(procRef, 3000);
+      if (!procRef.killed) {
+        procRef.kill('SIGKILL');
+        await waitForProcessDeath(procRef, 2000);
+      }
+      ffmpegProcesses.delete(process_id);
+      await stopTigoProxy(process_id).catch(() => {});
+      detectedErrors.delete(process_id);
+      quickRetryState.delete(process_id);
+      lastFrameTime.delete(process_id);
+      lastProgressLog.delete(process_id);
+      sendLog(process_id, 'info', `🛑 FFmpeg anterior detenido para reinicio en caliente`);
+    }
+
+    // 2) Invalidar cache de sesión de scraping → fuerza re-login limpio.
+    scrapeSessionCache.delete(process_id);
+    scrapeSessionCache.delete(Number(process_id));
+    sendLog(process_id, 'info', `🧹 Cache de sesión limpiada (cookies/token serán re-generados)`);
+
+    // 3) Resetear contadores y flags transitorios. NO tocar always_on.
+    recoveryAttempts.set(process_id, 0);
+    manualStopProcesses.delete(process_id);
+    manualStopProcesses.delete(Number(process_id));
+    resetCircuitBreaker(process_id);
+    emissionStatuses.set(process_id, 'idle');
+
+    // 4) Resolver source/target: si no vino del cliente, intentar leer DB.
+    let effectiveSource = source_m3u8;
+    let effectiveTarget = target_rtmp;
+    if ((!effectiveSource || !effectiveTarget) && supabase) {
+      const { data: row } = await supabase
+        .from('emission_processes')
+        .select('m3u8, rtmp')
+        .eq('id', numericProcessId)
+        .maybeSingle();
+      if (row) {
+        effectiveSource = effectiveSource || row.m3u8;
+        effectiveTarget = effectiveTarget || row.rtmp;
+      }
+    }
+
+    if (!effectiveTarget) {
+      sendLog(process_id, 'error', `❌ No hay RTMP destino conocido para reiniciar`);
+      return res.status(400).json({ error: 'No hay target_rtmp para reiniciar' });
+    }
+
+    sendLog(process_id, 'info', `🎭 Arrancando con User-Agent rotativo nuevo...`);
+
+    // 5) Re-disparar /api/emit internamente (mismo proceso, sin HTTP loop real).
+    //    Para esto hacemos una llamada HTTP local al propio servidor.
+    const port = process.env.PORT || 3000;
+    const restartResp = await fetch(`http://127.0.0.1:${port}/api/emit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_m3u8: effectiveSource,
+        target_rtmp: effectiveTarget,
+        process_id,
+        is_recovery: false, // arranque limpio, NO recovery (forza refresh de token)
+      }),
+    });
+
+    const restartData = await restartResp.json().catch(() => ({}));
+    if (!restartResp.ok) {
+      sendLog(process_id, 'error', `❌ Reinicio falló: ${restartData?.error || restartResp.statusText}`);
+      return res.status(restartResp.status).json(restartData);
+    }
+
+    sendLog(process_id, 'success', `✅ Reinicio en caliente completado con sesión fresca`);
+    return res.json({ success: true, message: 'Proceso reiniciado con sesión fresca', detail: restartData });
+  } catch (error) {
+    const pid = req.body?.process_id || '0';
+    sendLog(pid, 'error', `Error en reinicio: ${error.message}`);
+    return res.status(500).json({ error: 'Error interno', details: error.message });
+  }
+});
+
   try {
     const { process_id } = req.params;
     sendLog(process_id, 'info', `Solicitada eliminación del proceso ${process_id}`);
