@@ -255,10 +255,11 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16', '17']);
+const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16', '17', '18']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 // FUTV (11) y FUTV ALTERNO (17) comparten slug 'FUTV' a propósito (mismo destino RTMP/HLS)
-const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv' };
+// FUTV SRT (18) usa su propio slug 'FutvSrt' — no comparte con FUTV ni FUTV ALTERNO.
+const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'FutvSrt' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
@@ -373,19 +374,47 @@ const TIGO_BUFFER_MIN_SEGMENTS = 3; // HDMI no tiene jitter de CDN, 3 segs = ~30
 const TIGO_BUFFER_WAIT_TIMEOUT_MS = 60000; // Máx 60s esperando primer buffer
 
 // ── Disney 7 (ID 16) SRT INGEST desde OBS ──────────────────────────
-// Recibe SRT desde OBS (caller) → buffer HLS local → ETAPA 2 transcoder
-// → /live/Disney7/playlist.m3u8. Independiente del flujo Tigo.
-// Para activar: OBS apunta a srt://VPS_IP:9001?streamid=disney7&passphrase=...
-// Cuando el dashboard arranca Disney 7 (ID 16) sin URL de origen, el sistema
-// arranca automáticamente el listener SRT en este puerto.
-const DISNEY7_SRT_PORT = parseInt(process.env.DISNEY7_SRT_PORT || '9001', 10);
-const DISNEY7_SRT_LATENCY_MS = parseInt(process.env.DISNEY7_SRT_LATENCY_MS || '2000', 10);
-const DISNEY7_SRT_LATENCY_US = DISNEY7_SRT_LATENCY_MS * 1000;
-const DISNEY7_SRT_PASSPHRASE = process.env.DISNEY7_SRT_PASSPHRASE || ''; // vacío = sin encriptación
-const DISNEY7_BUFFER_DIR = '/tmp/disney7-buffer-16';
-const DISNEY7_BUFFER_PLAYLIST = path.join(DISNEY7_BUFFER_DIR, 'buf.m3u8');
-const DISNEY7_BUFFER_MIN_SEGMENTS = 3;
-const DISNEY7_BUFFER_WAIT_TIMEOUT_MS = 60000;
+// ── SRT INGEST genérico (OBS → VPS) ────────────────────────────────
+// Patrón unificado para procesos que reciben señal SRT desde OBS:
+//   Disney 7 (ID 16, puerto 9001), Tigo (ID 12, puerto 9000),
+//   FUTV SRT (ID 18, puerto 9002).
+// Para activar: OBS apunta a srt://VPS_IP:<port>?streamid=<id>&passphrase=...
+// Cuando el dashboard arranca un proceso SRT sin URL de origen, el sistema
+// arranca automáticamente el listener SRT en su puerto correspondiente.
+const SRT_INGEST_CONFIGS = {
+  '12': {
+    label: 'TIGO SRT',
+    slug: 'Tigo',
+    port: parseInt(process.env.TIGO_SRT_PORT || '9000', 10),
+    latencyMs: parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10),
+    passphrase: process.env.TIGO_SRT_PASSPHRASE || '',
+    bufferDir: '/tmp/tigo-srt-buffer-12',
+  },
+  '16': {
+    label: 'DISNEY 7 SRT',
+    slug: 'Disney7',
+    port: parseInt(process.env.DISNEY7_SRT_PORT || '9001', 10),
+    latencyMs: parseInt(process.env.DISNEY7_SRT_LATENCY_MS || '2000', 10),
+    passphrase: process.env.DISNEY7_SRT_PASSPHRASE || '',
+    bufferDir: '/tmp/disney7-buffer-16',
+  },
+  '18': {
+    label: 'FUTV SRT',
+    slug: 'FutvSrt',
+    port: parseInt(process.env.FUTV_SRT_PORT || '9002', 10),
+    latencyMs: parseInt(process.env.FUTV_SRT_LATENCY_MS || '2000', 10),
+    passphrase: process.env.FUTV_SRT_PASSPHRASE || '',
+    bufferDir: '/tmp/futv-srt-buffer-18',
+  },
+};
+for (const cfg of Object.values(SRT_INGEST_CONFIGS)) {
+  cfg.latencyUs = cfg.latencyMs * 1000;
+  cfg.bufferPlaylist = path.join(cfg.bufferDir, 'buf.m3u8');
+  cfg.minSegments = 3;
+  cfg.waitTimeoutMs = 60000;
+}
+const isSrtIngestProcess = (process_id) => Object.prototype.hasOwnProperty.call(SRT_INGEST_CONFIGS, String(process_id));
+const getSrtConfig = (process_id) => SRT_INGEST_CONFIGS[String(process_id)];
 
 // ── Métricas SRT en vivo (para dashboard) ──
 // Mapa<process_id, { connected, bitrateKbps, pktsLost, lastFrameAt, since }>
@@ -433,28 +462,29 @@ const cleanTigoBufferDir = () => {
   }
 };
 
-// ── Helpers genéricos para Disney 7 SRT (replican patrón Tigo) ──
-const cleanDisney7BufferDir = () => {
+// ── Helpers genéricos para SRT ingest (Tigo, Disney 7, FUTV SRT...) ──
+const cleanSrtBufferDir = (cfg) => {
   try {
-    if (fs.existsSync(DISNEY7_BUFFER_DIR)) {
-      for (const f of fs.readdirSync(DISNEY7_BUFFER_DIR)) {
-        try { fs.unlinkSync(path.join(DISNEY7_BUFFER_DIR, f)); } catch (_) {}
+    if (fs.existsSync(cfg.bufferDir)) {
+      for (const f of fs.readdirSync(cfg.bufferDir)) {
+        try { fs.unlinkSync(path.join(cfg.bufferDir, f)); } catch (_) {}
       }
     } else {
-      fs.mkdirSync(DISNEY7_BUFFER_DIR, { recursive: true });
+      fs.mkdirSync(cfg.bufferDir, { recursive: true });
     }
   } catch (err) {
-    console.error('[disney7-buffer] cleanDisney7BufferDir error:', err.message);
+    console.error(`[srt-buffer:${cfg.label}] clean error:`, err.message);
   }
 };
 
-const waitForDisney7BufferReady = async (timeoutMs = DISNEY7_BUFFER_WAIT_TIMEOUT_MS) => {
+const waitForSrtBufferReady = async (cfg, timeoutMs) => {
+  const limit = timeoutMs || cfg.waitTimeoutMs;
   const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+  while (Date.now() - start < limit) {
     try {
-      if (fs.existsSync(DISNEY7_BUFFER_PLAYLIST)) {
-        const segs = fs.readdirSync(DISNEY7_BUFFER_DIR).filter(f => f.endsWith('.ts'));
-        if (segs.length >= DISNEY7_BUFFER_MIN_SEGMENTS) {
+      if (fs.existsSync(cfg.bufferPlaylist)) {
+        const segs = fs.readdirSync(cfg.bufferDir).filter(f => f.endsWith('.ts'));
+        if (segs.length >= cfg.minSegments) {
           return { ready: true, segments: segs.length, waitedMs: Date.now() - start };
         }
       }
@@ -464,15 +494,16 @@ const waitForDisney7BufferReady = async (timeoutMs = DISNEY7_BUFFER_WAIT_TIMEOUT
   return { ready: false, segments: 0, waitedMs: Date.now() - start };
 };
 
-// ETAPA 1 Disney 7: FFmpeg SRT listener que recibe de OBS y escribe HLS buffer local.
-const startDisney7SrtIngest = (process_id) => {
-  cleanDisney7BufferDir();
-  resetTigoSrtMetric(process_id); // reusamos el mapa de métricas SRT (es genérico por process_id)
+// ETAPA 1 SRT genérico: FFmpeg SRT listener que recibe de OBS y escribe HLS buffer local.
+const startSrtIngest = (process_id) => {
+  const cfg = getSrtConfig(process_id);
+  if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
+  cleanSrtBufferDir(cfg);
+  resetTigoSrtMetric(process_id); // mapa de métricas SRT (genérico por process_id)
 
-  // SRT listener con encriptación opcional (AES-128 si hay passphrase)
-  let srtUrl = `srt://0.0.0.0:${DISNEY7_SRT_PORT}?mode=listener&latency=${DISNEY7_SRT_LATENCY_US}&pkt_size=1316`;
-  if (DISNEY7_SRT_PASSPHRASE && DISNEY7_SRT_PASSPHRASE.length >= 10) {
-    srtUrl += `&pbkeylen=16&passphrase=${encodeURIComponent(DISNEY7_SRT_PASSPHRASE)}`;
+  let srtUrl = `srt://0.0.0.0:${cfg.port}?mode=listener&latency=${cfg.latencyUs}&pkt_size=1316`;
+  if (cfg.passphrase && cfg.passphrase.length >= 10) {
+    srtUrl += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
   }
 
   const args = [
@@ -491,15 +522,15 @@ const startDisney7SrtIngest = (process_id) => {
     '-hls_list_size', '8',
     '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
     '-hls_segment_type', 'mpegts',
-    '-hls_segment_filename', path.join(DISNEY7_BUFFER_DIR, 'buf_%05d.ts'),
+    '-hls_segment_filename', path.join(cfg.bufferDir, 'buf_%05d.ts'),
     '-hls_allow_cache', '0',
     '-hls_start_number_source', 'epoch',
-    DISNEY7_BUFFER_PLAYLIST,
+    cfg.bufferPlaylist,
   ];
 
   const proc = spawn('ffmpeg', args);
   updateTigoSrtMetric(process_id, { connected: false, since: Date.now() });
-  return { process: proc, args, command: `ffmpeg ${args.join(' ')}` };
+  return { process: proc, args, command: `ffmpeg ${args.join(' ')}`, cfg };
 };
 
 const waitForTigoBufferReady = async (timeoutMs = TIGO_BUFFER_WAIT_TIMEOUT_MS) => {
@@ -852,8 +883,8 @@ setInterval(() => {
     // En modo HDMI (Tigo): el flujo es Etapa 1 (SRT→HLS buffer) + espera ≥3 segs
     // (~30s) + Etapa 2 (transcoder que emite "frame="). 90s da margen para todo.
     const isTigoHdmiProcess = String(processId) === '12' && TIGO_USE_HDMI;
-    const isDisney7SrtProcess = String(processId) === '16';
-    const startTimeout = isTigoHdmiProcess || isDisney7SrtProcess
+    const isSrtIngestProc = isSrtIngestProcess(processId);
+    const startTimeout = isTigoHdmiProcess || isSrtIngestProc
       ? 120000 // 120s: OBS puede tardar en conectar (handshake SRT + buffer 30s + ETAPA 2)
       : isUnivisionProcess
       ? 90000  // 90s para Univision (CDN lento con datacenter IPs)
@@ -1670,26 +1701,28 @@ app.post('/api/emit', async (req, res) => {
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
-    const isManualObsIngest = process_id === '12' || process_id === '16';
-    // Disney 7 SRT: si el caller no provee source_m3u8 (o lo marca como srt://obs),
-    // arrancamos un listener SRT que recibe de OBS en el puerto 9001.
-    const isDisney7SrtIngest = process_id === '16' && (
+    // SRT ingest: si el caller no provee source_m3u8 (o lo marca como srt://obs),
+    // arrancamos un listener SRT que recibe de OBS en el puerto del proceso.
+    const isSrtIngest = isSrtIngestProcess(process_id) && (
       !source_m3u8 ||
       String(source_m3u8).startsWith('srt://obs') ||
       String(source_m3u8).startsWith('srt://0.0.0.0')
     );
+    // Procesos manuales OBS = todos los SRT ingest (12, 16, 18).
+    const isManualObsIngest = isSrtIngestProcess(process_id);
 
     if (isTigoHdmiProcess && !effectiveSourceM3u8) {
       effectiveSourceM3u8 = `srt://pi5-hdmi:${TIGO_SRT_PORT}`;
     }
-    if (isDisney7SrtIngest && !effectiveSourceM3u8) {
-      effectiveSourceM3u8 = `srt://obs:${DISNEY7_SRT_PORT}`;
+    if (isSrtIngest && !effectiveSourceM3u8) {
+      const cfg = getSrtConfig(process_id);
+      effectiveSourceM3u8 = `srt://obs:${cfg.port}`;
     }
 
-    // Validación de ID: debe ser un número entre 0 y 16
-    if (isNaN(numericId) || numericId < 0 || numericId > 17) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-17)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 17` });
+    // Validación de ID: debe ser un número entre 0 y 18
+    if (isNaN(numericId) || numericId < 0 || numericId > 18) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-18)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 18` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -1704,18 +1737,15 @@ app.post('/api/emit', async (req, res) => {
     sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
 
     // Validaciones
-    if ((!isTigoHdmiProcess && !isDisney7SrtIngest && !effectiveSourceM3u8) || (!target_rtmp && !isHlsOutput)) {
+    if ((!isTigoHdmiProcess && !isSrtIngest && !effectiveSourceM3u8) || (!target_rtmp && !isHlsOutput)) {
       sendLog(process_id, 'error', 'Faltan parámetros requeridos: source_m3u8 y target_rtmp');
       return res.status(400).json({ 
         error: 'Faltan parámetros requeridos: source_m3u8 y target_rtmp' 
       });
     }
 
-    if (isManualObsIngest && !isDisney7SrtIngest) {
-      effectiveSourceM3u8 = process_id === '16'
-        ? 'rtmp://127.0.0.1/live/Disney7'
-        : 'rtmp://127.0.0.1/live/tigo';
-    }
+    // (Antes había fallback RTMP para Tigo cuando no era ingest SRT — eliminado:
+    //  todos los procesos manuales OBS ahora usan SRT exclusivamente.)
 
     // ── Refresco de token JIT para procesos con proxy (Tigo: wmsAuthSign dura 60s) ──
     // El token de Teletica/Tigo expira en 1 minuto, así que re-scrapeamos vía Pi5
@@ -1882,7 +1912,9 @@ app.post('/api/emit', async (req, res) => {
     const probeSize      = isStableSource ? '2000000' : (isRecovery ? '500000'  : '1500000');
 
     // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
-    const isRtmpInputSource = isManualObsIngest;
+    // Nota: para procesos OBS-ingest (SRT) el spawn real ocurre en `startSrtIngest`,
+    // así que estas variables solo aplican a flujos HLS/RTMP convencionales.
+    const isRtmpInputSource = isManualObsIngest; // (legacy alias, kept for branch below)
     const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id)) && !isRtmpInputSource;
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
@@ -2090,7 +2122,7 @@ app.post('/api/emit', async (req, res) => {
       effectiveResilienceArgs = [
         '-rtmp_live', 'live',
       ];
-      sendLog(process_id, 'info', `🛰️ TIGO URL: entrada RTMP local (sin flags de reconnect HTTP)`);
+      sendLog(process_id, 'info', `🛰️ TIGO SRT: entrada SRT local (sin flags de reconnect HTTP)`);
     } else {
       effectiveResilienceArgs = HLS_INPUT_RESILIENCE_ARGS;
     }
@@ -2317,7 +2349,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Nombre del proceso para logs
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 URL' };
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
@@ -2374,11 +2406,12 @@ app.post('/api/emit', async (req, res) => {
     // de proxychains/CDN.
     const isTigoHdmiMode = String(process_id) === '12' && TIGO_USE_HDMI;
     const useTigoBuffer = false;
-    const isDisney7SrtMode = String(process_id) === '16' && (
+    const isSrtIngestMode = isSrtIngestProcess(process_id) && (
       !source_m3u8 ||
       String(source_m3u8).startsWith('srt://obs') ||
       String(source_m3u8).startsWith('srt://0.0.0.0')
     );
+    const srtIngestCfg = isSrtIngestMode ? getSrtConfig(process_id) : null;
 
     if (useTigoBuffer) {
       // Sobrescribir args de salida: NO transcodear aquí, solo remuxear a HLS local.
@@ -2461,14 +2494,15 @@ app.post('/api/emit', async (req, res) => {
       spawnCmd = 'ffmpeg';
       spawnArgs = ingest.args;
       sendLog(process_id, 'success', `🛰️ ETAPA 1 HDMI activa: srt://0.0.0.0:${TIGO_SRT_PORT} → ${TIGO_BUFFER_PLAYLIST}`);
-    } else if (isDisney7SrtMode) {
-      sendLog(process_id, 'info', `📡 Disney 7 SRT: arrancando listener en :${DISNEY7_SRT_PORT} (esperando OBS...)`);
-      const ingest = startDisney7SrtIngest(process_id);
+    } else if (isSrtIngestMode) {
+      const cfg = srtIngestCfg;
+      sendLog(process_id, 'info', `📡 ${cfg.label}: arrancando listener en :${cfg.port} (esperando OBS...)`);
+      const ingest = startSrtIngest(process_id);
       ffmpegProcess = ingest.process;
       spawnCmd = 'ffmpeg';
       spawnArgs = ingest.args;
-      const encInfo = DISNEY7_SRT_PASSPHRASE ? '🔐 AES-128' : '⚠️ sin encriptación';
-      sendLog(process_id, 'success', `🛰️ ETAPA 1 SRT activa: srt://0.0.0.0:${DISNEY7_SRT_PORT} → ${DISNEY7_BUFFER_PLAYLIST} (${encInfo}, latency=${DISNEY7_SRT_LATENCY_MS}ms)`);
+      const encInfo = cfg.passphrase ? '🔐 AES-128' : '⚠️ sin encriptación';
+      sendLog(process_id, 'success', `🛰️ ETAPA 1 SRT activa: srt://0.0.0.0:${cfg.port} → ${cfg.bufferPlaylist} (${encInfo}, latency=${cfg.latencyMs}ms)`);
     } else if (PROXY_PROCESSES.has(process_id)) {
       // ── MODO PROXY (legacy/fallback): proxychains4 → CDN HLS ──
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
@@ -2579,8 +2613,8 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // ── Parser de métricas SRT Disney 7 (mismo patrón que Tigo) ──
-    if (isDisney7SrtMode) {
+    // ── Parser de métricas SRT genérico (Disney 7 / Tigo / FUTV) ──
+    if (isSrtIngestMode) {
       ffmpegProcess.stderr.on('data', (data) => {
         const text = data.toString();
         for (const line of text.split('\n')) {
@@ -2715,11 +2749,12 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // ── Disney 7 BUFFER ETAPA 2 ─────────────────────────────────────
+    // ── SRT BUFFER ETAPA 2 (Tigo / Disney 7 / FUTV SRT) ─────────────
     // Tras spawnear el SRT listener (ETAPA 1), espera ≥3 segs en buffer
-    // y arranca un transcoder local que lee de /tmp/disney7-buffer-16/buf.m3u8
-    // y emite a /live/Disney7/playlist.m3u8 (lo que consumen los usuarios).
-    if (isDisney7SrtMode) {
+    // y arranca un transcoder local que lee del buffer del proceso
+    // y emite a /live/<slug>/playlist.m3u8 (lo que consumen los usuarios).
+    if (isSrtIngestMode) {
+      const cfg = srtIngestCfg;
       (async () => {
         const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
         const outDir = path.join(HLS_OUTPUT_DIR, slug);
@@ -2730,21 +2765,21 @@ app.post('/api/emit', async (req, res) => {
           }
         } catch (_) {}
 
-        sendLog(process_id, 'info', `⏳ Disney 7 BUFFER ETAPA 2: esperando ≥${DISNEY7_BUFFER_MIN_SEGMENTS} segmentos SRT...`);
-        const ready = await waitForDisney7BufferReady();
+        sendLog(process_id, 'info', `⏳ ${cfg.label} BUFFER ETAPA 2: esperando ≥${cfg.minSegments} segmentos SRT...`);
+        const ready = await waitForSrtBufferReady(cfg);
         if (!ready.ready) {
-          sendLog(process_id, 'error', `❌ Disney 7 BUFFER: timeout (${ready.waitedMs}ms). ¿OBS está conectado al SRT?`);
+          sendLog(process_id, 'error', `❌ ${cfg.label} BUFFER: timeout (${ready.waitedMs}ms). ¿OBS está conectado al SRT?`);
           return;
         }
-        sendLog(process_id, 'success', `✅ Disney 7 BUFFER listo (${ready.segments} segs en ${ready.waitedMs}ms) — spawneando ETAPA 2`);
+        sendLog(process_id, 'success', `✅ ${cfg.label} BUFFER listo (${ready.segments} segs en ${ready.waitedMs}ms) — spawneando ETAPA 2`);
 
-        const spawnDisney7OutputStage = () => {
+        const spawnSrtOutputStage = () => {
           if (manualStopProcesses.has(process_id) || manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
             return;
           }
           const ingestProc = ffmpegProcesses.get(process_id);
           if (!ingestProc || !ingestProc.process || ingestProc.process.killed) {
-            sendLog(process_id, 'warn', `⚠️ Disney 7 ETAPA 2: ETAPA 1 no está viva, abortando spawn`);
+            sendLog(process_id, 'warn', `⚠️ ${cfg.label} ETAPA 2: ETAPA 1 no está viva, abortando spawn`);
             return;
           }
 
@@ -2754,7 +2789,7 @@ app.post('/api/emit', async (req, res) => {
             '-fflags', '+genpts+discardcorrupt',
             '-analyzeduration', '3000000',
             '-probesize', '1500000',
-            '-i', DISNEY7_BUFFER_PLAYLIST,
+            '-i', cfg.bufferPlaylist,
             '-map', '0:v:0?',
             '-map', '0:a:0?',
             '-c:v', 'libx264',
@@ -2787,7 +2822,7 @@ app.post('/api/emit', async (req, res) => {
           ];
           const stage2 = spawn('ffmpeg', stage2Args);
           tigoOutputProcesses.set(String(process_id), stage2);
-          sendLog(process_id, 'success', `🎬 Disney 7 BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode 720p CBR 2000k @ 30fps)`);
+          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode 720p CBR 2000k @ 30fps)`);
 
           stage2.stderr.on('data', (data) => {
             const out = data.toString();
@@ -2803,17 +2838,17 @@ app.post('/api/emit', async (req, res) => {
             const isAlive = stillRunning && stillRunning.process && !stillRunning.process.killed;
             const wasManual = manualStopProcesses.has(process_id) || manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id));
             if (wasManual || !isAlive) {
-              sendLog(process_id, 'info', `🛑 Disney 7 ETAPA 2 terminada (code=${code}, signal=${signal || '-'})`);
+              sendLog(process_id, 'info', `🛑 ${cfg.label} ETAPA 2 terminada (code=${code}, signal=${signal || '-'})`);
               return;
             }
-            sendLog(process_id, 'warn', `🔁 Disney 7 ETAPA 2 cayó (code=${code}) — reiniciando en 2s (ETAPA 1 SRT sigue viva)`);
-            setTimeout(spawnDisney7OutputStage, 2000);
+            sendLog(process_id, 'warn', `🔁 ${cfg.label} ETAPA 2 cayó (code=${code}) — reiniciando en 2s (ETAPA 1 SRT sigue viva)`);
+            setTimeout(spawnSrtOutputStage, 2000);
           });
         };
 
-        spawnDisney7OutputStage();
+        spawnSrtOutputStage();
       })().catch(err => {
-        sendLog(process_id, 'error', `❌ Disney 7 BUFFER ETAPA 2 error: ${err.message}`);
+        sendLog(process_id, 'error', `❌ ${cfg.label} BUFFER ETAPA 2 error: ${err.message}`);
       });
     }
 
@@ -3332,7 +3367,7 @@ app.post('/api/emit', async (req, res) => {
         } else if (MANUAL_URL_PROCESSES.has(String(process_id)) || AUTO_INGEST_PROCESSES.has(String(process_id))) {
           // Procesos manuales (Disney 7, Disney 8, Canal 6): reutilizar la misma URL M3U8 guardada en DB
           const procId = parseInt(String(process_id), 10);
-          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8', '12': 'TIGO URL', '15': 'CANAL 6 URL' };
+          const manualLabels = { '0': 'Disney 7', '5': 'Canal 6', '10': 'Disney 8', '12': 'TIGO SRT', '15': 'CANAL 6 URL' };
           const procLabel = manualLabels[String(process_id)] || 'Manual';
           
           const failureType = detectedErrors.get(process_id);
@@ -3494,7 +3529,7 @@ app.post('/api/emit', async (req, res) => {
             }
           });
         } else if (String(process_id) === '12') {
-          sendLog(process_id, 'info', '🛑 TIGO URL quedó detenido: usa Emitir cuando OBS vuelva a enviar señal.');
+          sendLog(process_id, 'info', '🛑 TIGO SRT quedó detenido: usa Emitir cuando OBS vuelva a enviar señal.');
           if (supabase) {
             await supabase.from('emission_processes').update({
               is_active: false,
@@ -4071,7 +4106,7 @@ app.post('/api/emit/restart', async (req, res) => {
     const process_id = String(rawProcessId);
     const numericProcessId = parseInt(process_id, 10);
 
-    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 17) {
+    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 18) {
       return res.status(400).json({ error: `ID inválido: ${rawProcessId}` });
     }
 
@@ -4602,8 +4637,8 @@ setInterval(async () => {
 const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
-  '11': 'FUTV URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
-  '16': 'DISNEY 7 URL', '17': 'FUTV ALTERNO',
+  '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
+  '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT',
 };
 
 // Endpoint para toggle night_rest
@@ -4648,8 +4683,8 @@ app.post('/api/always-on', async (req, res) => {
     if (!supabase) {
       return res.status(500).json({ error: 'Base de datos no disponible' });
     }
-    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '17') {
-      const labels = { '12': 'TIGO URL', '16': 'DISNEY 7 URL', '17': 'FUTV ALTERNO' };
+    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '17' || String(process_id) === '18') {
+      const labels = { '12': 'TIGO SRT', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT' };
       const label = labels[String(process_id)];
       const reason = String(process_id) === '17'
         ? 'es un canal eventual; actívalo manualmente cuando lo necesites'
@@ -4705,7 +4740,7 @@ server.listen(PORT, () => {
           .select('id');
         const existingIds = new Set((existingRows || []).map(r => r.id));
         const missingRows = [];
-        for (let id = 0; id <= 17; id++) {
+        for (let id = 0; id <= 18; id++) {
           if (!existingIds.has(id)) {
             missingRows.push({
               id,
@@ -4731,13 +4766,16 @@ server.listen(PORT, () => {
       }
     })();
 
-    supabase
-      .from('emission_processes')
-      .update({ m3u8: 'rtmp://127.0.0.1/live/tigo', rtmp: 'hls-local' })
-      .eq('id', 12)
-      .then(({ error }) => {
-        if (error) console.error('Error fijando preset de TIGO URL al iniciar servidor:', error.message);
-      });
+    // Fijar presets SRT al arrancar (Tigo, Disney 7, FUTV SRT)
+    for (const id of [12, 16, 18]) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: 'srt://obs', rtmp: 'hls-local' })
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) console.error(`Error fijando preset SRT (id=${id}) al iniciar servidor:`, error.message);
+        });
+    }
 
     // ====== RECUPERACIÓN AL ARRANCAR: levantar canales con always_on=true ======
     // Espera 8s para que el servidor esté completamente listo y luego relanza
@@ -4755,8 +4793,8 @@ server.listen(PORT, () => {
 
         for (const row of alwaysOnRows) {
           const pid = String(row.id);
-          // TIGO URL (12) y DISNEY 7 URL (16) se autoarrancan por su propio path; FUTV ALTERNO (17) es eventual.
-          if (pid === '12' || pid === '16' || pid === '17') continue;
+          // TIGO SRT (12), DISNEY 7 SRT (16) y FUTV SRT (18) se autoarrancan por su propio path; FUTV ALTERNO (17) es eventual.
+          if (pid === '12' || pid === '16' || pid === '17' || pid === '18') continue;
 
           // Limpiar manualStop por si quedó marcado
           manualStopProcesses.delete(pid);
@@ -4820,7 +4858,7 @@ server.listen(PORT, () => {
         const now = Date.now();
         for (const row of rows) {
           const pid = String(row.id);
-          if (pid === '12' || pid === '16' || pid === '17') continue; // URLs locales (OBS) y FUTV ALTERNO excluidas
+          if (pid === '12' || pid === '16' || pid === '17' || pid === '18') continue; // URLs locales (OBS) y FUTV ALTERNO excluidas
 
           // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
@@ -4882,39 +4920,60 @@ server.listen(PORT, () => {
       const tigoRunning = ffmpegProcesses.get('12');
       if (tigoRunning?.process && !tigoRunning.process.killed) return;
 
-      sendLog('12', 'info', '🚀 Auto-arranque TIGO URL al iniciar servidor...');
+      sendLog('12', 'info', '🚀 Auto-arranque TIGO SRT al iniciar servidor...');
       await fetch(`http://localhost:${PORT}/api/emit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          source_m3u8: 'rtmp://127.0.0.1/live/tigo',
+          source_m3u8: 'srt://obs',
           target_rtmp: 'hls-local',
           process_id: '12'
         })
       });
     } catch (error) {
-      console.error('Error auto-arrancando TIGO URL:', error);
+      console.error('Error auto-arrancando TIGO SRT:', error);
     }
   }, 1500);
 
-  // Auto-arranque DISNEY 7 URL (id 16): salida HLS local lista para recibir RTMP de OBS
+  // Auto-arranque DISNEY 7 SRT (id 16): salida HLS local lista para recibir SRT de OBS
   setTimeout(async () => {
     try {
       const disneyRunning = ffmpegProcesses.get('16');
       if (disneyRunning?.process && !disneyRunning.process.killed) return;
 
-      sendLog('16', 'info', '🚀 Auto-arranque DISNEY 7 URL al iniciar servidor...');
+      sendLog('16', 'info', '🚀 Auto-arranque DISNEY 7 SRT al iniciar servidor...');
       await fetch(`http://localhost:${PORT}/api/emit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          source_m3u8: 'rtmp://127.0.0.1/live/Disney7',
+          source_m3u8: 'srt://obs',
           target_rtmp: 'hls-local',
           process_id: '16'
         })
       });
     } catch (error) {
-      console.error('Error auto-arrancando DISNEY 7 URL:', error);
+      console.error('Error auto-arrancando DISNEY 7 SRT:', error);
     }
   }, 2500);
+
+  // Auto-arranque FUTV SRT (id 18): salida HLS local lista para recibir SRT de OBS
+  setTimeout(async () => {
+    try {
+      const futvSrtRunning = ffmpegProcesses.get('18');
+      if (futvSrtRunning?.process && !futvSrtRunning.process.killed) return;
+
+      sendLog('18', 'info', '🚀 Auto-arranque FUTV SRT al iniciar servidor...');
+      await fetch(`http://localhost:${PORT}/api/emit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_m3u8: 'srt://obs',
+          target_rtmp: 'hls-local',
+          process_id: '18'
+        })
+      });
+    } catch (error) {
+      console.error('Error auto-arrancando FUTV SRT:', error);
+    }
+  }, 3500);
 });

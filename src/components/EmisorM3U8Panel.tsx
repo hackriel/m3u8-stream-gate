@@ -16,7 +16,7 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 18;
+const NUM_PROCESSES = 19;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
@@ -26,11 +26,12 @@ const TDMAS1_URL_INDEX = 14;
 const CANAL6_URL_INDEX = 15;
 const DISNEY7_URL_INDEX = 16;
 const FUTV_ALTERNO_INDEX = 17; // Canal eventual con URL pegada del usuario, mismo destino que FUTV URL
+const FUTV_SRT_INDEX = 18; // FUTV SRT: ingest SRT desde OBS por puerto 9002
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
-const TIGO_OBS_INGEST_URL = "rtmp://167.17.69.116/live/tigo";
-const TIGO_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/tigo";
-const DISNEY7_OBS_INGEST_URL = "srt://167.17.69.116:9001?streamid=disney7&latency=2000000&pbkeylen=16&passphrase=36c424356fb0b9e496fcacfc689e3433";
-const DISNEY7_INTERNAL_SOURCE_URL = "srt://obs";
+const TIGO_OBS_INGEST_URL = "srt://167.17.69.116:9000?streamid=tigo&latency=2000000";
+const DISNEY7_OBS_INGEST_URL = "srt://167.17.69.116:9001?streamid=disney7&latency=2000000";
+const FUTV_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9002?streamid=futv&latency=2000000";
+const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
 // Procesos ocultos legacy
 // 2, 8, 9: Tigo legacy (descartados)
@@ -39,9 +40,9 @@ const DISNEY7_INTERNAL_SOURCE_URL = "srt://obs";
 //   La lógica permanece en el código por si se necesita revertir; solo se ocultan los tabs.
 const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX]);
-// Procesos que reciben RTMP local desde OBS (entrada manual interna)
-const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX]);
+// Procesos que reciben SRT desde OBS (entrada manual interna)
+const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX, FUTV_SRT_INDEX]);
 // Procesos eventuales que aceptan URL pegada del usuario y necesitan scraping dinámico
 const PASTE_URL_PROCESSES = new Set<number>([FUTV_ALTERNO_INDEX]);
 // Índices visibles para renderizar tabs
@@ -156,12 +157,13 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "(oculto)", scrapeFn: null, channelId: null, fetchLabel: "" }, // 9: Tigo (descartado)
   { name: "Disney 8", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "FUTV URL", scrapeFn: "scrape-channel", channelId: "641cba02e4b068d89b2344e3", fetchLabel: "🔄 FUTV" },
-  { name: "TIGO URL", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: TIGO_INTERNAL_SOURCE_URL },
+  { name: "TIGO SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "TELETICA URL", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "TDMAS 1 URL", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "CANAL 6 URL", scrapeFn: null, channelId: null, fetchLabel: "🏛️ Repretel", presetUrl: "https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8" },
-  { name: "DISNEY 7 URL", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: DISNEY7_INTERNAL_SOURCE_URL },
+  { name: "DISNEY 7 SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "FUTV ALTERNO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer de URL" },
+  { name: "FUTV SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -468,6 +470,7 @@ export default function EmisorM3U8Panel() {
     const canal6Preset = CHANNEL_CONFIGS[CANAL6_URL_INDEX]?.presetUrl;
     const tigoPreset = CHANNEL_CONFIGS[TIGO_URL_INDEX]?.presetUrl;
     const disney7Preset = CHANNEL_CONFIGS[DISNEY7_URL_INDEX]?.presetUrl;
+    const futvSrtPreset = CHANNEL_CONFIGS[FUTV_SRT_INDEX]?.presetUrl;
     const tigoRtmp = 'hls-local';
     setProcesses(prev => {
       let changed = false;
@@ -480,6 +483,11 @@ export default function EmisorM3U8Panel() {
 
       if (disney7Preset && (next[DISNEY7_URL_INDEX]?.m3u8 !== disney7Preset || next[DISNEY7_URL_INDEX]?.rtmp !== tigoRtmp)) {
         next[DISNEY7_URL_INDEX] = { ...next[DISNEY7_URL_INDEX], m3u8: disney7Preset, rtmp: tigoRtmp };
+        changed = true;
+      }
+
+      if (futvSrtPreset && (next[FUTV_SRT_INDEX]?.m3u8 !== futvSrtPreset || next[FUTV_SRT_INDEX]?.rtmp !== tigoRtmp)) {
+        next[FUTV_SRT_INDEX] = { ...next[FUTV_SRT_INDEX], m3u8: futvSrtPreset, rtmp: tigoRtmp };
         changed = true;
       }
 
@@ -497,7 +505,7 @@ export default function EmisorM3U8Panel() {
         .update({ m3u8: tigoPreset, rtmp: tigoRtmp })
         .eq('id', TIGO_URL_INDEX)
         .then(({ error }) => {
-          if (error) console.error('Error guardando preset de TIGO URL:', error);
+          if (error) console.error('Error guardando preset de TIGO SRT:', error);
         });
     }
 
@@ -507,7 +515,17 @@ export default function EmisorM3U8Panel() {
         .update({ m3u8: disney7Preset, rtmp: tigoRtmp })
         .eq('id', DISNEY7_URL_INDEX)
         .then(({ error }) => {
-          if (error) console.error('Error guardando preset de DISNEY 7 URL:', error);
+          if (error) console.error('Error guardando preset de DISNEY 7 SRT:', error);
+        });
+    }
+
+    if (futvSrtPreset) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: futvSrtPreset, rtmp: tigoRtmp })
+        .eq('id', FUTV_SRT_INDEX)
+        .then(({ error }) => {
+          if (error) console.error('Error guardando preset de FUTV SRT:', error);
         });
     }
 
@@ -1070,7 +1088,7 @@ export default function EmisorM3U8Panel() {
       case "cdn_unavailable": return "El CDN no respondió a las verificaciones de salud. Reintentando…";
       case "circuit_breaker": return "Demasiadas caídas seguidas. El sistema pausó los reintentos automáticos para evitar saturar la fuente. Reinicia manualmente.";
       default:
-        if (isTigo) return "Error en TIGO URL. Posibles causas: proxy SOCKS5 (Pi5 CR), token expirado, Teletica cortó la sesión, o CDN inestable.";
+        if (isTigo) return "Error en TIGO SRT. Verifica que OBS esté enviando señal al puerto 9000 del VPS.";
         return "Ocurrió un error durante la emisión. Revisa la configuración e intenta nuevamente.";
     }
   };
@@ -1090,12 +1108,13 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-teal-500", text: "text-teal-500", stroke: "#14b8a6", name: "(oculto)" },
       { bg: "bg-indigo-500", text: "text-indigo-500", stroke: "#6366f1", name: "Disney 8" },
       { bg: "bg-emerald-500", text: "text-emerald-500", stroke: "#10b981", name: "FUTV URL" },
-      { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "TIGO URL" },
+      { bg: "bg-sky-500", text: "text-sky-500", stroke: "#0ea5e9", name: "TIGO SRT" },
       { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "TELETICA URL" },
       { bg: "bg-lime-500", text: "text-lime-500", stroke: "#84cc16", name: "TDMAS 1 URL" },
       { bg: "bg-amber-500", text: "text-amber-500", stroke: "#f59e0b", name: "CANAL 6 URL" },
-      { bg: "bg-gray-400", text: "text-gray-300", stroke: "#d1d5db", name: "DISNEY 7 URL" },
+      { bg: "bg-gray-400", text: "text-gray-300", stroke: "#d1d5db", name: "DISNEY 7 SRT" },
       { bg: "bg-rose-500", text: "text-rose-500", stroke: "#f43f5e", name: "FUTV ALTERNO" },
+      { bg: "bg-fuchsia-500", text: "text-fuchsia-500", stroke: "#d946ef", name: "FUTV SRT" },
     ];
     return colors[processIndex];
   };
@@ -1159,11 +1178,9 @@ export default function EmisorM3U8Panel() {
               // Procesos M3U8 normales
               <>
                 <label className="block text-sm mb-2 text-muted-foreground">
-                  {processIndex === DISNEY7_URL_INDEX
+                  {OBS_INGEST_PROCESSES.has(processIndex)
                     ? 'Entrada SRT (OBS)'
-                    : OBS_INGEST_PROCESSES.has(processIndex)
-                      ? 'Entrada RTMP interna'
-                      : PASTE_URL_PROCESSES.has(processIndex)
+                    : PASTE_URL_PROCESSES.has(processIndex)
                       ? 'URL del player TDMax (pega aquí)'
                       : 'URL M3U8 (fuente)'}
                 </label>
@@ -1201,7 +1218,9 @@ export default function EmisorM3U8Panel() {
                         ? TIGO_OBS_INGEST_URL
                         : processIndex === DISNEY7_URL_INDEX
                           ? DISNEY7_OBS_INGEST_URL
-                          : PASTE_URL_PROCESSES.has(processIndex)
+                          : processIndex === FUTV_SRT_INDEX
+                            ? FUTV_SRT_OBS_INGEST_URL
+                            : PASTE_URL_PROCESSES.has(processIndex)
                             ? 'M3U8 extraído (auto-completado)'
                             : 'https://servidor/origen/playlist.m3u8'
                     }
@@ -1247,6 +1266,7 @@ export default function EmisorM3U8Panel() {
                 [CANAL6_URL_INDEX]: 'Canal6',
                 [DISNEY7_URL_INDEX]: 'Disney7',
                 [FUTV_ALTERNO_INDEX]: 'futv',
+                [FUTV_SRT_INDEX]: 'FutvSrt',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
@@ -1255,7 +1275,9 @@ export default function EmisorM3U8Panel() {
                 ? TIGO_OBS_INGEST_URL
                 : processIndex === DISNEY7_URL_INDEX
                   ? DISNEY7_OBS_INGEST_URL
-                  : '';
+                  : processIndex === FUTV_SRT_INDEX
+                    ? FUTV_SRT_OBS_INGEST_URL
+                    : '';
               return (
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
@@ -1265,7 +1287,7 @@ export default function EmisorM3U8Panel() {
                       {isObsIngest && (
                         <>
                           <p className="text-xs text-muted-foreground">
-                            {processIndex === DISNEY7_URL_INDEX ? 'SRT de entrada para OBS:' : 'RTMP de entrada para OBS:'}
+                            SRT de entrada para OBS:
                           </p>
                           <div className="flex items-center gap-2">
                             <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
@@ -1274,7 +1296,7 @@ export default function EmisorM3U8Panel() {
                             <button
                               onClick={() => {
                                 navigator.clipboard.writeText(obsIngestUrl);
-                                toast.success(processIndex === DISNEY7_URL_INDEX ? 'URL SRT copiada al portapapeles' : 'RTMP copiada al portapapeles');
+                                toast.success('URL SRT copiada al portapapeles');
                               }}
                               className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
                             >
@@ -1300,7 +1322,7 @@ export default function EmisorM3U8Panel() {
                       </div>
                       <p className="text-xs text-muted-foreground mt-2">
                         {isObsIngest
-                          ? '💡 Envía desde OBS a esa RTMP y tus clientes consumirán la HLS fija de abajo.'
+                          ? '💡 Envía desde OBS a esa SRT y tus clientes consumirán la HLS fija de abajo.'
                           : '💡 Esta URL es fija y no cambia. Agrégala directamente a XUI como source.'}
                       </p>
                     </div>
@@ -1364,7 +1386,7 @@ export default function EmisorM3U8Panel() {
               )}
             </div>
 
-            {/* Always-On Toggle (excluye TIGO URL y DISNEY 7 URL que dependen de OBS local) */}
+            {/* Always-On Toggle (excluye TIGO SRT, DISNEY 7 SRT y FUTV SRT que dependen de OBS local) */}
             {processIndex !== FILE_UPLOAD_INDEX && !OBS_INGEST_PROCESSES.has(processIndex) && (
               <div className="flex items-center gap-3 mt-4 p-3 rounded-xl bg-card/50 border border-primary/30">
                 <Switch
