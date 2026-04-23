@@ -2747,11 +2747,12 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // ── Disney 7 BUFFER ETAPA 2 ─────────────────────────────────────
+    // ── SRT BUFFER ETAPA 2 (Tigo / Disney 7 / FUTV SRT) ─────────────
     // Tras spawnear el SRT listener (ETAPA 1), espera ≥3 segs en buffer
-    // y arranca un transcoder local que lee de /tmp/disney7-buffer-16/buf.m3u8
-    // y emite a /live/Disney7/playlist.m3u8 (lo que consumen los usuarios).
-    if (isDisney7SrtMode) {
+    // y arranca un transcoder local que lee del buffer del proceso
+    // y emite a /live/<slug>/playlist.m3u8 (lo que consumen los usuarios).
+    if (isSrtIngestMode) {
+      const cfg = srtIngestCfg;
       (async () => {
         const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
         const outDir = path.join(HLS_OUTPUT_DIR, slug);
@@ -2762,21 +2763,21 @@ app.post('/api/emit', async (req, res) => {
           }
         } catch (_) {}
 
-        sendLog(process_id, 'info', `⏳ Disney 7 BUFFER ETAPA 2: esperando ≥${DISNEY7_BUFFER_MIN_SEGMENTS} segmentos SRT...`);
-        const ready = await waitForDisney7BufferReady();
+        sendLog(process_id, 'info', `⏳ ${cfg.label} BUFFER ETAPA 2: esperando ≥${cfg.minSegments} segmentos SRT...`);
+        const ready = await waitForSrtBufferReady(cfg);
         if (!ready.ready) {
-          sendLog(process_id, 'error', `❌ Disney 7 BUFFER: timeout (${ready.waitedMs}ms). ¿OBS está conectado al SRT?`);
+          sendLog(process_id, 'error', `❌ ${cfg.label} BUFFER: timeout (${ready.waitedMs}ms). ¿OBS está conectado al SRT?`);
           return;
         }
-        sendLog(process_id, 'success', `✅ Disney 7 BUFFER listo (${ready.segments} segs en ${ready.waitedMs}ms) — spawneando ETAPA 2`);
+        sendLog(process_id, 'success', `✅ ${cfg.label} BUFFER listo (${ready.segments} segs en ${ready.waitedMs}ms) — spawneando ETAPA 2`);
 
-        const spawnDisney7OutputStage = () => {
+        const spawnSrtOutputStage = () => {
           if (manualStopProcesses.has(process_id) || manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
             return;
           }
           const ingestProc = ffmpegProcesses.get(process_id);
           if (!ingestProc || !ingestProc.process || ingestProc.process.killed) {
-            sendLog(process_id, 'warn', `⚠️ Disney 7 ETAPA 2: ETAPA 1 no está viva, abortando spawn`);
+            sendLog(process_id, 'warn', `⚠️ ${cfg.label} ETAPA 2: ETAPA 1 no está viva, abortando spawn`);
             return;
           }
 
@@ -2786,7 +2787,7 @@ app.post('/api/emit', async (req, res) => {
             '-fflags', '+genpts+discardcorrupt',
             '-analyzeduration', '3000000',
             '-probesize', '1500000',
-            '-i', DISNEY7_BUFFER_PLAYLIST,
+            '-i', cfg.bufferPlaylist,
             '-map', '0:v:0?',
             '-map', '0:a:0?',
             '-c:v', 'libx264',
@@ -2819,7 +2820,7 @@ app.post('/api/emit', async (req, res) => {
           ];
           const stage2 = spawn('ffmpeg', stage2Args);
           tigoOutputProcesses.set(String(process_id), stage2);
-          sendLog(process_id, 'success', `🎬 Disney 7 BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode 720p CBR 2000k @ 30fps)`);
+          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode 720p CBR 2000k @ 30fps)`);
 
           stage2.stderr.on('data', (data) => {
             const out = data.toString();
@@ -2835,17 +2836,17 @@ app.post('/api/emit', async (req, res) => {
             const isAlive = stillRunning && stillRunning.process && !stillRunning.process.killed;
             const wasManual = manualStopProcesses.has(process_id) || manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id));
             if (wasManual || !isAlive) {
-              sendLog(process_id, 'info', `🛑 Disney 7 ETAPA 2 terminada (code=${code}, signal=${signal || '-'})`);
+              sendLog(process_id, 'info', `🛑 ${cfg.label} ETAPA 2 terminada (code=${code}, signal=${signal || '-'})`);
               return;
             }
-            sendLog(process_id, 'warn', `🔁 Disney 7 ETAPA 2 cayó (code=${code}) — reiniciando en 2s (ETAPA 1 SRT sigue viva)`);
-            setTimeout(spawnDisney7OutputStage, 2000);
+            sendLog(process_id, 'warn', `🔁 ${cfg.label} ETAPA 2 cayó (code=${code}) — reiniciando en 2s (ETAPA 1 SRT sigue viva)`);
+            setTimeout(spawnSrtOutputStage, 2000);
           });
         };
 
-        spawnDisney7OutputStage();
+        spawnSrtOutputStage();
       })().catch(err => {
-        sendLog(process_id, 'error', `❌ Disney 7 BUFFER ETAPA 2 error: ${err.message}`);
+        sendLog(process_id, 'error', `❌ ${cfg.label} BUFFER ETAPA 2 error: ${err.message}`);
       });
     }
 
