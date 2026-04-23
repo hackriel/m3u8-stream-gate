@@ -2373,6 +2373,11 @@ app.post('/api/emit', async (req, res) => {
     // de proxychains/CDN.
     const isTigoHdmiMode = String(process_id) === '12' && TIGO_USE_HDMI;
     const useTigoBuffer = false;
+    const isDisney7SrtMode = String(process_id) === '16' && (
+      !source_m3u8 ||
+      String(source_m3u8).startsWith('srt://obs') ||
+      String(source_m3u8).startsWith('srt://0.0.0.0')
+    );
 
     if (useTigoBuffer) {
       // Sobrescribir args de salida: NO transcodear aquí, solo remuxear a HLS local.
