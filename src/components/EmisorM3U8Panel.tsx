@@ -411,6 +411,7 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     const canal6Preset = CHANNEL_CONFIGS[CANAL6_URL_INDEX]?.presetUrl;
     const tigoPreset = CHANNEL_CONFIGS[TIGO_URL_INDEX]?.presetUrl;
+    const disney7Preset = CHANNEL_CONFIGS[DISNEY7_URL_INDEX]?.presetUrl;
     const tigoRtmp = 'hls-local';
     setProcesses(prev => {
       let changed = false;
@@ -418,6 +419,11 @@ export default function EmisorM3U8Panel() {
 
       if (tigoPreset && (next[TIGO_URL_INDEX]?.m3u8 !== tigoPreset || next[TIGO_URL_INDEX]?.rtmp !== tigoRtmp)) {
         next[TIGO_URL_INDEX] = { ...next[TIGO_URL_INDEX], m3u8: tigoPreset, rtmp: tigoRtmp };
+        changed = true;
+      }
+
+      if (disney7Preset && (next[DISNEY7_URL_INDEX]?.m3u8 !== disney7Preset || next[DISNEY7_URL_INDEX]?.rtmp !== tigoRtmp)) {
+        next[DISNEY7_URL_INDEX] = { ...next[DISNEY7_URL_INDEX], m3u8: disney7Preset, rtmp: tigoRtmp };
         changed = true;
       }
 
@@ -436,6 +442,16 @@ export default function EmisorM3U8Panel() {
         .eq('id', TIGO_URL_INDEX)
         .then(({ error }) => {
           if (error) console.error('Error guardando preset de TIGO URL:', error);
+        });
+    }
+
+    if (disney7Preset) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: disney7Preset, rtmp: tigoRtmp })
+        .eq('id', DISNEY7_URL_INDEX)
+        .then(({ error }) => {
+          if (error) console.error('Error guardando preset de DISNEY 7 URL:', error);
         });
     }
 
