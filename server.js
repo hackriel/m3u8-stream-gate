@@ -2404,11 +2404,12 @@ app.post('/api/emit', async (req, res) => {
     // de proxychains/CDN.
     const isTigoHdmiMode = String(process_id) === '12' && TIGO_USE_HDMI;
     const useTigoBuffer = false;
-    const isDisney7SrtMode = String(process_id) === '16' && (
+    const isSrtIngestMode = isSrtIngestProcess(process_id) && (
       !source_m3u8 ||
       String(source_m3u8).startsWith('srt://obs') ||
       String(source_m3u8).startsWith('srt://0.0.0.0')
     );
+    const srtIngestCfg = isSrtIngestMode ? getSrtConfig(process_id) : null;
 
     if (useTigoBuffer) {
       // Sobrescribir args de salida: NO transcodear aquí, solo remuxear a HLS local.
@@ -2609,8 +2610,8 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // ── Parser de métricas SRT Disney 7 (mismo patrón que Tigo) ──
-    if (isDisney7SrtMode) {
+    // ── Parser de métricas SRT genérico (Disney 7 / Tigo / FUTV) ──
+    if (isSrtIngestMode) {
       ffmpegProcess.stderr.on('data', (data) => {
         const text = data.toString();
         for (const line of text.split('\n')) {
