@@ -1238,13 +1238,13 @@ export default function EmisorM3U8Panel() {
             )}
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
               const hlsSlugs: Record<number, string> = {
-                [FUTV_URL_INDEX]: 'FUTV',
+                [FUTV_URL_INDEX]: 'futv',
                 [TIGO_URL_INDEX]: 'Tigo',
                 [TELETICA_URL_INDEX]: 'Teletica',
                 [TDMAS1_URL_INDEX]: 'Tdmas1',
                 [CANAL6_URL_INDEX]: 'Canal6',
                 [DISNEY7_URL_INDEX]: 'Disney7',
-                [FUTV_ALTERNO_INDEX]: 'FUTV',
+                [FUTV_ALTERNO_INDEX]: 'futv',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
