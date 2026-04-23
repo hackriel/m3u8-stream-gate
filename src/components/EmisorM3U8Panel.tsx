@@ -1200,6 +1200,7 @@ export default function EmisorM3U8Panel() {
                 [TDMAS1_URL_INDEX]: 'Tdmas1',
                 [CANAL6_URL_INDEX]: 'Canal6',
                 [DISNEY7_URL_INDEX]: 'Disney7',
+                [FUTV_ALTERNO_INDEX]: 'FUTV',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
