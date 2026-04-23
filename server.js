@@ -1592,9 +1592,9 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Validación de ID: debe ser un número entre 0 y 16
-    if (isNaN(numericId) || numericId < 0 || numericId > 16) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-16)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 16` });
+    if (isNaN(numericId) || numericId < 0 || numericId > 17) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-17)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 17` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
