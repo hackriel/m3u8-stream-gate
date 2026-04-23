@@ -461,28 +461,29 @@ const cleanTigoBufferDir = () => {
   }
 };
 
-// ── Helpers genéricos para Disney 7 SRT (replican patrón Tigo) ──
-const cleanDisney7BufferDir = () => {
+// ── Helpers genéricos para SRT ingest (Tigo, Disney 7, FUTV SRT...) ──
+const cleanSrtBufferDir = (cfg) => {
   try {
-    if (fs.existsSync(DISNEY7_BUFFER_DIR)) {
-      for (const f of fs.readdirSync(DISNEY7_BUFFER_DIR)) {
-        try { fs.unlinkSync(path.join(DISNEY7_BUFFER_DIR, f)); } catch (_) {}
+    if (fs.existsSync(cfg.bufferDir)) {
+      for (const f of fs.readdirSync(cfg.bufferDir)) {
+        try { fs.unlinkSync(path.join(cfg.bufferDir, f)); } catch (_) {}
       }
     } else {
-      fs.mkdirSync(DISNEY7_BUFFER_DIR, { recursive: true });
+      fs.mkdirSync(cfg.bufferDir, { recursive: true });
     }
   } catch (err) {
-    console.error('[disney7-buffer] cleanDisney7BufferDir error:', err.message);
+    console.error(`[srt-buffer:${cfg.label}] clean error:`, err.message);
   }
 };
 
-const waitForDisney7BufferReady = async (timeoutMs = DISNEY7_BUFFER_WAIT_TIMEOUT_MS) => {
+const waitForSrtBufferReady = async (cfg, timeoutMs) => {
+  const limit = timeoutMs || cfg.waitTimeoutMs;
   const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+  while (Date.now() - start < limit) {
     try {
-      if (fs.existsSync(DISNEY7_BUFFER_PLAYLIST)) {
-        const segs = fs.readdirSync(DISNEY7_BUFFER_DIR).filter(f => f.endsWith('.ts'));
-        if (segs.length >= DISNEY7_BUFFER_MIN_SEGMENTS) {
+      if (fs.existsSync(cfg.bufferPlaylist)) {
+        const segs = fs.readdirSync(cfg.bufferDir).filter(f => f.endsWith('.ts'));
+        if (segs.length >= cfg.minSegments) {
           return { ready: true, segments: segs.length, waitedMs: Date.now() - start };
         }
       }
@@ -492,15 +493,16 @@ const waitForDisney7BufferReady = async (timeoutMs = DISNEY7_BUFFER_WAIT_TIMEOUT
   return { ready: false, segments: 0, waitedMs: Date.now() - start };
 };
 
-// ETAPA 1 Disney 7: FFmpeg SRT listener que recibe de OBS y escribe HLS buffer local.
-const startDisney7SrtIngest = (process_id) => {
-  cleanDisney7BufferDir();
-  resetTigoSrtMetric(process_id); // reusamos el mapa de métricas SRT (es genérico por process_id)
+// ETAPA 1 SRT genérico: FFmpeg SRT listener que recibe de OBS y escribe HLS buffer local.
+const startSrtIngest = (process_id) => {
+  const cfg = getSrtConfig(process_id);
+  if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
+  cleanSrtBufferDir(cfg);
+  resetTigoSrtMetric(process_id); // mapa de métricas SRT (genérico por process_id)
 
-  // SRT listener con encriptación opcional (AES-128 si hay passphrase)
-  let srtUrl = `srt://0.0.0.0:${DISNEY7_SRT_PORT}?mode=listener&latency=${DISNEY7_SRT_LATENCY_US}&pkt_size=1316`;
-  if (DISNEY7_SRT_PASSPHRASE && DISNEY7_SRT_PASSPHRASE.length >= 10) {
-    srtUrl += `&pbkeylen=16&passphrase=${encodeURIComponent(DISNEY7_SRT_PASSPHRASE)}`;
+  let srtUrl = `srt://0.0.0.0:${cfg.port}?mode=listener&latency=${cfg.latencyUs}&pkt_size=1316`;
+  if (cfg.passphrase && cfg.passphrase.length >= 10) {
+    srtUrl += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
   }
 
   const args = [
@@ -519,15 +521,15 @@ const startDisney7SrtIngest = (process_id) => {
     '-hls_list_size', '8',
     '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
     '-hls_segment_type', 'mpegts',
-    '-hls_segment_filename', path.join(DISNEY7_BUFFER_DIR, 'buf_%05d.ts'),
+    '-hls_segment_filename', path.join(cfg.bufferDir, 'buf_%05d.ts'),
     '-hls_allow_cache', '0',
     '-hls_start_number_source', 'epoch',
-    DISNEY7_BUFFER_PLAYLIST,
+    cfg.bufferPlaylist,
   ];
 
   const proc = spawn('ffmpeg', args);
   updateTigoSrtMetric(process_id, { connected: false, since: Date.now() });
-  return { process: proc, args, command: `ffmpeg ${args.join(' ')}` };
+  return { process: proc, args, command: `ffmpeg ${args.join(' ')}`, cfg };
 };
 
 const waitForTigoBufferReady = async (timeoutMs = TIGO_BUFFER_WAIT_TIMEOUT_MS) => {
