@@ -903,11 +903,25 @@ export default function EmisorM3U8Panel() {
 
   async function onBorrar(processIndex: number) {
     const process = processes[processIndex];
-    
-    if (process.isEmitiendo) {
-      await stopEmit(processIndex);
+
+    // Marcar UI como deteniendo de inmediato para que el usuario vea feedback.
+    updateProcess(processIndex, {
+      emitStatus: "stopping",
+      emitMsg: "Limpiando proceso...",
+    });
+
+    // SIEMPRE pedir al server que detenga FFmpeg, aunque la UI diga isEmitiendo=false.
+    // (Cubre el caso de FFmpeg zombi del lado del server tras un error/recovery fallido).
+    try {
+      await fetch("/api/emit/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ process_id: processIndex.toString() })
+      });
+    } catch (e) {
+      console.error("Error parando proceso al borrar:", e);
     }
-    
+
     if (processIndex === FILE_UPLOAD_INDEX && uploadedFiles.length > 0) {
       fetch('/api/emit/files', {
         method: 'DELETE',
@@ -918,7 +932,8 @@ export default function EmisorM3U8Panel() {
       setUploadedFiles([]);
       setUploadProgress(0);
     }
-    
+
+    // Limpiar estado local DESPUÉS del stop para que no haya pisada de realtime.
     updateProcess(processIndex, {
       m3u8: "",
       rtmp: "",
@@ -933,11 +948,21 @@ export default function EmisorM3U8Panel() {
       recoveryCount: 0,
       lastSignalDuration: 0,
     });
-    
-    // Reset recovery_count and last_signal_duration in DB
+
+    // Limpieza completa en DB de manera atómica (incluye flags de emisión por si quedaron en true).
     await supabase
       .from('emission_processes')
-      .update({ 
+      .update({
+        m3u8: '',
+        rtmp: '',
+        source_url: '',
+        is_emitting: false,
+        is_active: false,
+        emit_status: 'idle',
+        emit_msg: '',
+        start_time: 0,
+        elapsed: 0,
+        ffmpeg_pid: null,
         recovery_count: 0,
         last_signal_duration: 0,
         failure_reason: null,
