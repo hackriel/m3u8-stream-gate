@@ -29,8 +29,8 @@ const FUTV_ALTERNO_INDEX = 17; // Canal eventual con URL pegada del usuario, mis
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "rtmp://167.17.69.116/live/tigo";
 const TIGO_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/tigo";
-const DISNEY7_OBS_INGEST_URL = "rtmp://167.17.69.116/live/Disney7";
-const DISNEY7_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/Disney7";
+const DISNEY7_OBS_INGEST_URL = "srt://167.17.69.116:9001?streamid=disney7&latency=2000000&pbkeylen=16&passphrase=36c424356fb0b9e496fcacfc689e3433";
+const DISNEY7_INTERNAL_SOURCE_URL = "srt://obs";
 
 // Procesos ocultos legacy
 // 2, 8, 9: Tigo legacy (descartados)
@@ -1159,9 +1159,11 @@ export default function EmisorM3U8Panel() {
               // Procesos M3U8 normales
               <>
                 <label className="block text-sm mb-2 text-muted-foreground">
-                  {OBS_INGEST_PROCESSES.has(processIndex)
-                    ? 'Entrada RTMP interna'
-                    : PASTE_URL_PROCESSES.has(processIndex)
+                  {processIndex === DISNEY7_URL_INDEX
+                    ? 'Entrada SRT (OBS)'
+                    : OBS_INGEST_PROCESSES.has(processIndex)
+                      ? 'Entrada RTMP interna'
+                      : PASTE_URL_PROCESSES.has(processIndex)
                       ? 'URL del player TDMax (pega aquí)'
                       : 'URL M3U8 (fuente)'}
                 </label>
@@ -1262,7 +1264,9 @@ export default function EmisorM3U8Panel() {
                     <div className="space-y-2">
                       {isObsIngest && (
                         <>
-                          <p className="text-xs text-muted-foreground">RTMP de entrada para OBS:</p>
+                          <p className="text-xs text-muted-foreground">
+                            {processIndex === DISNEY7_URL_INDEX ? 'SRT de entrada para OBS:' : 'RTMP de entrada para OBS:'}
+                          </p>
                           <div className="flex items-center gap-2">
                             <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
                               {obsIngestUrl}
@@ -1270,7 +1274,7 @@ export default function EmisorM3U8Panel() {
                             <button
                               onClick={() => {
                                 navigator.clipboard.writeText(obsIngestUrl);
-                                toast.success('RTMP copiada al portapapeles');
+                                toast.success(processIndex === DISNEY7_URL_INDEX ? 'URL SRT copiada al portapapeles' : 'RTMP copiada al portapapeles');
                               }}
                               className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
                             >
