@@ -1088,7 +1088,7 @@ export default function EmisorM3U8Panel() {
       case "cdn_unavailable": return "El CDN no respondió a las verificaciones de salud. Reintentando…";
       case "circuit_breaker": return "Demasiadas caídas seguidas. El sistema pausó los reintentos automáticos para evitar saturar la fuente. Reinicia manualmente.";
       default:
-        if (isTigo) return "Error en TIGO URL. Posibles causas: proxy SOCKS5 (Pi5 CR), token expirado, Teletica cortó la sesión, o CDN inestable.";
+        if (isTigo) return "Error en TIGO SRT. Verifica que OBS esté enviando señal al puerto 9000 del VPS.";
         return "Ocurrió un error durante la emisión. Revisa la configuración e intenta nuevamente.";
     }
   };
