@@ -33,7 +33,11 @@ const DISNEY7_OBS_INGEST_URL = "rtmp://167.17.69.116/live/Disney7";
 const DISNEY7_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/Disney7";
 
 // Procesos ocultos legacy
-const HIDDEN_PROCESSES = new Set([2, 8, 9]);
+// 2, 8, 9: Tigo legacy (descartados)
+// 1, 3, 4, 5, 6, 7: tabs antiguos (FUTV, TDmas 1, Teletica, Canal 6, Multimedios, Subida)
+//   reemplazados por la nueva tecnología (FUTV URL, TDMAS 1 URL, TELETICA URL, CANAL 6 URL, FUTV ALTERNO).
+//   La lógica permanece en el código por si se necesita revertir; solo se ocultan los tabs.
+const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 // Procesos que emiten HLS local (sin RTMP)
 const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX]);
 // Procesos que reciben RTMP local desde OBS (entrada manual interna)
