@@ -1052,6 +1052,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-lime-500", text: "text-lime-500", stroke: "#84cc16", name: "TDMAS 1 URL" },
       { bg: "bg-amber-500", text: "text-amber-500", stroke: "#f59e0b", name: "CANAL 6 URL" },
       { bg: "bg-gray-400", text: "text-gray-300", stroke: "#d1d5db", name: "DISNEY 7 URL" },
+      { bg: "bg-rose-500", text: "text-rose-500", stroke: "#f43f5e", name: "FUTV ALTERNO" },
     ];
     return colors[processIndex];
   };
