@@ -1711,7 +1711,7 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    if (isManualObsIngest) {
+    if (isManualObsIngest && !isDisney7SrtIngest) {
       effectiveSourceM3u8 = process_id === '16'
         ? 'rtmp://127.0.0.1/live/Disney7'
         : 'rtmp://127.0.0.1/live/tigo';
