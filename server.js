@@ -1880,7 +1880,7 @@ app.post('/api/emit', async (req, res) => {
         '-thread_queue_size', '16384'
       );
       sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1 endurecida): max_reload=50, hold=50, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
-    } else if (isManualProcess || isScrapedChannel) {
+    } else if (isManualProcess || needsTdmaxLikePinning) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         // ⚡ ANTI-STALL (Apr 2026): bajamos drásticamente max_reload.
