@@ -2460,6 +2460,14 @@ app.post('/api/emit', async (req, res) => {
       spawnCmd = 'ffmpeg';
       spawnArgs = ingest.args;
       sendLog(process_id, 'success', `🛰️ ETAPA 1 HDMI activa: srt://0.0.0.0:${TIGO_SRT_PORT} → ${TIGO_BUFFER_PLAYLIST}`);
+    } else if (isDisney7SrtMode) {
+      sendLog(process_id, 'info', `📡 Disney 7 SRT: arrancando listener en :${DISNEY7_SRT_PORT} (esperando OBS...)`);
+      const ingest = startDisney7SrtIngest(process_id);
+      ffmpegProcess = ingest.process;
+      spawnCmd = 'ffmpeg';
+      spawnArgs = ingest.args;
+      const encInfo = DISNEY7_SRT_PASSPHRASE ? '🔐 AES-128' : '⚠️ sin encriptación';
+      sendLog(process_id, 'success', `🛰️ ETAPA 1 SRT activa: srt://0.0.0.0:${DISNEY7_SRT_PORT} → ${DISNEY7_BUFFER_PLAYLIST} (${encInfo}, latency=${DISNEY7_SRT_LATENCY_MS}ms)`);
     } else if (PROXY_PROCESSES.has(process_id)) {
       // ── MODO PROXY (legacy/fallback): proxychains4 → CDN HLS ──
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
