@@ -976,6 +976,43 @@ export default function EmisorM3U8Panel() {
     console.log(`🧹 ${CHANNEL_CONFIGS[processIndex].name} limpiado completamente`);
   }
 
+  // 🔄 Reinicio en caliente con sesión fresca:
+  // - Mata el FFmpeg actual del canal.
+  // - Limpia cookies/token cacheados en el server.
+  // - Vuelve a arrancar con un User-Agent rotativo nuevo.
+  // NO toca "Encendido siempre" (alwaysOn).
+  async function onReiniciar(processIndex: number) {
+    const proc = processes[processIndex];
+    const channelName = CHANNEL_CONFIGS[processIndex]?.name ?? `Proceso ${processIndex}`;
+
+    updateProcess(processIndex, {
+      emitStatus: "starting",
+      emitMsg: "Reiniciando con sesión fresca...",
+    });
+
+    try {
+      const resp = await fetch("/api/emit/restart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          process_id: processIndex.toString(),
+          source_m3u8: proc.m3u8 || undefined,
+          target_rtmp: proc.rtmp || undefined,
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        toast.error(`Reinicio falló: ${data?.error ?? resp.statusText}`);
+        updateProcess(processIndex, { emitStatus: "error", emitMsg: data?.error ?? "Reinicio falló" });
+        return;
+      }
+      toast.success(`${channelName} reiniciado con sesión fresca 🎭`);
+    } catch (e: any) {
+      toast.error(`Error al reiniciar: ${e?.message ?? e}`);
+      updateProcess(processIndex, { emitStatus: "error", emitMsg: "Error al reiniciar" });
+    }
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "starting": return "bg-warning";
