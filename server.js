@@ -4104,7 +4104,7 @@ app.post('/api/emit/restart', async (req, res) => {
     const process_id = String(rawProcessId);
     const numericProcessId = parseInt(process_id, 10);
 
-    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 17) {
+    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 18) {
       return res.status(400).json({ error: `ID inválido: ${rawProcessId}` });
     }
 
@@ -4635,8 +4635,8 @@ setInterval(async () => {
 const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
-  '11': 'FUTV URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
-  '16': 'DISNEY 7 URL', '17': 'FUTV ALTERNO',
+  '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
+  '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT',
 };
 
 // Endpoint para toggle night_rest
@@ -4681,8 +4681,8 @@ app.post('/api/always-on', async (req, res) => {
     if (!supabase) {
       return res.status(500).json({ error: 'Base de datos no disponible' });
     }
-    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '17') {
-      const labels = { '12': 'TIGO URL', '16': 'DISNEY 7 URL', '17': 'FUTV ALTERNO' };
+    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '17' || String(process_id) === '18') {
+      const labels = { '12': 'TIGO SRT', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT' };
       const label = labels[String(process_id)];
       const reason = String(process_id) === '17'
         ? 'es un canal eventual; actívalo manualmente cuando lo necesites'
@@ -4738,7 +4738,7 @@ server.listen(PORT, () => {
           .select('id');
         const existingIds = new Set((existingRows || []).map(r => r.id));
         const missingRows = [];
-        for (let id = 0; id <= 17; id++) {
+        for (let id = 0; id <= 18; id++) {
           if (!existingIds.has(id)) {
             missingRows.push({
               id,
@@ -4788,8 +4788,8 @@ server.listen(PORT, () => {
 
         for (const row of alwaysOnRows) {
           const pid = String(row.id);
-          // TIGO URL (12) y DISNEY 7 URL (16) se autoarrancan por su propio path; FUTV ALTERNO (17) es eventual.
-          if (pid === '12' || pid === '16' || pid === '17') continue;
+          // TIGO SRT (12), DISNEY 7 SRT (16) y FUTV SRT (18) se autoarrancan por su propio path; FUTV ALTERNO (17) es eventual.
+          if (pid === '12' || pid === '16' || pid === '17' || pid === '18') continue;
 
           // Limpiar manualStop por si quedó marcado
           manualStopProcesses.delete(pid);
@@ -4853,7 +4853,7 @@ server.listen(PORT, () => {
         const now = Date.now();
         for (const row of rows) {
           const pid = String(row.id);
-          if (pid === '12' || pid === '16' || pid === '17') continue; // URLs locales (OBS) y FUTV ALTERNO excluidas
+          if (pid === '12' || pid === '16' || pid === '17' || pid === '18') continue; // URLs locales (OBS) y FUTV ALTERNO excluidas
 
           // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
