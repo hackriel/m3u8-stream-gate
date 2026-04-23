@@ -1834,6 +1834,10 @@ app.post('/api/emit', async (req, res) => {
 
     const hardenedLiveInputArgs = [];
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
+    // FUTV ALTERNO (17) NO está en CHANNEL_MAP (para no chocar en recovery con FUTV/11),
+    // pero recibe la misma URL master de TDMax → necesita Variant Pinning igual que los scrapeados.
+    // CANAL 6 URL (15) idem.
+    const needsTdmaxLikePinning = isScrapedChannel || process_id === '17' || process_id === '15';
 
     if (isUnivisionLikeSource) {
       // Univision: minimal HLS flags, let the HLS demuxer handle everything internally.
