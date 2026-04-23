@@ -1912,7 +1912,9 @@ app.post('/api/emit', async (req, res) => {
     const probeSize      = isStableSource ? '2000000' : (isRecovery ? '500000'  : '1500000');
 
     // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
-    const isRtmpInputSource = isManualObsIngest;
+    // Nota: para procesos OBS-ingest (SRT) el spawn real ocurre en `startSrtIngest`,
+    // así que estas variables solo aplican a flujos HLS/RTMP convencionales.
+    const isRtmpInputSource = isManualObsIngest; // (legacy alias, kept for branch below)
     const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id)) && !isRtmpInputSource;
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
