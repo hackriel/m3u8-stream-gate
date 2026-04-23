@@ -372,6 +372,21 @@ const TIGO_BUFFER_PLAYLIST = path.join(TIGO_BUFFER_DIR, 'buf.m3u8');
 const TIGO_BUFFER_MIN_SEGMENTS = 3; // HDMI no tiene jitter de CDN, 3 segs = ~30s buffer
 const TIGO_BUFFER_WAIT_TIMEOUT_MS = 60000; // Máx 60s esperando primer buffer
 
+// ── Disney 7 (ID 16) SRT INGEST desde OBS ──────────────────────────
+// Recibe SRT desde OBS (caller) → buffer HLS local → ETAPA 2 transcoder
+// → /live/Disney7/playlist.m3u8. Independiente del flujo Tigo.
+// Para activar: OBS apunta a srt://VPS_IP:9001?streamid=disney7&passphrase=...
+// Cuando el dashboard arranca Disney 7 (ID 16) sin URL de origen, el sistema
+// arranca automáticamente el listener SRT en este puerto.
+const DISNEY7_SRT_PORT = parseInt(process.env.DISNEY7_SRT_PORT || '9001', 10);
+const DISNEY7_SRT_LATENCY_MS = parseInt(process.env.DISNEY7_SRT_LATENCY_MS || '2000', 10);
+const DISNEY7_SRT_LATENCY_US = DISNEY7_SRT_LATENCY_MS * 1000;
+const DISNEY7_SRT_PASSPHRASE = process.env.DISNEY7_SRT_PASSPHRASE || ''; // vacío = sin encriptación
+const DISNEY7_BUFFER_DIR = '/tmp/disney7-buffer-16';
+const DISNEY7_BUFFER_PLAYLIST = path.join(DISNEY7_BUFFER_DIR, 'buf.m3u8');
+const DISNEY7_BUFFER_MIN_SEGMENTS = 3;
+const DISNEY7_BUFFER_WAIT_TIMEOUT_MS = 60000;
+
 // ── Métricas SRT en vivo (para dashboard) ──
 // Mapa<process_id, { connected, bitrateKbps, pktsLost, lastFrameAt, since }>
 const tigoSrtMetrics = new Map();
