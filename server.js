@@ -2187,7 +2187,7 @@ app.post('/api/emit', async (req, res) => {
       } catch (err) {
         sendLog(process_id, 'warn', `⚠️ Tigo Variant Pinning falló (${err.message}) — usando URL original`);
       }
-    } else if (isScrapedChannel) {
+    } else if (needsTdmaxLikePinning) {
       // Canales scrapeados (NO proxy): mantener master playlist vivo (token de 1min necesita renovación del CDN)
       // pero sí identificar el programa 720p para forzarlo con -map
       try {
@@ -2203,10 +2203,12 @@ app.post('/api/emit', async (req, res) => {
 
         const validVariants = (allVariants || []).filter(v => v.bandwidth > 0 && v.resolution);
         if (validVariants.length > 0) {
+          // Política: SOLO 720p preferido, 1080p como fallback. Sin saltos dinámicos posteriores.
           const target720 = validVariants.find(v => v.resolution && v.resolution.includes('720'));
-          const best = target720 || validVariants[validVariants.length - 1];
+          const target1080 = validVariants.find(v => v.resolution && v.resolution.includes('1080'));
+          const best = target720 || target1080 || validVariants[validVariants.length - 1];
           hlsProgramIndex = best.programIndex;
-          sendLog(process_id, 'success', `📺 Programa HLS fijado → p:${hlsProgramIndex} (${best.resolution} @ ${Math.round(best.bandwidth / 1000)}kbps) [master vivo]`);
+          sendLog(process_id, 'success', `📌 Variant Pinning → p:${hlsProgramIndex} (${best.resolution} @ ${Math.round(best.bandwidth / 1000)}kbps) [SIN ABR]`);
         } else if (allVariants && allVariants.length > 0) {
           const sorted = [...allVariants].filter(v => v.bandwidth > 0).sort((a,b) => b.bandwidth - a.bandwidth);
           if (sorted.length > 0) {
