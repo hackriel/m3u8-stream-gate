@@ -1675,6 +1675,28 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
+    // VALIDACIÓN: Bloqueo mutuo de slug HLS (FUTV vs FUTV ALTERNO comparten 'FUTV').
+    // Si otro proceso ya está emitiendo al mismo slug, rechazamos para no pisar la señal.
+    if (isHlsOutput) {
+      const mySlug = HLS_SLUG_MAP[process_id];
+      if (mySlug) {
+        for (const [otherPid, otherSlug] of Object.entries(HLS_SLUG_MAP)) {
+          if (otherPid === process_id) continue;
+          if (otherSlug !== mySlug) continue;
+          const otherProc = ffmpegProcesses.get(otherPid);
+          if (otherProc && otherProc.process && !otherProc.process.killed) {
+            const otherLabel = CHANNEL_CONFIGS_SERVER[otherPid] || `Proceso ${otherPid}`;
+            const myLabel = CHANNEL_CONFIGS_SERVER[process_id] || `Proceso ${process_id}`;
+            sendLog(process_id, 'error', `🚫 BLOQUEO: ${myLabel} no puede arrancar porque ${otherLabel} ya emite al slug "${mySlug}". Detén ${otherLabel} primero.`);
+            // Revertir is_emitting si quedó en true por el upsert previo (no llegamos a hacerlo aún, pero por seguridad)
+            return res.status(409).json({
+              error: `Conflicto de salida HLS: ${otherLabel} (ID ${otherPid}) ya emite al slug "${mySlug}". Detenlo antes de iniciar ${myLabel}.`
+            });
+          }
+        }
+      }
+    }
+
     // Si ya hay un proceso corriendo para este ID, detenerlo primero
     const existingProcess = ffmpegProcesses.get(process_id);
     if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
