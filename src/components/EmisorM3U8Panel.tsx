@@ -16,7 +16,7 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 17;
+const NUM_PROCESSES = 18;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
@@ -25,6 +25,7 @@ const TELETICA_URL_INDEX = 13;
 const TDMAS1_URL_INDEX = 14;
 const CANAL6_URL_INDEX = 15;
 const DISNEY7_URL_INDEX = 16;
+const FUTV_ALTERNO_INDEX = 17; // Canal eventual con URL pegada del usuario, mismo destino que FUTV URL
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "rtmp://167.17.69.116/live/tigo";
 const TIGO_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/tigo";
@@ -34,9 +35,11 @@ const DISNEY7_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/Disney7";
 // Procesos ocultos legacy
 const HIDDEN_PROCESSES = new Set([2, 8, 9]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX]);
 // Procesos que reciben RTMP local desde OBS (entrada manual interna)
 const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX]);
+// Procesos eventuales que aceptan URL pegada del usuario y necesitan scraping dinámico
+const PASTE_URL_PROCESSES = new Set<number>([FUTV_ALTERNO_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -154,6 +157,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "TDMAS 1 URL", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "CANAL 6 URL", scrapeFn: null, channelId: null, fetchLabel: "🏛️ Repretel", presetUrl: "https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8" },
   { name: "DISNEY 7 URL", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: DISNEY7_INTERNAL_SOURCE_URL },
+  { name: "FUTV ALTERNO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer de URL" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -369,7 +373,55 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
+  // URL pegada por el usuario para canales tipo FUTV ALTERNO (eventuales)
+  const [pasteUrls, setPasteUrls] = useState<Record<number, string>>({});
   const { metricsHistory, latestMetrics } = useServerMetrics();
+
+  // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
+  // https://www.app.tdmax.com/player?id=689b81b08f08c8be77f8eb43&type=channel
+  const extractTdmaxChannelId = (raw: string): string | null => {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    // Acepta también un id "pelado" (24 hex chars de Mongo)
+    if (/^[a-f0-9]{24}$/i.test(trimmed)) return trimmed;
+    try {
+      const u = new URL(trimmed);
+      const id = u.searchParams.get('id');
+      if (id && /^[a-f0-9]{24}$/i.test(id)) return id;
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Scraping para FUTV ALTERNO: el channel_id viene de la URL pegada.
+  const fetchPastedChannelUrl = useCallback(async (processIndex: number) => {
+    const pasted = (pasteUrls[processIndex] || '').trim();
+    const channelId = extractTdmaxChannelId(pasted);
+    if (!channelId) {
+      toast.error('URL inválida. Pega una URL tipo https://www.app.tdmax.com/player?id=XXXX&type=channel');
+      return;
+    }
+
+    setFetchingChannel(processIndex);
+    try {
+      const resp = await fetch('/api/local-scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_id: channelId, process_id: processIndex }),
+      });
+      const data = await resp.json();
+      if (!data?.success) throw new Error(data?.error || 'Error desconocido');
+      const streamUrl = data.url;
+      updateProcess(processIndex, { m3u8: streamUrl, rtmp: 'hls-local' });
+      toast.success(`✅ URL alterna extraída (${channelId.substring(0, 8)}…)`);
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, 'Error desconocido');
+      toast.error(`Error obteniendo URL alterna: ${message}`);
+    } finally {
+      setFetchingChannel(null);
+    }
+  }, [pasteUrls]);
 
   // Función genérica para obtener URL de un canal automáticamente
   // Usa scraping LOCAL del VPS para que el token se genere con la IP correcta
@@ -851,11 +903,25 @@ export default function EmisorM3U8Panel() {
 
   async function onBorrar(processIndex: number) {
     const process = processes[processIndex];
-    
-    if (process.isEmitiendo) {
-      await stopEmit(processIndex);
+
+    // Marcar UI como deteniendo de inmediato para que el usuario vea feedback.
+    updateProcess(processIndex, {
+      emitStatus: "stopping",
+      emitMsg: "Limpiando proceso...",
+    });
+
+    // SIEMPRE pedir al server que detenga FFmpeg, aunque la UI diga isEmitiendo=false.
+    // (Cubre el caso de FFmpeg zombi del lado del server tras un error/recovery fallido).
+    try {
+      await fetch("/api/emit/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ process_id: processIndex.toString() })
+      });
+    } catch (e) {
+      console.error("Error parando proceso al borrar:", e);
     }
-    
+
     if (processIndex === FILE_UPLOAD_INDEX && uploadedFiles.length > 0) {
       fetch('/api/emit/files', {
         method: 'DELETE',
@@ -866,7 +932,8 @@ export default function EmisorM3U8Panel() {
       setUploadedFiles([]);
       setUploadProgress(0);
     }
-    
+
+    // Limpiar estado local DESPUÉS del stop para que no haya pisada de realtime.
     updateProcess(processIndex, {
       m3u8: "",
       rtmp: "",
@@ -881,11 +948,21 @@ export default function EmisorM3U8Panel() {
       recoveryCount: 0,
       lastSignalDuration: 0,
     });
-    
-    // Reset recovery_count and last_signal_duration in DB
+
+    // Limpieza completa en DB de manera atómica (incluye flags de emisión por si quedaron en true).
     await supabase
       .from('emission_processes')
-      .update({ 
+      .update({
+        m3u8: '',
+        rtmp: '',
+        source_url: '',
+        is_emitting: false,
+        is_active: false,
+        emit_status: 'idle',
+        emit_msg: '',
+        start_time: 0,
+        elapsed: 0,
+        ffmpeg_pid: null,
         recovery_count: 0,
         last_signal_duration: 0,
         failure_reason: null,
@@ -1037,7 +1114,39 @@ export default function EmisorM3U8Panel() {
             ) : (
               // Procesos M3U8 normales
               <>
-                <label className="block text-sm mb-2 text-muted-foreground">{OBS_INGEST_PROCESSES.has(processIndex) ? 'Entrada RTMP interna' : 'URL M3U8 (fuente)'}</label>
+                <label className="block text-sm mb-2 text-muted-foreground">
+                  {OBS_INGEST_PROCESSES.has(processIndex)
+                    ? 'Entrada RTMP interna'
+                    : PASTE_URL_PROCESSES.has(processIndex)
+                      ? 'URL del player TDMax (pega aquí)'
+                      : 'URL M3U8 (fuente)'}
+                </label>
+                {PASTE_URL_PROCESSES.has(processIndex) && (
+                  <div className="flex gap-2 mb-2">
+                    <input
+                      type="url"
+                      placeholder="https://www.app.tdmax.com/player?id=XXXXX&type=channel"
+                      value={pasteUrls[processIndex] || ''}
+                      onChange={(e) => setPasteUrls(prev => ({ ...prev, [processIndex]: e.target.value }))}
+                      className="flex-1 bg-card border-2 border-amber-400/40 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400/50 transition-all duration-200"
+                    />
+                    <button
+                      onClick={() => fetchPastedChannelUrl(processIndex)}
+                      disabled={fetchingChannel !== null || !(pasteUrls[processIndex] || '').trim()}
+                      className="px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-500/90 active:scale-[.98] transition-all duration-200 font-medium text-amber-50 shadow-lg disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
+                      title="Extraer M3U8 de la URL del player"
+                    >
+                      {fetchingChannel === processIndex ? (
+                        <span className="flex items-center gap-2">
+                          <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-amber-50" />
+                          Extrayendo...
+                        </span>
+                      ) : (
+                        '🔄 Extraer'
+                      )}
+                    </button>
+                  </div>
+                )}
                 <div className="flex gap-2 mb-4">
                   <input
                     type="url"
@@ -1046,18 +1155,23 @@ export default function EmisorM3U8Panel() {
                         ? TIGO_OBS_INGEST_URL
                         : processIndex === DISNEY7_URL_INDEX
                           ? DISNEY7_OBS_INGEST_URL
-                          : 'https://servidor/origen/playlist.m3u8'
+                          : PASTE_URL_PROCESSES.has(processIndex)
+                            ? 'M3U8 extraído (auto-completado)'
+                            : 'https://servidor/origen/playlist.m3u8'
                     }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
+                    readOnly={PASTE_URL_PROCESSES.has(processIndex)}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
                         ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.4)]'
-                        : 'border-border'
+                        : PASTE_URL_PROCESSES.has(processIndex)
+                          ? 'border-border bg-muted/40'
+                          : 'border-border'
                     }`}
                   />
-                  {channelConfig.scrapeFn && (
+                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && (
                     <button
                       onClick={() => fetchChannelUrl(processIndex)}
                       disabled={fetchingChannel !== null}
@@ -1086,6 +1200,7 @@ export default function EmisorM3U8Panel() {
                 [TDMAS1_URL_INDEX]: 'Tdmas1',
                 [CANAL6_URL_INDEX]: 'Canal6',
                 [DISNEY7_URL_INDEX]: 'Disney7',
+                [FUTV_ALTERNO_INDEX]: 'FUTV',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;

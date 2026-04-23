@@ -255,9 +255,10 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16']);
+const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16', '17']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
-const HLS_SLUG_MAP = { '11': 'FUTV', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7' };
+// FUTV (11) y FUTV ALTERNO (17) comparten slug 'FUTV' a propósito (mismo destino RTMP/HLS)
+const HLS_SLUG_MAP = { '11': 'FUTV', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'FUTV' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
@@ -1591,9 +1592,9 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Validación de ID: debe ser un número entre 0 y 16
-    if (isNaN(numericId) || numericId < 0 || numericId > 16) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-16)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 16` });
+    if (isNaN(numericId) || numericId < 0 || numericId > 17) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-17)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 17` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -1671,6 +1672,28 @@ app.post('/api/emit', async (req, res) => {
         conflictingProcess.process.kill('SIGTERM');
         ffmpegProcesses.delete(conflictingProcessId);
         emissionStatuses.set(conflictingProcessId, 'idle');
+      }
+    }
+
+    // VALIDACIÓN: Bloqueo mutuo de slug HLS (FUTV vs FUTV ALTERNO comparten 'FUTV').
+    // Si otro proceso ya está emitiendo al mismo slug, rechazamos para no pisar la señal.
+    if (isHlsOutput) {
+      const mySlug = HLS_SLUG_MAP[process_id];
+      if (mySlug) {
+        for (const [otherPid, otherSlug] of Object.entries(HLS_SLUG_MAP)) {
+          if (otherPid === process_id) continue;
+          if (otherSlug !== mySlug) continue;
+          const otherProc = ffmpegProcesses.get(otherPid);
+          if (otherProc && otherProc.process && !otherProc.process.killed) {
+            const otherLabel = CHANNEL_CONFIGS_SERVER[otherPid] || `Proceso ${otherPid}`;
+            const myLabel = CHANNEL_CONFIGS_SERVER[process_id] || `Proceso ${process_id}`;
+            sendLog(process_id, 'error', `🚫 BLOQUEO: ${myLabel} no puede arrancar porque ${otherLabel} ya emite al slug "${mySlug}". Detén ${otherLabel} primero.`);
+            // Revertir is_emitting si quedó en true por el upsert previo (no llegamos a hacerlo aún, pero por seguridad)
+            return res.status(409).json({
+              error: `Conflicto de salida HLS: ${otherLabel} (ID ${otherPid}) ya emite al slug "${mySlug}". Detenlo antes de iniciar ${myLabel}.`
+            });
+          }
+        }
       }
     }
 
@@ -4161,7 +4184,7 @@ const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
   '11': 'FUTV URL', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
-  '16': 'DISNEY 7 URL',
+  '16': 'DISNEY 7 URL', '17': 'FUTV ALTERNO',
 };
 
 // Endpoint para toggle night_rest
@@ -4206,9 +4229,13 @@ app.post('/api/always-on', async (req, res) => {
     if (!supabase) {
       return res.status(500).json({ error: 'Base de datos no disponible' });
     }
-    if (String(process_id) === '12' || String(process_id) === '16') {
-      const label = String(process_id) === '16' ? 'DISNEY 7 URL' : 'TIGO URL';
-      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (depende de OBS local)` });
+    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '17') {
+      const labels = { '12': 'TIGO URL', '16': 'DISNEY 7 URL', '17': 'FUTV ALTERNO' };
+      const label = labels[String(process_id)];
+      const reason = String(process_id) === '17'
+        ? 'es un canal eventual; actívalo manualmente cuando lo necesites'
+        : 'depende de OBS local';
+      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (${reason})` });
     }
 
     const update = { always_on: !!enabled };
@@ -4259,7 +4286,7 @@ server.listen(PORT, () => {
           .select('id');
         const existingIds = new Set((existingRows || []).map(r => r.id));
         const missingRows = [];
-        for (let id = 0; id < 16; id++) {
+        for (let id = 0; id <= 17; id++) {
           if (!existingIds.has(id)) {
             missingRows.push({
               id,
@@ -4309,8 +4336,8 @@ server.listen(PORT, () => {
 
         for (const row of alwaysOnRows) {
           const pid = String(row.id);
-          // TIGO URL (12) y DISNEY 7 URL (16) se autoarrancan por su propio path; saltarlos aquí
-          if (pid === '12' || pid === '16') continue;
+          // TIGO URL (12) y DISNEY 7 URL (16) se autoarrancan por su propio path; FUTV ALTERNO (17) es eventual.
+          if (pid === '12' || pid === '16' || pid === '17') continue;
 
           // Limpiar manualStop por si quedó marcado
           manualStopProcesses.delete(pid);
@@ -4374,7 +4401,7 @@ server.listen(PORT, () => {
         const now = Date.now();
         for (const row of rows) {
           const pid = String(row.id);
-          if (pid === '12' || pid === '16') continue; // URLs locales (OBS) excluidas
+          if (pid === '12' || pid === '16' || pid === '17') continue; // URLs locales (OBS) y FUTV ALTERNO excluidas
 
           // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
