@@ -3741,9 +3741,6 @@ app.post('/api/emit/stop', async (req, res) => {
 });
 
 
-// Nuevo endpoint para eliminar completamente un proceso específico de la base de datos
-app.delete('/api/emit/:process_id', async (req, res) => {
-
 // ── Endpoint /api/emit/restart ────────────────────────────────────────
 // Reinicio MANUAL en caliente: detiene FFmpeg actual, invalida la cache de
 // sesión de scraping (cookies/token) para forzar un re-login completo, y
@@ -3752,8 +3749,6 @@ app.delete('/api/emit/:process_id', async (req, res) => {
 // que equivale a "abrir una sesión fresca como cliente nuevo".
 // ESTE FLUJO ES INDEPENDIENTE DEL "Encendido siempre": no toca always_on.
 app.post('/api/emit/restart', async (req, res) => {
-  // Movido fuera del DELETE de abajo. Este handler debería declararse antes
-  // del app.delete, pero lo ubicamos aquí mediante app.post.
   try {
     const { process_id: rawProcessId = '0', source_m3u8, target_rtmp } = req.body;
     const process_id = String(rawProcessId);
@@ -3848,6 +3843,8 @@ app.post('/api/emit/restart', async (req, res) => {
   }
 });
 
+// Nuevo endpoint para eliminar completamente un proceso específico de la base de datos
+app.delete('/api/emit/:process_id', async (req, res) => {
   try {
     const { process_id } = req.params;
     sendLog(process_id, 'info', `Solicitada eliminación del proceso ${process_id}`);
