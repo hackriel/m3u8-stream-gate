@@ -2578,6 +2578,36 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
+    // ── Parser de métricas SRT Disney 7 (mismo patrón que Tigo) ──
+    if (isDisney7SrtMode) {
+      ffmpegProcess.stderr.on('data', (data) => {
+        const text = data.toString();
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (!/^frame=|^size=/.test(trimmed)) {
+            sendLog(process_id, 'info', `[ETAPA1-SRT] ${trimmed.substring(0, 220)}`);
+          }
+          const m = parseFfmpegProgress(trimmed);
+          if (m.frame !== undefined && m.frame > 0) {
+            updateTigoSrtMetric(process_id, {
+              connected: true,
+              lastFrameAt: Date.now(),
+              ...(m.bitrateKbps !== undefined ? { bitrateKbps: m.bitrateKbps } : {}),
+            });
+          }
+          const lostMatch = trimmed.match(/SRT.*lost\s*[:=]\s*(\d+)/i);
+          if (lostMatch) {
+            const cur = tigoSrtMetrics.get(String(process_id))?.pktsLost || 0;
+            updateTigoSrtMetric(process_id, { pktsLost: cur + parseInt(lostMatch[1], 10) });
+          }
+          if (/Connection (lost|timed out)/i.test(trimmed) || /SRT.*disconnect/i.test(trimmed)) {
+            updateTigoSrtMetric(process_id, { connected: false });
+          }
+        }
+      });
+    }
+
     // ── Buffer Tigo ETAPA 2 ─────────────────────────────────────────
     // Tras spawnear FFmpeg #1 (ingest crudo a /tmp/tigo-buffer-12), esperamos
     // a que existan ≥3 segmentos en el buffer y arrancamos FFmpeg #2 (transcoder
