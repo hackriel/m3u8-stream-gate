@@ -16,7 +16,7 @@ import { useServerMetrics } from "@/hooks/useServerMetrics";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 16;
+const NUM_PROCESSES = 17;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
@@ -24,14 +24,19 @@ const TIGO_URL_INDEX = 12;
 const TELETICA_URL_INDEX = 13;
 const TDMAS1_URL_INDEX = 14;
 const CANAL6_URL_INDEX = 15;
+const DISNEY7_URL_INDEX = 16;
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "rtmp://167.17.69.116/live/tigo";
 const TIGO_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/tigo";
+const DISNEY7_OBS_INGEST_URL = "rtmp://167.17.69.116/live/Disney7";
+const DISNEY7_INTERNAL_SOURCE_URL = "rtmp://127.0.0.1/live/Disney7";
 
 // Procesos ocultos legacy
 const HIDDEN_PROCESSES = new Set([2, 8, 9]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX]);
+// Procesos que reciben RTMP local desde OBS (entrada manual interna)
+const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -148,6 +153,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "TELETICA URL", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "TDMAS 1 URL", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
   { name: "CANAL 6 URL", scrapeFn: null, channelId: null, fetchLabel: "🏛️ Repretel", presetUrl: "https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8" },
+  { name: "DISNEY 7 URL", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: DISNEY7_INTERNAL_SOURCE_URL },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -952,6 +958,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-cyan-500", text: "text-cyan-500", stroke: "#06b6d4", name: "TELETICA URL" },
       { bg: "bg-lime-500", text: "text-lime-500", stroke: "#84cc16", name: "TDMAS 1 URL" },
       { bg: "bg-amber-500", text: "text-amber-500", stroke: "#f59e0b", name: "CANAL 6 URL" },
+      { bg: "bg-gray-400", text: "text-gray-300", stroke: "#d1d5db", name: "DISNEY 7 URL" },
     ];
     return colors[processIndex];
   };
