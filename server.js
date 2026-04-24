@@ -4809,7 +4809,7 @@ server.listen(PORT, () => {
       try {
         const { data: alwaysOnRows, error } = await supabase
           .from('emission_processes')
-          .select('id, source_url, m3u8, rtmp, always_on')
+          .select('id, source_url, m3u8, rtmp, always_on, player_url')
           .eq('always_on', true);
 
         if (error || !alwaysOnRows || alwaysOnRows.length === 0) return;
