@@ -4818,8 +4818,9 @@ server.listen(PORT, () => {
 
         for (const row of alwaysOnRows) {
           const pid = String(row.id);
-          // TIGO SRT (12), DISNEY 7 SRT (16) y FUTV SRT (18) se autoarrancan por su propio path; FUTV ALTERNO (17) es eventual.
-          if (pid === '12' || pid === '16' || pid === '17' || pid === '18') continue;
+          // TIGO SRT (12), DISNEY 7 SRT (16) y FUTV SRT (18) se autoarrancan por su propio path.
+          // FUTV ALTERNO (17) sí se relanza si tiene player_url guardada (re-scrape fresco).
+          if (pid === '12' || pid === '16' || pid === '18') continue;
 
           // Limpiar manualStop por si quedó marcado
           manualStopProcesses.delete(pid);
@@ -4831,6 +4832,21 @@ server.listen(PORT, () => {
               const { channelId, channelName } = CHANNEL_MAP[pid];
               sendLog(pid, 'info', `🔁 Always-on: relanzando ${channelName} con scraping fresco...`);
               await autoRecoverChannel(pid, channelId, channelName);
+            } else if (pid === '17') {
+              // FUTV ALTERNO: re-scrape con player_url persistido
+              const playerUrl = row.player_url;
+              if (!playerUrl) {
+                sendLog('17', 'warn', `⚠️ Always-on activo pero no hay player_url guardada (volver a extraer)`);
+              } else {
+                const m = String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i);
+                const channelId = m ? m[1] : null;
+                if (!channelId) {
+                  sendLog('17', 'error', `❌ player_url inválida: ${playerUrl}`);
+                } else {
+                  sendLog('17', 'info', `🔁 Always-on: re-scrapeando FUTV ALTERNO con player_url guardada...`);
+                  await autoRecoverChannel('17', channelId, 'FUTV ALTERNO');
+                }
+              }
             } else {
               // Canales manuales (ej. ID 15 CANAL 6 URL): usar última URL guardada
               const sourceUrl = row.source_url || row.m3u8;
