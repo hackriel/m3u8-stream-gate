@@ -500,6 +500,16 @@ const waitForSrtBufferReady = async (cfg, timeoutMs) => {
 const startSrtIngest = (process_id) => {
   const cfg = getSrtConfig(process_id);
   if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
+  // Blindaje: matar cualquier ffmpeg residual (huérfano) que esté usando este buffer
+  // o esta carpeta de salida HLS, para evitar arrancar "encima" de un proceso zombi
+  // que bloquearía el spawn de ETAPA 2 (caso real visto en Disney 7).
+  try {
+    const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
+    const patterns = [cfg.bufferDir, `live/${slug}/`, `:${cfg.port}?mode=listener`];
+    for (const pat of patterns) {
+      try { execSync(`pkill -9 -f ${JSON.stringify(pat)}`, { stdio: 'ignore' }); } catch (_) {}
+    }
+  } catch (_) {}
   cleanSrtBufferDir(cfg);
   resetTigoSrtMetric(process_id); // mapa de métricas SRT (genérico por process_id)
 
