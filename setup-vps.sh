@@ -216,41 +216,19 @@ cat > /etc/logrotate.d/${SERVICE_NAME} << EOF
 EOF
 ok "Logrotate configurado (7 días)"
 
-# ── Paso 8: Reinicio diario a las 3 AM + limpieza de chromes zombies ──
-echo "⏰ [8/8] Programando mantenimiento diario a las 3:00 AM..."
+# ── Paso 8: Eliminar reinicios programados (causaban corte a las 9 PM CR) ──
+echo "⏰ [8/8] Eliminando cualquier reinicio programado previo..."
 
-# Script de mantenimiento: mata chromes headless huérfanos y reinicia el servicio
+# Eliminar script de mantenimiento si existe (versiones antiguas reiniciaban el servicio a las 3 AM UTC = 9 PM CR)
 MAINT_SCRIPT="/usr/local/bin/${SERVICE_NAME}-maintenance.sh"
-cat > "$MAINT_SCRIPT" << 'MAINT_EOF'
-#!/bin/bash
-# Mantenimiento diario: limpia procesos chrome/chromium headless zombies
-# y reinicia el servicio m3u8-emitter
-
-LOG="/var/log/m3u8-emitter-maintenance.log"
-echo "===== $(date '+%Y-%m-%d %H:%M:%S') Inicio mantenimiento =====" >> "$LOG"
-
-# Contar chromes antes
-BEFORE=$(pgrep -af 'chrome.*--headless|chromium.*--headless' | wc -l)
-echo "Chromes headless detectados: $BEFORE" >> "$LOG"
-
-if [ "$BEFORE" -gt 0 ]; then
-  # Matar chromes headless huérfanos (no afecta FFmpeg ni Node)
-  pkill -9 -f 'chrome.*--headless' 2>/dev/null || true
-  pkill -9 -f 'chromium.*--headless' 2>/dev/null || true
-  sleep 2
-  AFTER=$(pgrep -af 'chrome.*--headless|chromium.*--headless' | wc -l)
-  echo "Chromes restantes tras limpieza: $AFTER" >> "$LOG"
+if [ -f "$MAINT_SCRIPT" ]; then
+  rm -f "$MAINT_SCRIPT"
+  ok "Script de mantenimiento antiguo eliminado"
 fi
 
-# Reiniciar servicio principal
-systemctl restart m3u8-emitter
-echo "Servicio m3u8-emitter reiniciado" >> "$LOG"
-echo "" >> "$LOG"
-MAINT_EOF
-chmod +x "$MAINT_SCRIPT"
-
-(crontab -l 2>/dev/null | grep -v "$SERVICE_NAME"; echo "0 3 * * * $MAINT_SCRIPT") | crontab -
-ok "Cron configurado: 3:00 AM → limpieza chromes zombies + reinicio servicio"
+# Limpiar cualquier entrada de cron relacionada con el servicio
+(crontab -l 2>/dev/null | grep -v "$SERVICE_NAME" | grep -v "${SERVICE_NAME}-maintenance") | crontab - 2>/dev/null || true
+ok "Cron limpio: SIN reinicios programados (el servicio corre 24/7)"
 
 # ── Iniciar servicio ──
 echo ""
