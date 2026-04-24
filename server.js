@@ -4929,6 +4929,16 @@ server.listen(PORT, () => {
             if (CHANNEL_MAP[pid]) {
               const { channelId, channelName } = CHANNEL_MAP[pid];
               await autoRecoverChannel(pid, channelId, channelName);
+            } else if (pid === '17') {
+              const playerUrl = row.player_url;
+              const m = playerUrl ? (String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i)) : null;
+              const channelId = m ? m[1] : null;
+              if (!channelId) {
+                sendLog('17', 'error', `❌ Refresh 17: player_url inválida o ausente, omitiendo`);
+              } else {
+                sendLog('17', 'info', `🔄 Refresh 3:00 CR: re-scrapeando FUTV ALTERNO con player_url guardada...`);
+                await autoRecoverChannel('17', channelId, 'FUTV ALTERNO');
+              }
             } else {
               const sourceUrl = row.source_url || row.m3u8;
               const targetRtmp = row.rtmp;
