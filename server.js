@@ -4881,7 +4881,7 @@ server.listen(PORT, () => {
     // ====== AUTO-REFRESH HORARIO FIJO: reinicia canales always_on a las 00:00 y 05:00 hora Costa Rica ======
     // Solo afecta filas con always_on=true Y is_emitting=true (no relanza canales que el usuario apagó).
     // Usamos last_refresh_at como guard para no disparar dos veces en la misma ventana horaria (60 min).
-    const REFRESH_HOURS_CR = [0, 5]; // 12:00 AM y 5:00 AM hora Costa Rica
+    const REFRESH_HOURS_CR = [3]; // 3:00 AM hora Costa Rica (1 sola ventana diaria)
     const REFRESH_GUARD_MS = 60 * 60 * 1000; // no re-disparar dentro de la misma hora
     setInterval(async () => {
       try {
@@ -4891,7 +4891,7 @@ server.listen(PORT, () => {
 
         const { data: rows } = await supabase
           .from('emission_processes')
-          .select('id, source_url, m3u8, rtmp, always_on, last_refresh_at, is_emitting')
+          .select('id, source_url, m3u8, rtmp, always_on, last_refresh_at, is_emitting, player_url')
           .eq('always_on', true)
           .eq('is_emitting', true);
         if (!rows || rows.length === 0) return;
@@ -4899,7 +4899,7 @@ server.listen(PORT, () => {
         const now = Date.now();
         for (const row of rows) {
           const pid = String(row.id);
-          if (pid === '12' || pid === '16' || pid === '17' || pid === '18') continue; // URLs locales (OBS) y FUTV ALTERNO excluidas
+          if (pid === '12' || pid === '16' || pid === '18') continue; // SRT/OBS locales excluidos. FUTV ALTERNO (17) sí refresca si tiene player_url.
 
           // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
