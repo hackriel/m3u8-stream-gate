@@ -1663,7 +1663,7 @@ const detectSourceInfo = async (source) => {
 // Esto es CRÍTICO para canales como Tigo cuyo CDN valida IP del token vs IP del consumidor
 app.post('/api/local-scrape', async (req, res) => {
   try {
-    const { channel_id, process_id } = req.body;
+    const { channel_id, process_id, player_url } = req.body;
     
     if (!channel_id) {
       return res.status(400).json({ success: false, error: 'Falta channel_id' });
@@ -1686,7 +1686,20 @@ app.post('/api/local-scrape', async (req, res) => {
       });
       sendLog(String(process_id), 'info', `🔐 Sesión de scraping guardada en cache (cookies: ${result.cookies ? 'sí' : 'no'}, token: ${result.accessToken ? 'sí' : 'no'})`);
     }
-    
+
+    // FUTV ALTERNO (17): persistir player_url para sobrevivir reinicios
+    if (String(process_id) === '17' && player_url && supabase) {
+      try {
+        await supabase
+          .from('emission_processes')
+          .update({ player_url: String(player_url) })
+          .eq('id', 17);
+        sendLog('17', 'info', `💾 player_url guardado para auto-recovery tras reinicio`);
+      } catch (e) {
+        sendLog('17', 'warn', `⚠️ No se pudo guardar player_url: ${e.message}`);
+      }
+    }
+
     return res.json({ success: true, url: result.url, channel: channelName });
   } catch (error) {
     console.error('Error en /api/local-scrape:', error);
