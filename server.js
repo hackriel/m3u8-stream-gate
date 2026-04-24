@@ -4685,13 +4685,23 @@ app.post('/api/always-on', async (req, res) => {
     if (!supabase) {
       return res.status(500).json({ error: 'Base de datos no disponible' });
     }
-    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '17' || String(process_id) === '18') {
-      const labels = { '12': 'TIGO SRT', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT' };
+    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '18') {
+      const labels = { '12': 'TIGO SRT', '16': 'DISNEY 7 SRT', '18': 'FUTV SRT' };
       const label = labels[String(process_id)];
-      const reason = String(process_id) === '17'
-        ? 'es un canal eventual; actívalo manualmente cuando lo necesites'
-        : 'depende de OBS local';
-      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (${reason})` });
+      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (depende de OBS local)` });
+    }
+    // FUTV ALTERNO (17): solo permitir always_on si tiene player_url guardada
+    if (String(process_id) === '17' && enabled) {
+      const { data: row17 } = await supabase
+        .from('emission_processes')
+        .select('player_url')
+        .eq('id', 17)
+        .maybeSingle();
+      if (!row17?.player_url) {
+        return res.status(400).json({
+          error: 'FUTV ALTERNO requiere extraer una URL del player TDMax antes de activar "Encendido siempre".',
+        });
+      }
     }
 
     const update = { always_on: !!enabled };
