@@ -2798,6 +2798,8 @@ app.post('/api/emit', async (req, res) => {
         }
         sendLog(process_id, 'success', `✅ ${cfg.label} BUFFER listo (${ready.segments} segs en ${ready.waitedMs}ms) — spawneando ETAPA 2`);
 
+        let stage2RetryCount = 0;
+        const STAGE2_MAX_RETRIES = 10;
         const spawnSrtOutputStage = () => {
           if (manualStopProcesses.has(process_id) || manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
             return;
@@ -2866,7 +2868,12 @@ app.post('/api/emit', async (req, res) => {
               sendLog(process_id, 'info', `🛑 ${cfg.label} ETAPA 2 terminada (code=${code}, signal=${signal || '-'})`);
               return;
             }
-            sendLog(process_id, 'warn', `🔁 ${cfg.label} ETAPA 2 cayó (code=${code}) — reiniciando en 2s (ETAPA 1 SRT sigue viva)`);
+            stage2RetryCount++;
+            if (stage2RetryCount > STAGE2_MAX_RETRIES) {
+              sendLog(process_id, 'error', `❌ ${cfg.label} ETAPA 2 falló ${STAGE2_MAX_RETRIES} veces consecutivas — abortando reintentos. Revisar buffer/codec.`);
+              return;
+            }
+            sendLog(process_id, 'warn', `🔁 ${cfg.label} ETAPA 2 reintento ${stage2RetryCount}/${STAGE2_MAX_RETRIES} (code=${code}) en 2s`);
             setTimeout(spawnSrtOutputStage, 2000);
           });
         };
