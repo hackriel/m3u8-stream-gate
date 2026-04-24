@@ -500,6 +500,16 @@ const waitForSrtBufferReady = async (cfg, timeoutMs) => {
 const startSrtIngest = (process_id) => {
   const cfg = getSrtConfig(process_id);
   if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
+  // Blindaje: matar cualquier ffmpeg residual (huérfano) que esté usando este buffer
+  // o esta carpeta de salida HLS, para evitar arrancar "encima" de un proceso zombi
+  // que bloquearía el spawn de ETAPA 2 (caso real visto en Disney 7).
+  try {
+    const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
+    const patterns = [cfg.bufferDir, `live/${slug}/`, `:${cfg.port}?mode=listener`];
+    for (const pat of patterns) {
+      try { execSync(`pkill -9 -f ${JSON.stringify(pat)}`, { stdio: 'ignore' }); } catch (_) {}
+    }
+  } catch (_) {}
   cleanSrtBufferDir(cfg);
   resetTigoSrtMetric(process_id); // mapa de métricas SRT (genérico por process_id)
 
@@ -2788,6 +2798,8 @@ app.post('/api/emit', async (req, res) => {
         }
         sendLog(process_id, 'success', `✅ ${cfg.label} BUFFER listo (${ready.segments} segs en ${ready.waitedMs}ms) — spawneando ETAPA 2`);
 
+        let stage2RetryCount = 0;
+        const STAGE2_MAX_RETRIES = 10;
         const spawnSrtOutputStage = () => {
           if (manualStopProcesses.has(process_id) || manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
             return;
@@ -2856,7 +2868,12 @@ app.post('/api/emit', async (req, res) => {
               sendLog(process_id, 'info', `🛑 ${cfg.label} ETAPA 2 terminada (code=${code}, signal=${signal || '-'})`);
               return;
             }
-            sendLog(process_id, 'warn', `🔁 ${cfg.label} ETAPA 2 cayó (code=${code}) — reiniciando en 2s (ETAPA 1 SRT sigue viva)`);
+            stage2RetryCount++;
+            if (stage2RetryCount > STAGE2_MAX_RETRIES) {
+              sendLog(process_id, 'error', `❌ ${cfg.label} ETAPA 2 falló ${STAGE2_MAX_RETRIES} veces consecutivas — abortando reintentos. Revisar buffer/codec.`);
+              return;
+            }
+            sendLog(process_id, 'warn', `🔁 ${cfg.label} ETAPA 2 reintento ${stage2RetryCount}/${STAGE2_MAX_RETRIES} (code=${code}) en 2s`);
             setTimeout(spawnSrtOutputStage, 2000);
           });
         };
