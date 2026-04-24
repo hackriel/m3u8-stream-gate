@@ -1,0 +1,1 @@
+ALTER TABLE public.emission_processes ADD COLUMN IF NOT EXISTS player_url TEXT;
