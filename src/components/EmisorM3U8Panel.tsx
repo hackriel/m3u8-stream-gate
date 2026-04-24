@@ -414,13 +414,13 @@ export default function EmisorM3U8Panel() {
       const resp = await fetch('/api/local-scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_id: channelId, process_id: processIndex }),
+        body: JSON.stringify({ channel_id: channelId, process_id: processIndex, player_url: pasted }),
       });
       const data = await resp.json();
       if (!data?.success) throw new Error(data?.error || 'Error desconocido');
       const streamUrl = data.url;
       updateProcess(processIndex, { m3u8: streamUrl, rtmp: 'hls-local' });
-      toast.success(`✅ URL alterna extraída (${channelId.substring(0, 8)}…)`);
+      toast.success(`✅ URL alterna extraída (${channelId.substring(0, 8)}…) — player URL guardada para auto-recovery`);
     } catch (error: unknown) {
       const message = getErrorMessage(error, 'Error desconocido');
       toast.error(`Error obteniendo URL alterna: ${message}`);

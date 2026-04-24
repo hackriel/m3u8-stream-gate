@@ -1663,7 +1663,7 @@ const detectSourceInfo = async (source) => {
 // Esto es CRÍTICO para canales como Tigo cuyo CDN valida IP del token vs IP del consumidor
 app.post('/api/local-scrape', async (req, res) => {
   try {
-    const { channel_id, process_id } = req.body;
+    const { channel_id, process_id, player_url } = req.body;
     
     if (!channel_id) {
       return res.status(400).json({ success: false, error: 'Falta channel_id' });
@@ -1686,7 +1686,20 @@ app.post('/api/local-scrape', async (req, res) => {
       });
       sendLog(String(process_id), 'info', `🔐 Sesión de scraping guardada en cache (cookies: ${result.cookies ? 'sí' : 'no'}, token: ${result.accessToken ? 'sí' : 'no'})`);
     }
-    
+
+    // FUTV ALTERNO (17): persistir player_url para sobrevivir reinicios
+    if (String(process_id) === '17' && player_url && supabase) {
+      try {
+        await supabase
+          .from('emission_processes')
+          .update({ player_url: String(player_url) })
+          .eq('id', 17);
+        sendLog('17', 'info', `💾 player_url guardado para auto-recovery tras reinicio`);
+      } catch (e) {
+        sendLog('17', 'warn', `⚠️ No se pudo guardar player_url: ${e.message}`);
+      }
+    }
+
     return res.json({ success: true, url: result.url, channel: channelName });
   } catch (error) {
     console.error('Error en /api/local-scrape:', error);
@@ -4685,13 +4698,23 @@ app.post('/api/always-on', async (req, res) => {
     if (!supabase) {
       return res.status(500).json({ error: 'Base de datos no disponible' });
     }
-    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '17' || String(process_id) === '18') {
-      const labels = { '12': 'TIGO SRT', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT' };
+    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '18') {
+      const labels = { '12': 'TIGO SRT', '16': 'DISNEY 7 SRT', '18': 'FUTV SRT' };
       const label = labels[String(process_id)];
-      const reason = String(process_id) === '17'
-        ? 'es un canal eventual; actívalo manualmente cuando lo necesites'
-        : 'depende de OBS local';
-      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (${reason})` });
+      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (depende de OBS local)` });
+    }
+    // FUTV ALTERNO (17): solo permitir always_on si tiene player_url guardada
+    if (String(process_id) === '17' && enabled) {
+      const { data: row17 } = await supabase
+        .from('emission_processes')
+        .select('player_url')
+        .eq('id', 17)
+        .maybeSingle();
+      if (!row17?.player_url) {
+        return res.status(400).json({
+          error: 'FUTV ALTERNO requiere extraer una URL del player TDMax antes de activar "Encendido siempre".',
+        });
+      }
     }
 
     const update = { always_on: !!enabled };
@@ -4786,7 +4809,7 @@ server.listen(PORT, () => {
       try {
         const { data: alwaysOnRows, error } = await supabase
           .from('emission_processes')
-          .select('id, source_url, m3u8, rtmp, always_on')
+          .select('id, source_url, m3u8, rtmp, always_on, player_url')
           .eq('always_on', true);
 
         if (error || !alwaysOnRows || alwaysOnRows.length === 0) return;
@@ -4795,8 +4818,9 @@ server.listen(PORT, () => {
 
         for (const row of alwaysOnRows) {
           const pid = String(row.id);
-          // TIGO SRT (12), DISNEY 7 SRT (16) y FUTV SRT (18) se autoarrancan por su propio path; FUTV ALTERNO (17) es eventual.
-          if (pid === '12' || pid === '16' || pid === '17' || pid === '18') continue;
+          // TIGO SRT (12), DISNEY 7 SRT (16) y FUTV SRT (18) se autoarrancan por su propio path.
+          // FUTV ALTERNO (17) sí se relanza si tiene player_url guardada (re-scrape fresco).
+          if (pid === '12' || pid === '16' || pid === '18') continue;
 
           // Limpiar manualStop por si quedó marcado
           manualStopProcesses.delete(pid);
@@ -4808,6 +4832,21 @@ server.listen(PORT, () => {
               const { channelId, channelName } = CHANNEL_MAP[pid];
               sendLog(pid, 'info', `🔁 Always-on: relanzando ${channelName} con scraping fresco...`);
               await autoRecoverChannel(pid, channelId, channelName);
+            } else if (pid === '17') {
+              // FUTV ALTERNO: re-scrape con player_url persistido
+              const playerUrl = row.player_url;
+              if (!playerUrl) {
+                sendLog('17', 'warn', `⚠️ Always-on activo pero no hay player_url guardada (volver a extraer)`);
+              } else {
+                const m = String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i);
+                const channelId = m ? m[1] : null;
+                if (!channelId) {
+                  sendLog('17', 'error', `❌ player_url inválida: ${playerUrl}`);
+                } else {
+                  sendLog('17', 'info', `🔁 Always-on: re-scrapeando FUTV ALTERNO con player_url guardada...`);
+                  await autoRecoverChannel('17', channelId, 'FUTV ALTERNO');
+                }
+              }
             } else {
               // Canales manuales (ej. ID 15 CANAL 6 URL): usar última URL guardada
               const sourceUrl = row.source_url || row.m3u8;
@@ -4842,7 +4881,7 @@ server.listen(PORT, () => {
     // ====== AUTO-REFRESH HORARIO FIJO: reinicia canales always_on a las 00:00 y 05:00 hora Costa Rica ======
     // Solo afecta filas con always_on=true Y is_emitting=true (no relanza canales que el usuario apagó).
     // Usamos last_refresh_at como guard para no disparar dos veces en la misma ventana horaria (60 min).
-    const REFRESH_HOURS_CR = [0, 5]; // 12:00 AM y 5:00 AM hora Costa Rica
+    const REFRESH_HOURS_CR = [3]; // 3:00 AM hora Costa Rica (1 sola ventana diaria)
     const REFRESH_GUARD_MS = 60 * 60 * 1000; // no re-disparar dentro de la misma hora
     setInterval(async () => {
       try {
@@ -4852,7 +4891,7 @@ server.listen(PORT, () => {
 
         const { data: rows } = await supabase
           .from('emission_processes')
-          .select('id, source_url, m3u8, rtmp, always_on, last_refresh_at, is_emitting')
+          .select('id, source_url, m3u8, rtmp, always_on, last_refresh_at, is_emitting, player_url')
           .eq('always_on', true)
           .eq('is_emitting', true);
         if (!rows || rows.length === 0) return;
@@ -4860,7 +4899,7 @@ server.listen(PORT, () => {
         const now = Date.now();
         for (const row of rows) {
           const pid = String(row.id);
-          if (pid === '12' || pid === '16' || pid === '17' || pid === '18') continue; // URLs locales (OBS) y FUTV ALTERNO excluidas
+          if (pid === '12' || pid === '16' || pid === '18') continue; // SRT/OBS locales excluidos. FUTV ALTERNO (17) sí refresca si tiene player_url.
 
           // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
@@ -4890,6 +4929,16 @@ server.listen(PORT, () => {
             if (CHANNEL_MAP[pid]) {
               const { channelId, channelName } = CHANNEL_MAP[pid];
               await autoRecoverChannel(pid, channelId, channelName);
+            } else if (pid === '17') {
+              const playerUrl = row.player_url;
+              const m = playerUrl ? (String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i)) : null;
+              const channelId = m ? m[1] : null;
+              if (!channelId) {
+                sendLog('17', 'error', `❌ Refresh 17: player_url inválida o ausente, omitiendo`);
+              } else {
+                sendLog('17', 'info', `🔄 Refresh 3:00 CR: re-scrapeando FUTV ALTERNO con player_url guardada...`);
+                await autoRecoverChannel('17', channelId, 'FUTV ALTERNO');
+              }
             } else {
               const sourceUrl = row.source_url || row.m3u8;
               const targetRtmp = row.rtmp;
