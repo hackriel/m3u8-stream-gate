@@ -4447,6 +4447,26 @@ app.get('/api/status', (req, res) => {
   }
 });
 
+// ============= LOG SNAPSHOTS API =============
+// GET /api/log-snapshots/:processId  → últimos 3 snapshots de logs del proceso
+app.get('/api/log-snapshots/:processId', async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase no disponible' });
+  const pid = Number(req.params.processId);
+  if (!Number.isFinite(pid)) return res.status(400).json({ error: 'process_id inválido' });
+  try {
+    const { data, error } = await supabase
+      .from('process_log_snapshots')
+      .select('*')
+      .eq('process_id', pid)
+      .order('created_at', { ascending: false })
+      .limit(3);
+    if (error) throw error;
+    res.json({ snapshots: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
 // Endpoint de health check
 app.get('/api/health', (req, res) => {
   res.json({
