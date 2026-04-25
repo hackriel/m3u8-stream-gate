@@ -3961,6 +3961,14 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         sendLog(process_id, 'error', logMessage);
         sendFailureNotification(process_id, 'server', `Proceso de archivos terminado con código de error ${code}`);
       }
+
+      // Snapshot forense: guardar últimas 100 líneas de log a Supabase
+      saveLogSnapshot(
+        process_id,
+        code === 0
+          ? `Cierre exitoso (code=0, runtime=${Math.floor(runtime/1000)}s)`
+          : `Cierre con error (code=${code}, runtime=${Math.floor(runtime/1000)}s)`
+      ).catch(()=>{});
       
       // Actualizar base de datos (solo si Supabase está disponible)
       if (supabase) {
