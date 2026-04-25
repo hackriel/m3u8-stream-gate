@@ -104,6 +104,42 @@ export type Database = {
         }
         Relationships: []
       }
+      process_log_snapshots: {
+        Row: {
+          created_at: string
+          emit_msg: string | null
+          emit_status: string | null
+          failure_details: string | null
+          failure_reason: string | null
+          id: string
+          log_content: string
+          process_id: number
+          reason: string
+        }
+        Insert: {
+          created_at?: string
+          emit_msg?: string | null
+          emit_status?: string | null
+          failure_details?: string | null
+          failure_reason?: string | null
+          id?: string
+          log_content: string
+          process_id: number
+          reason: string
+        }
+        Update: {
+          created_at?: string
+          emit_msg?: string | null
+          emit_status?: string | null
+          failure_details?: string | null
+          failure_reason?: string | null
+          id?: string
+          log_content?: string
+          process_id?: number
+          reason?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

@@ -80,6 +80,51 @@ wss.on('connection', (ws) => {
   });
 });
 
+// ============= BUFFER CIRCULAR DE LOGS POR PROCESO (snapshots forenses) =============
+// Mantiene las últimas N líneas de log "ricas" (level + mensaje + details)
+// por cada processId. Se vuelca a Supabase (process_log_snapshots) cuando
+// el proceso termina (close handler) o se detiene manualmente.
+const recentLogsBuffer = new Map(); // pid (string) -> string[]
+const LOG_SNAPSHOT_LINES = 100;
+
+// Guarda un snapshot del log actual del proceso en Supabase.
+// La rotación a 3 snapshots por proceso la hace un trigger en la DB.
+async function saveLogSnapshot(processId, reason) {
+  if (!supabase) return;
+  const pid = String(processId);
+  const buf = recentLogsBuffer.get(pid) || [];
+  if (buf.length === 0) return; // nada que guardar
+  const logContent = buf.join('\n');
+  try {
+    // Traer estado actual del proceso para enriquecer el snapshot
+    let emit_status = null, emit_msg = null, failure_reason = null, failure_details = null;
+    try {
+      const { data } = await supabase
+        .from('emission_processes')
+        .select('emit_status, emit_msg, failure_reason, failure_details')
+        .eq('id', Number(pid))
+        .maybeSingle();
+      if (data) {
+        emit_status = data.emit_status;
+        emit_msg = data.emit_msg;
+        failure_reason = data.failure_reason;
+        failure_details = data.failure_details;
+      }
+    } catch {}
+    await supabase.from('process_log_snapshots').insert({
+      process_id: Number(pid),
+      reason: String(reason).slice(0, 200),
+      log_content: logContent,
+      emit_status,
+      emit_msg,
+      failure_reason,
+      failure_details,
+    });
+  } catch (e) {
+    console.error(`[snapshot] Error guardando para pid=${pid}:`, e?.message || e);
+  }
+}
+
 // Función para enviar logs a todos los clientes conectados
 const sendLog = (processId, level, message, details = null) => {
   const logData = {
@@ -93,6 +138,19 @@ const sendLog = (processId, level, message, details = null) => {
   
   const logMessage = JSON.stringify(logData);
   
+  // ── Buffer circular de últimos 100 logs por proceso (para snapshots forenses) ──
+  try {
+    const pid = String(processId);
+    if (!recentLogsBuffer.has(pid)) recentLogsBuffer.set(pid, []);
+    const buf = recentLogsBuffer.get(pid);
+    const ts = new Date(logData.timestamp).toISOString();
+    const detailsStr = details ? ` | ${typeof details === 'string' ? details : JSON.stringify(details)}` : '';
+    buf.push(`[${ts}] [${String(level).toUpperCase()}] ${message}${detailsStr}`);
+    if (buf.length > LOG_SNAPSHOT_LINES) buf.shift();
+  } catch (e) {
+    // No romper sendLog por un error de buffer
+  }
+
   connectedClients.forEach((client) => {
     if (client.readyState === 1) { // WebSocket.OPEN
       try {
@@ -3093,6 +3151,12 @@ app.post('/api/emit', async (req, res) => {
         manualStopProcesses.has(String(process_id)) ||
         manualStopProcesses.has(Number(process_id));
 
+      // Snapshot forense: guardar últimas 100 líneas de log a Supabase
+      const snapshotReason = isManualStop
+        ? `Stop manual (code=${code}${signal ? `, signal=${signal}` : ''}, runtime=${Math.floor(runtime/1000)}s)`
+        : `Cierre inesperado (code=${code}${signal ? `, signal=${signal}` : ''}, runtime=${Math.floor(runtime/1000)}s)`;
+      saveLogSnapshot(process_id, snapshotReason).catch(()=>{});
+
       const rawDiagnosticLines = stderrBuffer
         .filter(l => !l.includes('frame=') && !l.includes('fps='))
         .slice(-8);
@@ -3897,6 +3961,14 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         sendLog(process_id, 'error', logMessage);
         sendFailureNotification(process_id, 'server', `Proceso de archivos terminado con código de error ${code}`);
       }
+
+      // Snapshot forense: guardar últimas 100 líneas de log a Supabase
+      saveLogSnapshot(
+        process_id,
+        code === 0
+          ? `Cierre exitoso (code=0, runtime=${Math.floor(runtime/1000)}s)`
+          : `Cierre con error (code=${code}, runtime=${Math.floor(runtime/1000)}s)`
+      ).catch(()=>{});
       
       // Actualizar base de datos (solo si Supabase está disponible)
       if (supabase) {
@@ -4372,6 +4444,26 @@ app.get('/api/status', (req, res) => {
       processes: allStatuses,
       timestamp: new Date().toISOString()
     });
+  }
+});
+
+// ============= LOG SNAPSHOTS API =============
+// GET /api/log-snapshots/:processId  → últimos 3 snapshots de logs del proceso
+app.get('/api/log-snapshots/:processId', async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase no disponible' });
+  const pid = Number(req.params.processId);
+  if (!Number.isFinite(pid)) return res.status(400).json({ error: 'process_id inválido' });
+  try {
+    const { data, error } = await supabase
+      .from('process_log_snapshots')
+      .select('*')
+      .eq('process_id', pid)
+      .order('created_at', { ascending: false })
+      .limit(3);
+    if (error) throw error;
+    res.json({ snapshots: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
   }
 });
 
