@@ -3151,6 +3151,12 @@ app.post('/api/emit', async (req, res) => {
         manualStopProcesses.has(String(process_id)) ||
         manualStopProcesses.has(Number(process_id));
 
+      // Snapshot forense: guardar últimas 100 líneas de log a Supabase
+      const snapshotReason = isManualStop
+        ? `Stop manual (code=${code}${signal ? `, signal=${signal}` : ''}, runtime=${Math.floor(runtime/1000)}s)`
+        : `Cierre inesperado (code=${code}${signal ? `, signal=${signal}` : ''}, runtime=${Math.floor(runtime/1000)}s)`;
+      saveLogSnapshot(process_id, snapshotReason).catch(()=>{});
+
       const rawDiagnosticLines = stderrBuffer
         .filter(l => !l.includes('frame=') && !l.includes('fps='))
         .slice(-8);
