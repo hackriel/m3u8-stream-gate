@@ -1458,6 +1458,19 @@ export default function EmisorM3U8Panel() {
                     </div>
                   </div>
                 )}
+
+                {/* Snapshots de logs (backups automáticos al terminar el proceso) */}
+                <div className="mt-3 pt-3 border-t border-border/50">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      🗂️ Backups de logs:
+                    </span>
+                    <LogSnapshotsViewer
+                      processId={processIndex}
+                      refreshKey={process.isEmitiendo ? 0 : process.elapsed}
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Contador de Reinicios / Cambios de URL */}
