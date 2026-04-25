@@ -93,6 +93,19 @@ const sendLog = (processId, level, message, details = null) => {
   
   const logMessage = JSON.stringify(logData);
   
+  // ── Buffer circular de últimos 100 logs por proceso (para snapshots forenses) ──
+  try {
+    const pid = String(processId);
+    if (!recentLogsBuffer.has(pid)) recentLogsBuffer.set(pid, []);
+    const buf = recentLogsBuffer.get(pid);
+    const ts = new Date(logData.timestamp).toISOString();
+    const detailsStr = details ? ` | ${typeof details === 'string' ? details : JSON.stringify(details)}` : '';
+    buf.push(`[${ts}] [${String(level).toUpperCase()}] ${message}${detailsStr}`);
+    if (buf.length > LOG_SNAPSHOT_LINES) buf.shift();
+  } catch (e) {
+    // No romper sendLog por un error de buffer
+  }
+
   connectedClients.forEach((client) => {
     if (client.readyState === 1) { // WebSocket.OPEN
       try {
