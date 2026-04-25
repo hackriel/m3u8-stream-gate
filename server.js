@@ -80,6 +80,51 @@ wss.on('connection', (ws) => {
   });
 });
 
+// ============= BUFFER CIRCULAR DE LOGS POR PROCESO (snapshots forenses) =============
+// Mantiene las últimas N líneas de log "ricas" (level + mensaje + details)
+// por cada processId. Se vuelca a Supabase (process_log_snapshots) cuando
+// el proceso termina (close handler) o se detiene manualmente.
+const recentLogsBuffer = new Map(); // pid (string) -> string[]
+const LOG_SNAPSHOT_LINES = 100;
+
+// Guarda un snapshot del log actual del proceso en Supabase.
+// La rotación a 3 snapshots por proceso la hace un trigger en la DB.
+async function saveLogSnapshot(processId, reason) {
+  if (!supabase) return;
+  const pid = String(processId);
+  const buf = recentLogsBuffer.get(pid) || [];
+  if (buf.length === 0) return; // nada que guardar
+  const logContent = buf.join('\n');
+  try {
+    // Traer estado actual del proceso para enriquecer el snapshot
+    let emit_status = null, emit_msg = null, failure_reason = null, failure_details = null;
+    try {
+      const { data } = await supabase
+        .from('emission_processes')
+        .select('emit_status, emit_msg, failure_reason, failure_details')
+        .eq('id', Number(pid))
+        .maybeSingle();
+      if (data) {
+        emit_status = data.emit_status;
+        emit_msg = data.emit_msg;
+        failure_reason = data.failure_reason;
+        failure_details = data.failure_details;
+      }
+    } catch {}
+    await supabase.from('process_log_snapshots').insert({
+      process_id: Number(pid),
+      reason: String(reason).slice(0, 200),
+      log_content: logContent,
+      emit_status,
+      emit_msg,
+      failure_reason,
+      failure_details,
+    });
+  } catch (e) {
+    console.error(`[snapshot] Error guardando para pid=${pid}:`, e?.message || e);
+  }
+}
+
 // Función para enviar logs a todos los clientes conectados
 const sendLog = (processId, level, message, details = null) => {
   const logData = {
