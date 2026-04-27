@@ -449,6 +449,7 @@ const SRT_INGEST_CONFIGS = {
     latencyMs: parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10),
     passphrase: process.env.TIGO_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/tigo-srt-buffer-12',
+    udpPort: parseInt(process.env.TIGO_SRT_UDP_PORT || '9100', 10),
   },
   '16': {
     label: 'DISNEY 7 SRT',
@@ -457,6 +458,7 @@ const SRT_INGEST_CONFIGS = {
     latencyMs: parseInt(process.env.DISNEY7_SRT_LATENCY_MS || '2000', 10),
     passphrase: process.env.DISNEY7_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/disney7-buffer-16',
+    udpPort: parseInt(process.env.DISNEY7_SRT_UDP_PORT || '9101', 10),
   },
   '18': {
     label: 'FUTV SRT',
@@ -465,6 +467,7 @@ const SRT_INGEST_CONFIGS = {
     latencyMs: parseInt(process.env.FUTV_SRT_LATENCY_MS || '2000', 10),
     passphrase: process.env.FUTV_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/futv-srt-buffer-18',
+    udpPort: parseInt(process.env.FUTV_SRT_UDP_PORT || '9102', 10),
   },
 };
 for (const cfg of Object.values(SRT_INGEST_CONFIGS)) {
