@@ -2601,13 +2601,13 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'success', `🛰️ ETAPA 1 HDMI activa: srt://0.0.0.0:${TIGO_SRT_PORT} → ${TIGO_BUFFER_PLAYLIST}`);
     } else if (isSrtIngestMode) {
       const cfg = srtIngestCfg;
-      sendLog(process_id, 'info', `📡 ${cfg.label}: arrancando listener en :${cfg.port} (esperando OBS...)`);
+      sendLog(process_id, 'info', `📡 ${cfg.label}: arrancando listener PERSISTENTE en :${cfg.port} (esperando OBS...)`);
       const ingest = startSrtIngest(process_id);
       ffmpegProcess = ingest.process;
-      spawnCmd = 'ffmpeg';
+      spawnCmd = 'srt-live-transmit';
       spawnArgs = ingest.args;
       const encInfo = cfg.passphrase ? '🔐 AES-128' : '⚠️ sin encriptación';
-      sendLog(process_id, 'success', `🛰️ ETAPA 1 SRT activa: srt://0.0.0.0:${cfg.port} → ${cfg.bufferPlaylist} (${encInfo}, latency=${cfg.latencyMs}ms)`);
+      sendLog(process_id, 'success', `🛰️ ETAPA 1 SRT (srt-live-transmit) activa: srt://0.0.0.0:${cfg.port} → udp://127.0.0.1:${cfg.udpPort} (${encInfo}, latency=${cfg.latencyMs}ms, listener nunca muere)`);
     } else if (PROXY_PROCESSES.has(process_id)) {
       // ── MODO PROXY (legacy/fallback): proxychains4 → CDN HLS ──
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
