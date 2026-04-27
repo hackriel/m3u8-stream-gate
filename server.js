@@ -557,53 +557,60 @@ const waitForSrtBufferReady = async (cfg, timeoutMs) => {
   return { ready: false, segments: 0, waitedMs: Date.now() - start };
 };
 
-// ETAPA 1 SRT genérico: FFmpeg SRT listener que recibe de OBS y escribe HLS buffer local.
+// ETAPA 1 SRT genérico (Apr 2026 — arquitectura srt-live-transmit):
+// Usa `srt-live-transmit` (de srt-tools) como LISTENER PERSISTENTE que NUNCA muere
+// aunque OBS desconecte. Reenvía el stream MPEG-TS a UDP local (127.0.0.1:<udpPort>),
+// donde la ETAPA 2 lo consume con un solo FFmpeg de re-encode → RTMP/HLS.
+//
+// Por qué: FFmpeg como listener SRT cierra con "Input/output error" cuando el accept()
+// no recibe datos rápido — eso provocaba que el listener muriera a los 7s y OBS no
+// pudiera reconectar. srt-live-transmit es un binario pensado exactamente para este
+// uso: queda escuchando indefinidamente y reacepta conexiones sin perder el bind.
+//
+// Bonus: al eliminar el buffer HLS intermedio en ETAPA 1, desaparece el desfase
+// audio/video acumulado por encadenar 2 FFmpeg con HLS de 10s segmentos.
 const startSrtIngest = (process_id) => {
   const cfg = getSrtConfig(process_id);
   if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
-  // Blindaje: matar cualquier ffmpeg residual (huérfano) que esté usando este buffer
-  // o esta carpeta de salida HLS, para evitar arrancar "encima" de un proceso zombi
-  // que bloquearía el spawn de ETAPA 2 (caso real visto en Disney 7).
+  // Blindaje: matar cualquier proceso residual (FFmpeg viejo o srt-live-transmit
+  // huérfano) que esté usando este puerto SRT o esta carpeta — evita "Address in use".
   try {
     const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
-    const patterns = [cfg.bufferDir, `live/${slug}/`, `:${cfg.port}?mode=listener`];
+    const patterns = [
+      cfg.bufferDir,
+      `live/${slug}/`,
+      `:${cfg.port}?mode=listener`,
+      `srt://:${cfg.port}`,
+      `127.0.0.1:${cfg.udpPort}`,
+    ];
     for (const pat of patterns) {
       try { execSync(`pkill -9 -f ${JSON.stringify(pat)}`, { stdio: 'ignore' }); } catch (_) {}
     }
   } catch (_) {}
   cleanSrtBufferDir(cfg);
-  resetTigoSrtMetric(process_id); // mapa de métricas SRT (genérico por process_id)
+  resetTigoSrtMetric(process_id);
 
-  let srtUrl = `srt://0.0.0.0:${cfg.port}?mode=listener&latency=${cfg.latencyUs}&pkt_size=1316`;
+  // SRT URL: listener que NO se cierra (rcvlatency alto + sin maxbw para que srt-live-transmit
+  // mantenga el socket vivo aunque haya gaps).
+  let srtUrl = `srt://:${cfg.port}?mode=listener&latency=${cfg.latencyUs}&pkt_size=1316&rcvbuf=12058624&peerlatency=${cfg.latencyUs}`;
   if (cfg.passphrase && cfg.passphrase.length >= 10) {
     srtUrl += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
   }
 
+  // UDP local hacia ETAPA 2. pkt_size=1316 = MTU friendly para MPEG-TS (188×7).
+  const udpUrl = `udp://127.0.0.1:${cfg.udpPort}?pkt_size=1316&buffer_size=2097152`;
+
+  // srt-live-transmit -t (timeout=infinito implícito) -v (verbose) -s 1000 (stats cada 1000 pkts)
   const args = [
-    '-hide_banner',
-    '-loglevel', 'verbose',
-    '-stats',
-    '-fflags', '+genpts+discardcorrupt+nobuffer',
-    '-analyzeduration', '10000000',
-    '-probesize', '5000000',
-    '-i', srtUrl,
-    '-map', '0:v:0',
-    '-map', '0:a:0',
-    '-c', 'copy',
-    '-f', 'hls',
-    '-hls_time', '10',
-    '-hls_list_size', '8',
-    '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
-    '-hls_segment_type', 'mpegts',
-    '-hls_segment_filename', path.join(cfg.bufferDir, 'buf_%05d.ts'),
-    '-hls_allow_cache', '0',
-    '-hls_start_number_source', 'epoch',
-    cfg.bufferPlaylist,
+    '-v',         // verbose: muestra connect/disconnect en stderr
+    '-s', '1000', // imprime stats cada 1000 paquetes (p/ métricas)
+    srtUrl,
+    udpUrl,
   ];
 
-  const proc = spawn('ffmpeg', args);
+  const proc = spawn('srt-live-transmit', args);
   updateTigoSrtMetric(process_id, { connected: false, since: Date.now() });
-  return { process: proc, args, command: `ffmpeg ${args.join(' ')}`, cfg };
+  return { process: proc, args, command: `srt-live-transmit ${args.join(' ')}`, cfg };
 };
 
 const waitForTigoBufferReady = async (timeoutMs = TIGO_BUFFER_WAIT_TIMEOUT_MS) => {
