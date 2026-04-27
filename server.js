@@ -449,6 +449,7 @@ const SRT_INGEST_CONFIGS = {
     latencyMs: parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10),
     passphrase: process.env.TIGO_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/tigo-srt-buffer-12',
+    udpPort: parseInt(process.env.TIGO_SRT_UDP_PORT || '9100', 10),
   },
   '16': {
     label: 'DISNEY 7 SRT',
@@ -457,6 +458,7 @@ const SRT_INGEST_CONFIGS = {
     latencyMs: parseInt(process.env.DISNEY7_SRT_LATENCY_MS || '2000', 10),
     passphrase: process.env.DISNEY7_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/disney7-buffer-16',
+    udpPort: parseInt(process.env.DISNEY7_SRT_UDP_PORT || '9101', 10),
   },
   '18': {
     label: 'FUTV SRT',
@@ -465,6 +467,7 @@ const SRT_INGEST_CONFIGS = {
     latencyMs: parseInt(process.env.FUTV_SRT_LATENCY_MS || '2000', 10),
     passphrase: process.env.FUTV_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/futv-srt-buffer-18',
+    udpPort: parseInt(process.env.FUTV_SRT_UDP_PORT || '9102', 10),
   },
 };
 for (const cfg of Object.values(SRT_INGEST_CONFIGS)) {
@@ -554,53 +557,60 @@ const waitForSrtBufferReady = async (cfg, timeoutMs) => {
   return { ready: false, segments: 0, waitedMs: Date.now() - start };
 };
 
-// ETAPA 1 SRT genérico: FFmpeg SRT listener que recibe de OBS y escribe HLS buffer local.
+// ETAPA 1 SRT genérico (Apr 2026 — arquitectura srt-live-transmit):
+// Usa `srt-live-transmit` (de srt-tools) como LISTENER PERSISTENTE que NUNCA muere
+// aunque OBS desconecte. Reenvía el stream MPEG-TS a UDP local (127.0.0.1:<udpPort>),
+// donde la ETAPA 2 lo consume con un solo FFmpeg de re-encode → RTMP/HLS.
+//
+// Por qué: FFmpeg como listener SRT cierra con "Input/output error" cuando el accept()
+// no recibe datos rápido — eso provocaba que el listener muriera a los 7s y OBS no
+// pudiera reconectar. srt-live-transmit es un binario pensado exactamente para este
+// uso: queda escuchando indefinidamente y reacepta conexiones sin perder el bind.
+//
+// Bonus: al eliminar el buffer HLS intermedio en ETAPA 1, desaparece el desfase
+// audio/video acumulado por encadenar 2 FFmpeg con HLS de 10s segmentos.
 const startSrtIngest = (process_id) => {
   const cfg = getSrtConfig(process_id);
   if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
-  // Blindaje: matar cualquier ffmpeg residual (huérfano) que esté usando este buffer
-  // o esta carpeta de salida HLS, para evitar arrancar "encima" de un proceso zombi
-  // que bloquearía el spawn de ETAPA 2 (caso real visto en Disney 7).
+  // Blindaje: matar cualquier proceso residual (FFmpeg viejo o srt-live-transmit
+  // huérfano) que esté usando este puerto SRT o esta carpeta — evita "Address in use".
   try {
     const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
-    const patterns = [cfg.bufferDir, `live/${slug}/`, `:${cfg.port}?mode=listener`];
+    const patterns = [
+      cfg.bufferDir,
+      `live/${slug}/`,
+      `:${cfg.port}?mode=listener`,
+      `srt://:${cfg.port}`,
+      `127.0.0.1:${cfg.udpPort}`,
+    ];
     for (const pat of patterns) {
       try { execSync(`pkill -9 -f ${JSON.stringify(pat)}`, { stdio: 'ignore' }); } catch (_) {}
     }
   } catch (_) {}
   cleanSrtBufferDir(cfg);
-  resetTigoSrtMetric(process_id); // mapa de métricas SRT (genérico por process_id)
+  resetTigoSrtMetric(process_id);
 
-  let srtUrl = `srt://0.0.0.0:${cfg.port}?mode=listener&latency=${cfg.latencyUs}&pkt_size=1316`;
+  // SRT URL: listener que NO se cierra (rcvlatency alto + sin maxbw para que srt-live-transmit
+  // mantenga el socket vivo aunque haya gaps).
+  let srtUrl = `srt://:${cfg.port}?mode=listener&latency=${cfg.latencyUs}&pkt_size=1316&rcvbuf=12058624&peerlatency=${cfg.latencyUs}`;
   if (cfg.passphrase && cfg.passphrase.length >= 10) {
     srtUrl += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
   }
 
+  // UDP local hacia ETAPA 2. pkt_size=1316 = MTU friendly para MPEG-TS (188×7).
+  const udpUrl = `udp://127.0.0.1:${cfg.udpPort}?pkt_size=1316&buffer_size=2097152`;
+
+  // srt-live-transmit -t (timeout=infinito implícito) -v (verbose) -s 1000 (stats cada 1000 pkts)
   const args = [
-    '-hide_banner',
-    '-loglevel', 'verbose',
-    '-stats',
-    '-fflags', '+genpts+discardcorrupt+nobuffer',
-    '-analyzeduration', '10000000',
-    '-probesize', '5000000',
-    '-i', srtUrl,
-    '-map', '0:v:0',
-    '-map', '0:a:0',
-    '-c', 'copy',
-    '-f', 'hls',
-    '-hls_time', '10',
-    '-hls_list_size', '8',
-    '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
-    '-hls_segment_type', 'mpegts',
-    '-hls_segment_filename', path.join(cfg.bufferDir, 'buf_%05d.ts'),
-    '-hls_allow_cache', '0',
-    '-hls_start_number_source', 'epoch',
-    cfg.bufferPlaylist,
+    '-v',         // verbose: muestra connect/disconnect en stderr
+    '-s', '1000', // imprime stats cada 1000 paquetes (p/ métricas)
+    srtUrl,
+    udpUrl,
   ];
 
-  const proc = spawn('ffmpeg', args);
+  const proc = spawn('srt-live-transmit', args);
   updateTigoSrtMetric(process_id, { connected: false, since: Date.now() });
-  return { process: proc, args, command: `ffmpeg ${args.join(' ')}`, cfg };
+  return { process: proc, args, command: `srt-live-transmit ${args.join(' ')}`, cfg };
 };
 
 const waitForTigoBufferReady = async (timeoutMs = TIGO_BUFFER_WAIT_TIMEOUT_MS) => {
@@ -2591,13 +2601,13 @@ app.post('/api/emit', async (req, res) => {
       sendLog(process_id, 'success', `🛰️ ETAPA 1 HDMI activa: srt://0.0.0.0:${TIGO_SRT_PORT} → ${TIGO_BUFFER_PLAYLIST}`);
     } else if (isSrtIngestMode) {
       const cfg = srtIngestCfg;
-      sendLog(process_id, 'info', `📡 ${cfg.label}: arrancando listener en :${cfg.port} (esperando OBS...)`);
+      sendLog(process_id, 'info', `📡 ${cfg.label}: arrancando listener PERSISTENTE en :${cfg.port} (esperando OBS...)`);
       const ingest = startSrtIngest(process_id);
       ffmpegProcess = ingest.process;
-      spawnCmd = 'ffmpeg';
+      spawnCmd = 'srt-live-transmit';
       spawnArgs = ingest.args;
       const encInfo = cfg.passphrase ? '🔐 AES-128' : '⚠️ sin encriptación';
-      sendLog(process_id, 'success', `🛰️ ETAPA 1 SRT activa: srt://0.0.0.0:${cfg.port} → ${cfg.bufferPlaylist} (${encInfo}, latency=${cfg.latencyMs}ms)`);
+      sendLog(process_id, 'success', `🛰️ ETAPA 1 SRT (srt-live-transmit) activa: srt://0.0.0.0:${cfg.port} → udp://127.0.0.1:${cfg.udpPort} (${encInfo}, latency=${cfg.latencyMs}ms, listener nunca muere)`);
     } else if (PROXY_PROCESSES.has(process_id)) {
       // ── MODO PROXY (legacy/fallback): proxychains4 → CDN HLS ──
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
@@ -2708,31 +2718,36 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // ── Parser de métricas SRT genérico (Disney 7 / Tigo / FUTV) ──
+    // ── Parser de stderr de srt-live-transmit (ETAPA 1 SRT genérica) ──
+    // srt-live-transmit imprime líneas tipo:
+    //   "Accepted SRT source connection"
+    //   "SRT source disconnected"
+    //   "SRT stats: ... pktRcvLoss=N ..."
     if (isSrtIngestMode) {
       ffmpegProcess.stderr.on('data', (data) => {
         const text = data.toString();
         for (const line of text.split('\n')) {
           const trimmed = line.trim();
           if (!trimmed) continue;
-          if (!/^frame=|^size=/.test(trimmed)) {
-            sendLog(process_id, 'info', `[ETAPA1-SRT] ${trimmed.substring(0, 220)}`);
+          // Filtrar el spam de stats periódicas; loguear handshakes y errores.
+          const isStatsLine = /pktRcv|pktSnd|RTT|bandwidth/i.test(trimmed);
+          if (!isStatsLine) {
+            sendLog(process_id, 'info', `[SRT-LIVE] ${trimmed.substring(0, 220)}`);
           }
-          const m = parseFfmpegProgress(trimmed);
-          if (m.frame !== undefined && m.frame > 0) {
+          if (/Accepted.*connection|Source connected|connection established/i.test(trimmed)) {
             updateTigoSrtMetric(process_id, {
               connected: true,
               lastFrameAt: Date.now(),
-              ...(m.bitrateKbps !== undefined ? { bitrateKbps: m.bitrateKbps } : {}),
+              since: Date.now(),
             });
           }
-          const lostMatch = trimmed.match(/SRT.*lost\s*[:=]\s*(\d+)/i);
-          if (lostMatch) {
-            const cur = tigoSrtMetrics.get(String(process_id))?.pktsLost || 0;
-            updateTigoSrtMetric(process_id, { pktsLost: cur + parseInt(lostMatch[1], 10) });
-          }
-          if (/Connection (lost|timed out)/i.test(trimmed) || /SRT.*disconnect/i.test(trimmed)) {
+          if (/disconnected|Connection (lost|broken|closed)|EOF/i.test(trimmed)) {
             updateTigoSrtMetric(process_id, { connected: false });
+          }
+          // pktRcvLoss=NNN en logs de stats
+          const lostMatch = trimmed.match(/pktRcvLoss[\s=:]+(\d+)/i);
+          if (lostMatch) {
+            updateTigoSrtMetric(process_id, { pktsLost: parseInt(lostMatch[1], 10) });
           }
         }
       });
@@ -2860,13 +2875,10 @@ app.post('/api/emit', async (req, res) => {
           }
         } catch (_) {}
 
-        sendLog(process_id, 'info', `⏳ ${cfg.label} BUFFER ETAPA 2: esperando ≥${cfg.minSegments} segmentos SRT...`);
-        const ready = await waitForSrtBufferReady(cfg);
-        if (!ready.ready) {
-          sendLog(process_id, 'error', `❌ ${cfg.label} BUFFER: timeout (${ready.waitedMs}ms). ¿OBS está conectado al SRT?`);
-          return;
-        }
-        sendLog(process_id, 'success', `✅ ${cfg.label} BUFFER listo (${ready.segments} segs en ${ready.waitedMs}ms) — spawneando ETAPA 2`);
+        // Sin espera de buffer en disco: ETAPA 2 lee UDP en vivo. FFmpeg con
+        // listen=1 queda escuchando aunque srt-live-transmit todavía no haya
+        // recibido nada de OBS — cuando llegue el primer paquete UDP, arranca solo.
+        sendLog(process_id, 'info', `🎬 ${cfg.label} ETAPA 2 escuchando UDP en 127.0.0.1:${cfg.udpPort} (sin buffer HLS intermedio, A/V sincronizado)`);
 
         let stage2RetryCount = 0;
         const STAGE2_MAX_RETRIES = 10;
@@ -2881,12 +2893,20 @@ app.post('/api/emit', async (req, res) => {
           }
 
           const outPlaylist = path.join(outDir, 'playlist.m3u8');
+          // Input UDP local en modo listener: FFmpeg queda esperando el primer
+          // paquete sin reventar si srt-live-transmit aún no recibe nada de OBS.
+          //   - overrun_nonfatal=1: no muere si el buffer UDP se llena en un hipo.
+          //   - fifo_size grande: 50000 paquetes × 188B ~ 9.4MB de buffer en kernel.
+          //   - listen=1: queda bindeado al puerto incluso si nadie envía aún.
+          //   - timeout=0: nunca cierra por inactividad.
+          // Sin -re: la cadencia la marca el reloj de los paquetes UDP entrantes
+          // (que vienen al ritmo real del codificador de OBS), evitando drift A/V.
           const stage2Args = [
-            '-re',
-            '-fflags', '+genpts+discardcorrupt',
+            '-fflags', '+genpts+discardcorrupt+nobuffer',
+            '-flags', 'low_delay',
             '-analyzeduration', '3000000',
             '-probesize', '1500000',
-            '-i', cfg.bufferPlaylist,
+            '-i', `udp://127.0.0.1:${cfg.udpPort}?listen=1&overrun_nonfatal=1&fifo_size=50000&timeout=0&buffer_size=2097152`,
             '-map', '0:v:0?',
             '-map', '0:a:0?',
             '-c:v', 'libx264',
@@ -2919,7 +2939,7 @@ app.post('/api/emit', async (req, res) => {
           ];
           const stage2 = spawn('ffmpeg', stage2Args);
           tigoOutputProcesses.set(String(process_id), stage2);
-          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode 720p CBR 2000k @ 30fps)`);
+          sendLog(process_id, 'success', `🎬 ${cfg.label} ETAPA 2 → /live/${slug}/playlist.m3u8 (UDP→HLS, 720p CBR 2000k @ 30fps, low-delay)`);
 
           stage2.stderr.on('data', (data) => {
             const out = data.toString();
