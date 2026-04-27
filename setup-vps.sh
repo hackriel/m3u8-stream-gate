@@ -59,16 +59,6 @@ else
   ok "FFmpeg instalado"
 fi
 
-# srt-tools (provee srt-live-transmit) — listener SRT persistente para
-# Tigo (12), Disney 7 SRT (16) y FUTV SRT (18). FFmpeg solo no aguanta
-# como listener (cierra con Input/output error si OBS no conecta rápido).
-if command -v srt-live-transmit &>/dev/null; then
-  ok "srt-tools ya instalado"
-else
-  apt install -y srt-tools
-  ok "srt-tools instalado (srt-live-transmit disponible)"
-fi
-
 apt install -y nginx libnginx-mod-rtmp
 
 mkdir -p /var/www/hls /var/www/hls/tigo
