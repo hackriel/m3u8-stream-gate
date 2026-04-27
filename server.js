@@ -2718,31 +2718,36 @@ app.post('/api/emit', async (req, res) => {
       });
     }
 
-    // ── Parser de métricas SRT genérico (Disney 7 / Tigo / FUTV) ──
+    // ── Parser de stderr de srt-live-transmit (ETAPA 1 SRT genérica) ──
+    // srt-live-transmit imprime líneas tipo:
+    //   "Accepted SRT source connection"
+    //   "SRT source disconnected"
+    //   "SRT stats: ... pktRcvLoss=N ..."
     if (isSrtIngestMode) {
       ffmpegProcess.stderr.on('data', (data) => {
         const text = data.toString();
         for (const line of text.split('\n')) {
           const trimmed = line.trim();
           if (!trimmed) continue;
-          if (!/^frame=|^size=/.test(trimmed)) {
-            sendLog(process_id, 'info', `[ETAPA1-SRT] ${trimmed.substring(0, 220)}`);
+          // Filtrar el spam de stats periódicas; loguear handshakes y errores.
+          const isStatsLine = /pktRcv|pktSnd|RTT|bandwidth/i.test(trimmed);
+          if (!isStatsLine) {
+            sendLog(process_id, 'info', `[SRT-LIVE] ${trimmed.substring(0, 220)}`);
           }
-          const m = parseFfmpegProgress(trimmed);
-          if (m.frame !== undefined && m.frame > 0) {
+          if (/Accepted.*connection|Source connected|connection established/i.test(trimmed)) {
             updateTigoSrtMetric(process_id, {
               connected: true,
               lastFrameAt: Date.now(),
-              ...(m.bitrateKbps !== undefined ? { bitrateKbps: m.bitrateKbps } : {}),
+              since: Date.now(),
             });
           }
-          const lostMatch = trimmed.match(/SRT.*lost\s*[:=]\s*(\d+)/i);
-          if (lostMatch) {
-            const cur = tigoSrtMetrics.get(String(process_id))?.pktsLost || 0;
-            updateTigoSrtMetric(process_id, { pktsLost: cur + parseInt(lostMatch[1], 10) });
-          }
-          if (/Connection (lost|timed out)/i.test(trimmed) || /SRT.*disconnect/i.test(trimmed)) {
+          if (/disconnected|Connection (lost|broken|closed)|EOF/i.test(trimmed)) {
             updateTigoSrtMetric(process_id, { connected: false });
+          }
+          // pktRcvLoss=NNN en logs de stats
+          const lostMatch = trimmed.match(/pktRcvLoss[\s=:]+(\d+)/i);
+          if (lostMatch) {
+            updateTigoSrtMetric(process_id, { pktsLost: parseInt(lostMatch[1], 10) });
           }
         }
       });
