@@ -2875,13 +2875,10 @@ app.post('/api/emit', async (req, res) => {
           }
         } catch (_) {}
 
-        sendLog(process_id, 'info', `⏳ ${cfg.label} BUFFER ETAPA 2: esperando ≥${cfg.minSegments} segmentos SRT...`);
-        const ready = await waitForSrtBufferReady(cfg);
-        if (!ready.ready) {
-          sendLog(process_id, 'error', `❌ ${cfg.label} BUFFER: timeout (${ready.waitedMs}ms). ¿OBS está conectado al SRT?`);
-          return;
-        }
-        sendLog(process_id, 'success', `✅ ${cfg.label} BUFFER listo (${ready.segments} segs en ${ready.waitedMs}ms) — spawneando ETAPA 2`);
+        // Sin espera de buffer en disco: ETAPA 2 lee UDP en vivo. FFmpeg con
+        // listen=1 queda escuchando aunque srt-live-transmit todavía no haya
+        // recibido nada de OBS — cuando llegue el primer paquete UDP, arranca solo.
+        sendLog(process_id, 'info', `🎬 ${cfg.label} ETAPA 2 escuchando UDP en 127.0.0.1:${cfg.udpPort} (sin buffer HLS intermedio, A/V sincronizado)`);
 
         let stage2RetryCount = 0;
         const STAGE2_MAX_RETRIES = 10;
@@ -2896,12 +2893,20 @@ app.post('/api/emit', async (req, res) => {
           }
 
           const outPlaylist = path.join(outDir, 'playlist.m3u8');
+          // Input UDP local en modo listener: FFmpeg queda esperando el primer
+          // paquete sin reventar si srt-live-transmit aún no recibe nada de OBS.
+          //   - overrun_nonfatal=1: no muere si el buffer UDP se llena en un hipo.
+          //   - fifo_size grande: 50000 paquetes × 188B ~ 9.4MB de buffer en kernel.
+          //   - listen=1: queda bindeado al puerto incluso si nadie envía aún.
+          //   - timeout=0: nunca cierra por inactividad.
+          // Sin -re: la cadencia la marca el reloj de los paquetes UDP entrantes
+          // (que vienen al ritmo real del codificador de OBS), evitando drift A/V.
           const stage2Args = [
-            '-re',
-            '-fflags', '+genpts+discardcorrupt',
+            '-fflags', '+genpts+discardcorrupt+nobuffer',
+            '-flags', 'low_delay',
             '-analyzeduration', '3000000',
             '-probesize', '1500000',
-            '-i', cfg.bufferPlaylist,
+            '-i', `udp://127.0.0.1:${cfg.udpPort}?listen=1&overrun_nonfatal=1&fifo_size=50000&timeout=0&buffer_size=2097152`,
             '-map', '0:v:0?',
             '-map', '0:a:0?',
             '-c:v', 'libx264',
@@ -2934,7 +2939,7 @@ app.post('/api/emit', async (req, res) => {
           ];
           const stage2 = spawn('ffmpeg', stage2Args);
           tigoOutputProcesses.set(String(process_id), stage2);
-          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode 720p CBR 2000k @ 30fps)`);
+          sendLog(process_id, 'success', `🎬 ${cfg.label} ETAPA 2 → /live/${slug}/playlist.m3u8 (UDP→HLS, 720p CBR 2000k @ 30fps, low-delay)`);
 
           stage2.stderr.on('data', (data) => {
             const out = data.toString();
