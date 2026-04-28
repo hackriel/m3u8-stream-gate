@@ -1263,25 +1263,36 @@ const scrapeStreamUrlWithRetries = async (process_id, channelId, channelName) =>
 // Espera a que el proceso FFmpeg esté completamente muerto (con timeout agresivo)
 const waitForProcessDeath = (proc, timeoutMs = 1500) => {
   return new Promise((resolve) => {
-    if (!proc || proc.killed || proc.exitCode !== null) {
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
       return resolve();
     }
+
     let resolved = false;
-    // SIGKILL inmediato si no muere en timeoutMs
-    const timer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
+    let sigkillSent = false;
+
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      clearInterval(pollTimer);
+      clearTimeout(killTimer);
+      clearTimeout(giveUpTimer);
+      resolve();
+    };
+
+    const pollTimer = setInterval(() => {
+      if (proc.exitCode !== null || proc.signalCode !== null) return finish();
+      if (proc.pid && typeof isPidAlive === 'function' && !isPidAlive(proc.pid)) return finish();
+    }, 100);
+
+    const killTimer = setTimeout(() => {
+      if (!resolved && !sigkillSent) {
+        sigkillSent = true;
         try { proc.kill('SIGKILL'); } catch (e) {}
-        resolve();
       }
     }, timeoutMs);
-    proc.on('close', () => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timer);
-        resolve();
-      }
-    });
+
+    const giveUpTimer = setTimeout(finish, timeoutMs + 1500);
+    proc.once('close', finish);
   });
 };
 
@@ -2108,20 +2119,11 @@ app.post('/api/emit', async (req, res) => {
     } else if (isManualProcess || needsTdmaxLikePinning) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
-        // ⚡ ANTI-STALL (Apr 2026): bajamos drásticamente max_reload.
-        // Antes 1000 = FFmpeg reintentaba el MISMO segmento muerto cientos
-        // de veces, congelando el output RTMP (frame= dejaba de avanzar y
-        // el cliente veía solo ~10s antes del corte). Con 6 reintentos
-        // (~6s) FFmpeg salta el segmento corrupto y sigue leyendo nuevos
-        // chunks → cadencia de salida estable hacia el RTMP.
-        '-max_reload', '6',
-        '-m3u8_hold_counters', '10',
-        // +discardcorrupt: descarta paquetes corruptos (token rotado a
-        // mitad de descarga) en vez de bloquear; +genpts: regenera PTS
-        // si el segmento saltado deja huecos en el timestamp.
-        '-fflags', '+genpts+discardcorrupt'
+        '-max_reload', '1000',
+        '-m3u8_hold_counters', '1000',
+        '-fflags', '+genpts'
       );
-      sendLog(process_id, 'info', `🛡️ Anti-stall: max_reload=6, hold=10, +discardcorrupt`);
+      sendLog(process_id, 'info', `🛡️ HLS resiliente: max_reload=1000, hold=1000`);
     }
     // Mantener -re como pacing de entrada para HLS live.
     // Quitar -re hace que FFmpeg lea a velocidad CPU, agote segmentos y termine en EOF.
@@ -2557,28 +2559,16 @@ app.post('/api/emit', async (req, res) => {
       const hlsPlaylistPath = path.join(hlsDir, 'playlist.m3u8');
       ffmpegArgs.push(
         '-f', 'hls',
-        // ── Perfil LIVE-EDGE BALANCEADO ─────────────────────────────────────
-        // Objetivo: evitar que IPTV Smarters Pro se "atrase" eternamente
-        // tras un hipo de red. Forzamos al reproductor a estar siempre cerca
-        // del live edge expulsando segmentos viejos rápido.
-        //   - hls_time=2  → segmentos cortos (recuperación rápida)
-        //   - hls_list_size=6 → solo 12s de buffer visible
-        //   - delete_segments → borra los .ts viejos del disco
-        //   - omit_endlist → nunca cierra el playlist (siempre "live")
-        //   - discont_start → marca discontinuidad al iniciar/reiniciar
-        //                     para que el player resincronice limpio
-        // NO incluimos append_list: queremos sesión fresca en cada arranque
-        // para que el player no intente leer segmentos inexistentes.
-        '-hls_time', '2',
-        '-hls_list_size', '6',
-        '-hls_flags', 'delete_segments+independent_segments+omit_endlist+discont_start',
+        '-hls_time', '10',
+        '-hls_list_size', '8',
+        '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
         '-hls_segment_type', 'mpegts',
         '-hls_segment_filename', path.join(hlsDir, 'seg_%05d.ts'),
         '-hls_allow_cache', '0',
         '-hls_start_number_source', 'epoch',  // Números de segmento únicos por sesión
         hlsPlaylistPath
       );
-      sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8 (live-edge: 2s×6, anti-rebuffer)`);
+      sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8 (10s×8, estable)`);
     } else {
       ffmpegArgs.push(
         '-f', 'flv',
@@ -2834,7 +2824,7 @@ app.post('/api/emit', async (req, res) => {
             // Silencioso: solo errores reales
             if (/error|failed|Invalid/i.test(out) && !/frame=/.test(out)) {
               const line = out.split('\n').find(l => /error|failed|Invalid/i.test(l));
-              if (line) sendLog(process_id, 'warn', `[ETAPA2] ${line.trim().substring(0, 180)}`);
+          if (line && !line.includes('failed to delete old segment')) sendLog(process_id, 'warn', `[ETAPA2] ${line.trim().substring(0, 180)}`);
             }
           });
 
@@ -2940,7 +2930,7 @@ app.post('/api/emit', async (req, res) => {
             const out = data.toString();
             if (/error|failed|Invalid/i.test(out) && !/frame=/.test(out)) {
               const line = out.split('\n').find(l => /error|failed|Invalid/i.test(l));
-              if (line) sendLog(process_id, 'warn', `[ETAPA2] ${line.trim().substring(0, 180)}`);
+              if (line && !line.includes('failed to delete old segment')) sendLog(process_id, 'warn', `[ETAPA2] ${line.trim().substring(0, 180)}`);
             }
           });
 
@@ -3140,6 +3130,7 @@ app.post('/api/emit', async (req, res) => {
           output.includes("Skip ('#EXT-X-") ||
           output.includes('keepalive request failed') ||
           output.includes('Error in the pull function') ||
+          output.includes('failed to delete old segment') ||
           output.includes('retrying with new connection') ||
           (isStoppingNow && output.includes('Error when loading first segment')) ||
           (isStoppingNow && output.includes('Immediate exit requested')) ||
