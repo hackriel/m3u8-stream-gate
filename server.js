@@ -1263,25 +1263,36 @@ const scrapeStreamUrlWithRetries = async (process_id, channelId, channelName) =>
 // Espera a que el proceso FFmpeg esté completamente muerto (con timeout agresivo)
 const waitForProcessDeath = (proc, timeoutMs = 1500) => {
   return new Promise((resolve) => {
-    if (!proc || proc.killed || proc.exitCode !== null) {
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
       return resolve();
     }
+
     let resolved = false;
-    // SIGKILL inmediato si no muere en timeoutMs
-    const timer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
+    let sigkillSent = false;
+
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      clearInterval(pollTimer);
+      clearTimeout(killTimer);
+      clearTimeout(giveUpTimer);
+      resolve();
+    };
+
+    const pollTimer = setInterval(() => {
+      if (proc.exitCode !== null || proc.signalCode !== null) return finish();
+      if (proc.pid && typeof isPidAlive === 'function' && !isPidAlive(proc.pid)) return finish();
+    }, 100);
+
+    const killTimer = setTimeout(() => {
+      if (!resolved && !sigkillSent) {
+        sigkillSent = true;
         try { proc.kill('SIGKILL'); } catch (e) {}
-        resolve();
       }
     }, timeoutMs);
-    proc.on('close', () => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timer);
-        resolve();
-      }
-    });
+
+    const giveUpTimer = setTimeout(finish, timeoutMs + 1500);
+    proc.once('close', finish);
   });
 };
 
