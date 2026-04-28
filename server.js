@@ -1352,6 +1352,21 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
   } else {
     sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Obteniendo nueva URL...`);
     
+    // 🧹 FIX: Si llevamos 2+ intentos seguidos, la sesión cacheada (cookies/token previos)
+    // está envenenada. Invalidarla fuerza al scraper a hacer un login limpio en TDMax,
+    // que es lo que típicamente recupera el canal cuando el CDN devuelve 404 con tokens
+    // recién generados (ventana de mantenimiento nocturno, sesión backend muerta, etc.).
+    if (attempts >= 2) {
+      const hadCache = scrapeSessionCache.has(String(process_id)) || scrapeSessionCache.has(process_id);
+      scrapeSessionCache.delete(String(process_id));
+      scrapeSessionCache.delete(process_id);
+      if (hadCache) {
+        sendLog(process_id, 'warn', `🧹 Sesión TDMax invalidada tras ${attempts - 1} fallo(s) consecutivo(s) - forzando login limpio`);
+      }
+      // Pequeña pausa para dejar respirar al backend de TDMax/CDN antes del re-login
+      await new Promise(r => setTimeout(r, 1500));
+    }
+    
     try {
       const result = await scrapeStreamUrlWithRetries(process_id, channelId, channelName);
       
