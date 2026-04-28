@@ -2559,28 +2559,16 @@ app.post('/api/emit', async (req, res) => {
       const hlsPlaylistPath = path.join(hlsDir, 'playlist.m3u8');
       ffmpegArgs.push(
         '-f', 'hls',
-        // ── Perfil LIVE-EDGE BALANCEADO ─────────────────────────────────────
-        // Objetivo: evitar que IPTV Smarters Pro se "atrase" eternamente
-        // tras un hipo de red. Forzamos al reproductor a estar siempre cerca
-        // del live edge expulsando segmentos viejos rápido.
-        //   - hls_time=2  → segmentos cortos (recuperación rápida)
-        //   - hls_list_size=6 → solo 12s de buffer visible
-        //   - delete_segments → borra los .ts viejos del disco
-        //   - omit_endlist → nunca cierra el playlist (siempre "live")
-        //   - discont_start → marca discontinuidad al iniciar/reiniciar
-        //                     para que el player resincronice limpio
-        // NO incluimos append_list: queremos sesión fresca en cada arranque
-        // para que el player no intente leer segmentos inexistentes.
-        '-hls_time', '2',
-        '-hls_list_size', '6',
-        '-hls_flags', 'delete_segments+independent_segments+omit_endlist+discont_start',
+        '-hls_time', '10',
+        '-hls_list_size', '8',
+        '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
         '-hls_segment_type', 'mpegts',
         '-hls_segment_filename', path.join(hlsDir, 'seg_%05d.ts'),
         '-hls_allow_cache', '0',
         '-hls_start_number_source', 'epoch',  // Números de segmento únicos por sesión
         hlsPlaylistPath
       );
-      sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8 (live-edge: 2s×6, anti-rebuffer)`);
+      sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8 (10s×8, estable)`);
     } else {
       ffmpegArgs.push(
         '-f', 'flv',
