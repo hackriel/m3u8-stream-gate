@@ -2824,7 +2824,7 @@ app.post('/api/emit', async (req, res) => {
             // Silencioso: solo errores reales
             if (/error|failed|Invalid/i.test(out) && !/frame=/.test(out)) {
               const line = out.split('\n').find(l => /error|failed|Invalid/i.test(l));
-              if (line) sendLog(process_id, 'warn', `[ETAPA2] ${line.trim().substring(0, 180)}`);
+          if (line && !line.includes('failed to delete old segment')) sendLog(process_id, 'warn', `[ETAPA2] ${line.trim().substring(0, 180)}`);
             }
           });
 
@@ -2930,7 +2930,7 @@ app.post('/api/emit', async (req, res) => {
             const out = data.toString();
             if (/error|failed|Invalid/i.test(out) && !/frame=/.test(out)) {
               const line = out.split('\n').find(l => /error|failed|Invalid/i.test(l));
-              if (line) sendLog(process_id, 'warn', `[ETAPA2] ${line.trim().substring(0, 180)}`);
+              if (line && !line.includes('failed to delete old segment')) sendLog(process_id, 'warn', `[ETAPA2] ${line.trim().substring(0, 180)}`);
             }
           });
 
