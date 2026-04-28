@@ -3130,6 +3130,7 @@ app.post('/api/emit', async (req, res) => {
           output.includes("Skip ('#EXT-X-") ||
           output.includes('keepalive request failed') ||
           output.includes('Error in the pull function') ||
+          output.includes('failed to delete old segment') ||
           output.includes('retrying with new connection') ||
           (isStoppingNow && output.includes('Error when loading first segment')) ||
           (isStoppingNow && output.includes('Immediate exit requested')) ||
