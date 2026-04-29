@@ -1857,10 +1857,20 @@ app.post('/api/emit', async (req, res) => {
       process_id: rawProcessId = '0',
       is_recovery = false,
       passthrough = false,
+      passthrough_mode = null, // 'copy' | 'smart' | 'transcode' | null
       extra_headers = null,
       referer: customReferer = null,
       user_agent: customUserAgent = null,
     } = req.body;
+    // Normalizar el modo. Compat: si llega `passthrough: true` sin `passthrough_mode`,
+    // asumimos 'copy' (comportamiento histórico). Si llega 'transcode', desactivamos
+    // el flag para que NO se ejecute el bloque de strip de transcoding.
+    const normalizedMode = (() => {
+      const m = (passthrough_mode || '').toString().toLowerCase();
+      if (['copy', 'smart', 'transcode'].includes(m)) return m;
+      return passthrough === true ? 'copy' : null;
+    })();
+    const isPassthroughBlock = normalizedMode === 'copy' || normalizedMode === 'smart';
     const process_id = String(rawProcessId);
     const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
