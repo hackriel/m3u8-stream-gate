@@ -1756,6 +1756,50 @@ const detectSourceInfo = async (source) => {
   });
 };
 
+// Probe de codecs (video + audio) para decidir copy-vs-transcode en modo 'smart'.
+// Devuelve { videoCodec, audioCodec } en lowercase, o strings vacíos si falla.
+// Acepta opcionalmente headers HTTP (referer/user-agent/extra) para que el probe
+// pueda llegar a CDNs con autenticación por header (ej. M3U con #EXTVLCOPT).
+const detectSourceCodecs = async (source, httpHeaders = '', userAgent = '', referer = '') => {
+  return new Promise((resolve) => {
+    const args = ['-v', 'error'];
+    if (userAgent) args.push('-user_agent', userAgent);
+    if (referer) args.push('-referer', referer);
+    if (httpHeaders) args.push('-headers', httpHeaders);
+    args.push(
+      '-show_entries', 'stream=codec_type,codec_name',
+      '-of', 'json',
+      '-analyzeduration', '3000000',
+      '-probesize', '2000000',
+      source
+    );
+    const probe = spawn('ffprobe', args);
+    let output = '';
+    let errOut = '';
+    let done = false;
+    const finish = (result) => { if (done) return; done = true; resolve(result); };
+    probe.stdout.on('data', d => { output += d.toString(); });
+    probe.stderr.on('data', d => { errOut += d.toString(); });
+    probe.on('close', () => {
+      try {
+        const data = JSON.parse(output);
+        let videoCodec = '';
+        let audioCodec = '';
+        for (const s of (data.streams || [])) {
+          if (s.codec_type === 'video' && !videoCodec) videoCodec = String(s.codec_name || '').toLowerCase();
+          else if (s.codec_type === 'audio' && !audioCodec) audioCodec = String(s.codec_name || '').toLowerCase();
+        }
+        finish({ videoCodec, audioCodec, error: errOut.slice(0, 300) });
+      } catch (e) {
+        finish({ videoCodec: '', audioCodec: '', error: errOut.slice(0, 300) || e.message });
+      }
+    });
+    probe.on('error', (e) => finish({ videoCodec: '', audioCodec: '', error: e.message }));
+    // Timeout de seguridad: si ffprobe se cuelga, abortar a los 12s
+    setTimeout(() => { try { probe.kill('SIGKILL'); } catch {} finish({ videoCodec: '', audioCodec: '', error: 'probe-timeout' }); }, 12000);
+  });
+};
+
 // Endpoint para scraping LOCAL desde el VPS (para que el token se genere con la IP del VPS)
 // Esto es CRÍTICO para canales como Tigo cuyo CDN valida IP del token vs IP del consumidor
 app.post('/api/local-scrape', async (req, res) => {
@@ -1813,10 +1857,20 @@ app.post('/api/emit', async (req, res) => {
       process_id: rawProcessId = '0',
       is_recovery = false,
       passthrough = false,
+      passthrough_mode = null, // 'copy' | 'smart' | 'transcode' | null
       extra_headers = null,
       referer: customReferer = null,
       user_agent: customUserAgent = null,
     } = req.body;
+    // Normalizar el modo. Compat: si llega `passthrough: true` sin `passthrough_mode`,
+    // asumimos 'copy' (comportamiento histórico). Si llega 'transcode', desactivamos
+    // el flag para que NO se ejecute el bloque de strip de transcoding.
+    const normalizedMode = (() => {
+      const m = (passthrough_mode || '').toString().toLowerCase();
+      if (['copy', 'smart', 'transcode'].includes(m)) return m;
+      return passthrough === true ? 'copy' : null;
+    })();
+    const isPassthroughBlock = normalizedMode === 'copy' || normalizedMode === 'smart';
     const process_id = String(rawProcessId);
     const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
@@ -2545,12 +2599,13 @@ app.post('/api/emit', async (req, res) => {
       '-reset_timestamps', '1',
     ];
 
-    // ── MODO PASSTHROUGH (RANDOM Disney 7 ID 19) ────────────────────────
-    // El usuario subió un M3U con su propia URL de origen y queremos REMUXEAR
-    // (no recodificar). Reemplazamos todo el bloque de transcoding por -c copy
-    // y dejamos los streams como vienen del origen. Útil cuando la fuente ya
-    // viene en H.264/AAC compatibles con HLS.
-    if (passthrough === true) {
+    // ── MODOS DE SALIDA (RANDOM Disney 7 ID 19) ─────────────────────────
+    // 'copy'      → -c copy puro: máxima calidad, requiere H.264/AAC.
+    // 'smart'     → probe de codecs: copy si compatible, transcode mínimo del
+    //               stream que no lo sea. Ideal para Xui/IPTV Smarters.
+    // 'transcode' → no toca este bloque; usa el perfil estándar de arriba
+    //               (CBR 2000k 720p libx264 + AAC 128k).
+    if (isPassthroughBlock) {
       const transcodeFlagsToStrip = new Set([
         '-c:v', '-preset', '-profile:v', '-threads',
         '-b:v', '-maxrate', '-bufsize',
@@ -2564,12 +2619,50 @@ app.post('/api/emit', async (req, res) => {
         if (transcodeFlagsToStrip.has(ffmpegArgs[i])) { i++; continue; }
         stripped.push(ffmpegArgs[i]);
       }
-      ffmpegArgs = [
-        ...stripped,
-        '-c', 'copy',
-        '-bsf:a', 'aac_adtstoasc',  // Necesario para muxear AAC a MPEG-TS limpio
-      ];
-      sendLog(process_id, 'success', `🎯 Modo PASSTHROUGH: -c copy (calidad de origen, sin recodificar)`);
+      // Por defecto (modo 'copy'): copy puro.
+      let videoOut = ['-c:v', 'copy'];
+      let audioOut = ['-c:a', 'copy', '-bsf:a', 'aac_adtstoasc'];
+
+      if (normalizedMode === 'smart') {
+        // Probe del origen para decidir per-stream. Construir headers HTTP.
+        const probeHeaderStr = (combinedHeaders && typeof combinedHeaders === 'string') ? combinedHeaders : '';
+        const probeUA = customUserAgent || sessionUserAgent || '';
+        const probeRef = customReferer || refererDomain || '';
+        sendLog(process_id, 'info', `🔍 Modo SMART: analizando codecs del origen...`);
+        const codecs = await detectSourceCodecs(effectiveSourceM3u8 || source_m3u8, probeHeaderStr, probeUA, probeRef);
+        const v = codecs.videoCodec;
+        const a = codecs.audioCodec;
+        sendLog(process_id, 'info', `🔬 Probe: video=${v || '?'} audio=${a || '?'}`);
+
+        // Video: copy si ya es H.264 (avc1/h264). Sino, transcodear a H.264 baseline-friendly.
+        if (v === 'h264' || v === 'avc1') {
+          videoOut = ['-c:v', 'copy'];
+        } else {
+          videoOut = [
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',
+            '-profile:v', 'high',
+            '-pix_fmt', 'yuv420p',
+            '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
+          ];
+          sendLog(process_id, 'warn', `⚙️  Video '${v || '?'}' no es H.264 → transcodeando a libx264`);
+        }
+
+        // Audio: copy si ya es AAC. Sino, transcodear a AAC 128k.
+        if (a === 'aac') {
+          audioOut = ['-c:a', 'copy', '-bsf:a', 'aac_adtstoasc'];
+        } else if (!a) {
+          // No detectado: dejar copy y que FFmpeg falle visiblemente si hay problema
+          audioOut = ['-c:a', 'copy'];
+        } else {
+          audioOut = ['-c:a', 'aac', '-b:a', '128k', '-ar', '48000'];
+          sendLog(process_id, 'warn', `⚙️  Audio '${a}' no es AAC → transcodeando a AAC 128k`);
+        }
+      }
+
+      ffmpegArgs = [...stripped, ...videoOut, ...audioOut];
+      const modeLabel = normalizedMode === 'smart' ? 'SMART (copy compatible)' : 'COPY puro';
+      sendLog(process_id, 'success', `🎯 Modo ${modeLabel}: salida HLS lista`);
     }
 
     // === OUTPUT: HLS local o RTMP ===

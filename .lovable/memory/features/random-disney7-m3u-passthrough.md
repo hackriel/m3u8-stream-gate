@@ -12,8 +12,11 @@ Nuevo canal (ID 19) "RANDOM Disney 7" que recibe un archivo `.m3u` con `#EXTVLCO
 - Misma lógica que FUTV (11/17/18) compartiendo slug `futv`.
 
 ## Backend (`server.js`)
-- `/api/emit` acepta nuevos params: `passthrough`, `extra_headers`, `referer`, `user_agent`.
-- Cuando `passthrough === true`: strip de flags de transcoding y reemplazo por `-c copy -bsf:a aac_adtstoasc`.
+- `/api/emit` acepta: `passthrough`, `passthrough_mode`, `extra_headers`, `referer`, `user_agent`.
+- `passthrough_mode` ∈ {`copy`, `smart`, `transcode`}. Compat: `passthrough:true` sin mode = `copy`.
+  - `copy`: strip de flags de transcoding + `-c copy -bsf:a aac_adtstoasc`.
+  - `smart`: `detectSourceCodecs()` (ffprobe con headers) decide per-stream. Video copy si h264, sino libx264 veryfast high yuv420p GOP 60. Audio copy si aac, sino aac 128k 48k.
+  - `transcode`: usa el perfil estándar (CBR 2000k 720p libx264 + AAC 128k).
 - `referer` custom sobreescribe `refererDomain`/`originDomain`.
 - `user_agent` custom sobreescribe `sessionUserAgent`.
 - `extra_headers` se concatenan a `combinedHeaders` (excepto Referer/Origin/User-Agent/Authorization que se manejan aparte).
