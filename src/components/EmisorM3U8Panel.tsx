@@ -414,6 +414,91 @@ export default function EmisorM3U8Panel() {
     }
   };
 
+  // ───────────────────────────────────────────────────────────────────────
+  // Parser de archivo M3U (RANDOM Disney 7 / ID 19)
+  //   - Soporta `#EXTVLCOPT:http-referrer=...`
+  //   - Soporta `#EXTVLCOPT:http-user-agent=...`
+  //   - Soporta `#EXTVLCOPT:http-header=Key:Value` (múltiples)
+  //   - Toma la PRIMERA línea no-comentario como URL del stream
+  // Devuelve null si no se encuentra una URL válida.
+  // ───────────────────────────────────────────────────────────────────────
+  const parseM3uContent = (content: string): Omit<M3uPayload, 'fileName'> | null => {
+    if (!content) return null;
+    const lines = content.split(/\r?\n/);
+    let url = '';
+    let referer: string | undefined;
+    let userAgent: string | undefined;
+    const headers: Record<string, string> = {};
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      if (line.startsWith('#EXTVLCOPT:')) {
+        const opt = line.slice('#EXTVLCOPT:'.length);
+        const eqIdx = opt.indexOf('=');
+        if (eqIdx === -1) continue;
+        const key = opt.slice(0, eqIdx).trim().toLowerCase();
+        const value = opt.slice(eqIdx + 1).trim();
+        if (key === 'http-referrer' || key === 'http-referer') {
+          referer = value;
+        } else if (key === 'http-user-agent') {
+          userAgent = value;
+        } else if (key === 'http-header') {
+          // Formato: "Key:Value" (puede haber `:` extra dentro del value)
+          const colonIdx = value.indexOf(':');
+          if (colonIdx > 0) {
+            const hk = value.slice(0, colonIdx).trim();
+            const hv = value.slice(colonIdx + 1).trim();
+            if (hk && hv) headers[hk] = hv;
+          }
+        }
+        continue;
+      }
+
+      // Líneas de comentario / metadata las ignoramos
+      if (line.startsWith('#')) continue;
+
+      // Primera línea no-comentario = URL del stream
+      if (!url && /^https?:\/\//i.test(line)) {
+        url = line;
+        break; // Solo el primer canal del M3U
+      }
+    }
+
+    if (!url) return null;
+    return { url, referer, userAgent, headers };
+  };
+
+  const handleM3uFile = async (processIndex: number, file: File) => {
+    try {
+      if (file.size > 1024 * 1024) {
+        toast.error('Archivo demasiado grande (>1MB)');
+        return;
+      }
+      const text = await file.text();
+      const parsed = parseM3uContent(text);
+      if (!parsed) {
+        toast.error('No se encontró una URL válida en el archivo M3U');
+        return;
+      }
+      const payload: M3uPayload = { fileName: file.name, ...parsed };
+      setM3uPayloads(prev => ({ ...prev, [processIndex]: payload }));
+      // Reflejar la URL en el campo m3u8 del proceso para mantener compatibilidad
+      updateProcess(processIndex, { m3u8: parsed.url });
+      const headerCount = Object.keys(parsed.headers).length;
+      toast.success(
+        `M3U cargado: ${file.name}` +
+        (parsed.referer ? ` · referer ✓` : '') +
+        (parsed.userAgent ? ` · UA ✓` : '') +
+        (headerCount > 0 ? ` · ${headerCount} header(s)` : '')
+      );
+    } catch (e) {
+      console.error('Error leyendo M3U:', e);
+      toast.error('No se pudo leer el archivo M3U');
+    }
+  };
+
   // Scraping para FUTV ALTERNO: el channel_id viene de la URL pegada.
   const fetchPastedChannelUrl = useCallback(async (processIndex: number) => {
     const pasted = (pasteUrls[processIndex] || '').trim();
