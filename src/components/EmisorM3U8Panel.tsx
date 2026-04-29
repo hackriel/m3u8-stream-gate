@@ -1390,6 +1390,7 @@ export default function EmisorM3U8Panel() {
                     </button>
                   </div>
                 )}
+                {!M3U_FILE_PROCESSES.has(processIndex) && (
                 <div className="flex gap-2 mb-4">
                   <input
                     type="url"
@@ -1434,6 +1435,7 @@ export default function EmisorM3U8Panel() {
                     </button>
                   )}
                 </div>
+                )}
                 {/* Backup URL field removed - Canal 6 now uses single URL */}
               </>
             )}
