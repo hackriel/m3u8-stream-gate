@@ -1314,12 +1314,56 @@ export default function EmisorM3U8Panel() {
               // Procesos M3U8 normales
               <>
                 <label className="block text-sm mb-2 text-muted-foreground">
-                  {OBS_INGEST_PROCESSES.has(processIndex)
+                  {M3U_FILE_PROCESSES.has(processIndex)
+                    ? 'Archivo M3U (con headers)'
+                    : OBS_INGEST_PROCESSES.has(processIndex)
                     ? 'Entrada SRT (OBS)'
                     : PASTE_URL_PROCESSES.has(processIndex)
                       ? 'URL del player TDMax (pega aquí)'
                       : 'URL M3U8 (fuente)'}
                 </label>
+                {M3U_FILE_PROCESSES.has(processIndex) && (
+                  <div className="mb-3">
+                    <input
+                      type="file"
+                      accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleM3uFile(processIndex, f);
+                        e.target.value = '';
+                      }}
+                      className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-2 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+                    />
+                    {m3uPayloads[processIndex] && (
+                      <div className="p-3 rounded-xl bg-card/50 border border-violet-400/30 space-y-1.5">
+                        <p className="text-xs text-muted-foreground">
+                          📄 <span className="text-foreground font-medium">{m3uPayloads[processIndex].fileName}</span>
+                        </p>
+                        <p className="text-xs text-muted-foreground break-all">
+                          🔗 <span className="text-foreground font-mono">{m3uPayloads[processIndex].url}</span>
+                        </p>
+                        {m3uPayloads[processIndex].referer && (
+                          <p className="text-xs text-muted-foreground">
+                            🧾 referer: <span className="text-foreground">{m3uPayloads[processIndex].referer}</span>
+                          </p>
+                        )}
+                        {m3uPayloads[processIndex].userAgent && (
+                          <p className="text-xs text-muted-foreground">
+                            🧾 user-agent: <span className="text-foreground">{m3uPayloads[processIndex].userAgent.substring(0, 80)}{m3uPayloads[processIndex].userAgent.length > 80 ? '…' : ''}</span>
+                          </p>
+                        )}
+                        {Object.keys(m3uPayloads[processIndex].headers).length > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            🧾 headers extra: <span className="text-foreground">{Object.keys(m3uPayloads[processIndex].headers).length}</span>
+                          </p>
+                        )}
+                        <p className="text-xs text-violet-400 mt-2">
+                          🎯 Modo PASSTHROUGH (-c copy): salida con calidad de origen, sin recodificar
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {PASTE_URL_PROCESSES.has(processIndex) && (
                   <div className="flex gap-2 mb-2">
                     <input
