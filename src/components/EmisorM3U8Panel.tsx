@@ -386,6 +386,15 @@ export default function EmisorM3U8Panel() {
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
   // URL pegada por el usuario para canales tipo FUTV ALTERNO (eventuales)
   const [pasteUrls, setPasteUrls] = useState<Record<number, string>>({});
+  // Payload parseado de archivos M3U subidos (RANDOM Disney 7 y similares)
+  interface M3uPayload {
+    fileName: string;
+    url: string;
+    referer?: string;
+    userAgent?: string;
+    headers: Record<string, string>;
+  }
+  const [m3uPayloads, setM3uPayloads] = useState<Record<number, M3uPayload>>({});
   const { metricsHistory, latestMetrics } = useServerMetrics();
 
   // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
