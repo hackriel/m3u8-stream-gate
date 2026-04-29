@@ -2071,6 +2071,19 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
+    // RANDOM Disney 7 (ID 19) o cualquier proceso que envíe referer custom desde el M3U:
+    // sobreescribir refererDomain/originDomain con los valores que vienen del archivo M3U.
+    if (customReferer && typeof customReferer === 'string') {
+      refererDomain = customReferer;
+      try {
+        const refUrl = new URL(customReferer);
+        originDomain = `${refUrl.protocol}//${refUrl.host}`;
+      } catch (_) {
+        // Si el referer no es URL válida, dejar originDomain por defecto
+      }
+      sendLog(process_id, 'info', `🧾 Referer/Origin custom (M3U): ${refererDomain}`);
+    }
+
     const isTeleticaSource = (() => {
       try {
         return new URL(effectiveSourceM3u8).hostname.toLowerCase().includes('teletica.com');
