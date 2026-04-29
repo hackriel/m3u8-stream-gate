@@ -2545,6 +2545,33 @@ app.post('/api/emit', async (req, res) => {
       '-reset_timestamps', '1',
     ];
 
+    // ── MODO PASSTHROUGH (RANDOM Disney 7 ID 19) ────────────────────────
+    // El usuario subió un M3U con su propia URL de origen y queremos REMUXEAR
+    // (no recodificar). Reemplazamos todo el bloque de transcoding por -c copy
+    // y dejamos los streams como vienen del origen. Útil cuando la fuente ya
+    // viene en H.264/AAC compatibles con HLS.
+    if (passthrough === true) {
+      const transcodeFlagsToStrip = new Set([
+        '-c:v', '-preset', '-profile:v', '-threads',
+        '-b:v', '-maxrate', '-bufsize',
+        '-vf', '-r', '-vsync',
+        '-g', '-keyint_min', '-sc_threshold',
+        '-c:a', '-b:a', '-ar',
+        '-max_muxing_queue_size', '-reset_timestamps',
+      ]);
+      const stripped = [];
+      for (let i = 0; i < ffmpegArgs.length; i++) {
+        if (transcodeFlagsToStrip.has(ffmpegArgs[i])) { i++; continue; }
+        stripped.push(ffmpegArgs[i]);
+      }
+      ffmpegArgs = [
+        ...stripped,
+        '-c', 'copy',
+        '-bsf:a', 'aac_adtstoasc',  // Necesario para muxear AAC a MPEG-TS limpio
+      ];
+      sendLog(process_id, 'success', `🎯 Modo PASSTHROUGH: -c copy (calidad de origen, sin recodificar)`);
+    }
+
     // === OUTPUT: HLS local o RTMP ===
     // Para Tigo (ID 12) con buffer activo: FFmpeg #1 escribe HLS CRUDO (-c copy)
     // a /tmp/tigo-buffer-12 sin transcoding. FFmpeg #2 (más abajo) transcodea
