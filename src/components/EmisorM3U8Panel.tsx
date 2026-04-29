@@ -1120,6 +1120,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-gray-400", text: "text-gray-300", stroke: "#d1d5db", name: "DISNEY 7 SRT" },
       { bg: "bg-rose-500", text: "text-rose-500", stroke: "#f43f5e", name: "FUTV ALTERNO" },
       { bg: "bg-fuchsia-500", text: "text-fuchsia-500", stroke: "#d946ef", name: "FUTV SRT" },
+      { bg: "bg-violet-500", text: "text-violet-500", stroke: "#8b5cf6", name: "RANDOM Disney 7" },
     ];
     return colors[processIndex];
   };
