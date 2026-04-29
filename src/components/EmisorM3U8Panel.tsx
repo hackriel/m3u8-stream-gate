@@ -395,6 +395,10 @@ export default function EmisorM3U8Panel() {
     headers: Record<string, string>;
   }
   const [m3uPayloads, setM3uPayloads] = useState<Record<number, M3uPayload>>({});
+  // Modo de salida para procesos M3U file (RANDOM Disney 7).
+  // 'copy' = -c copy puro · 'smart' = copy compatible con fallback · 'transcode' = perfil estándar 2000k
+  type M3uMode = 'copy' | 'smart' | 'transcode';
+  const [m3uModes, setM3uModes] = useState<Record<number, M3uMode>>({});
   const { metricsHistory, latestMetrics } = useServerMetrics();
 
   // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
