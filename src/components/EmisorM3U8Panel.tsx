@@ -974,7 +974,8 @@ export default function EmisorM3U8Panel() {
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString(),
           ...(isM3uFileProcess && m3uPayload ? {
-            passthrough: true,
+            passthrough: true, // compat
+            passthrough_mode: m3uModes[processIndex] || 'copy',
             referer: m3uPayload.referer || null,
             user_agent: m3uPayload.userAgent || null,
             extra_headers: m3uPayload.headers || {},
