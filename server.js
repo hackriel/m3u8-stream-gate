@@ -2262,17 +2262,41 @@ app.post('/api/emit', async (req, res) => {
       'Connection: keep-alive',
     ].join('\r\n') + '\r\n' : '';
 
+    // Headers extra del M3U (RANDOM Disney 7 ID 19): cualquier header arbitrario
+    // (sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, etc.) que el archivo M3U
+    // declare con `#EXTVLCOPT:http-header=Key:Value`.
+    const customHeaderLines = [];
+    if (extra_headers && typeof extra_headers === 'object') {
+      for (const [k, v] of Object.entries(extra_headers)) {
+        if (!k || v === undefined || v === null) continue;
+        // Saltar headers que ya gestionamos por separado
+        const lk = String(k).toLowerCase();
+        if (lk === 'referer' || lk === 'origin' || lk === 'user-agent' || lk === 'authorization') continue;
+        customHeaderLines.push(`${k}: ${v}`);
+      }
+      if (customHeaderLines.length > 0) {
+        sendLog(process_id, 'info', `🧾 ${customHeaderLines.length} header(s) custom del M3U inyectados`);
+      }
+    }
+
     const combinedHeaders = [
       authorizationHeader,
       `Referer: ${refererDomain}`,
       `Origin: ${originDomain}`,
+      ...customHeaderLines,
     ].filter(Boolean).join('\r\n') + '\r\n' + univisionExtraHeaders;
 
     // FASE 1: User-Agent rotativo para Tigo (proxy). Cada arranque/recovery
     // elige un UA distinto del pool → cada reconexión = "cliente nuevo" para Wowza.
-    const sessionUserAgent = isProxyScrapedSource
-      ? pickRandomUserAgent()
-      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+    // Si viene un User-Agent custom desde el M3U, tiene prioridad absoluta.
+    const sessionUserAgent = customUserAgent
+      ? customUserAgent
+      : (isProxyScrapedSource
+          ? pickRandomUserAgent()
+          : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
+    if (customUserAgent) {
+      sendLog(process_id, 'info', `🧾 User-Agent custom (M3U): ${customUserAgent.substring(0, 60)}...`);
+    }
     if (isProxyScrapedSource) {
       sendLog(process_id, 'info', `🎭 UA rotativo: ${sessionUserAgent.substring(0, 60)}...`);
     }
