@@ -912,6 +912,36 @@ export default function EmisorM3U8Panel() {
 
     // Procesos M3U8 -> RTMP o HLS local
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
+    const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex);
+    const m3uPayload = isM3uFileProcess ? m3uPayloads[processIndex] : null;
+
+    // RANDOM Disney 7 (19) requiere que se haya cargado un archivo M3U
+    if (isM3uFileProcess && !m3uPayload) {
+      updateProcess(processIndex, {
+        emitStatus: "error",
+        emitMsg: "Sube un archivo M3U primero"
+      });
+      return;
+    }
+
+    // Mutex con DISNEY 7 SRT (16): comparten /live/Disney7/playlist.m3u8.
+    // Si el otro está activo, lo paramos antes de iniciar el nuestro.
+    if (processIndex === RANDOM_DISNEY7_INDEX || processIndex === DISNEY7_URL_INDEX) {
+      const otherIdx = processIndex === RANDOM_DISNEY7_INDEX ? DISNEY7_URL_INDEX : RANDOM_DISNEY7_INDEX;
+      if (processes[otherIdx]?.isEmitiendo) {
+        toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Disney7)...`);
+        try {
+          await fetch("/api/emit/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ process_id: otherIdx.toString() })
+          });
+        } catch (e) {
+          console.warn(`No se pudo detener proceso ${otherIdx}:`, e);
+        }
+      }
+    }
+
     if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
@@ -938,7 +968,13 @@ export default function EmisorM3U8Panel() {
         body: JSON.stringify({
           source_m3u8: process.m3u8,
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
-          process_id: processIndex.toString()
+          process_id: processIndex.toString(),
+          ...(isM3uFileProcess && m3uPayload ? {
+            passthrough: true,
+            referer: m3uPayload.referer || null,
+            user_agent: m3uPayload.userAgent || null,
+            extra_headers: m3uPayload.headers || {},
+          } : {}),
         })
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
