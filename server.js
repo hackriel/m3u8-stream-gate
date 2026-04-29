@@ -1807,7 +1807,16 @@ app.post('/api/local-scrape', async (req, res) => {
 // Endpoint para iniciar emisión
 app.post('/api/emit', async (req, res) => {
   try {
-    const { source_m3u8, target_rtmp, process_id: rawProcessId = '0', is_recovery = false } = req.body;
+    const {
+      source_m3u8,
+      target_rtmp,
+      process_id: rawProcessId = '0',
+      is_recovery = false,
+      passthrough = false,
+      extra_headers = null,
+      referer: customReferer = null,
+      user_agent: customUserAgent = null,
+    } = req.body;
     const process_id = String(rawProcessId);
     const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
