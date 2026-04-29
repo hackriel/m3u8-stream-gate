@@ -1756,6 +1756,50 @@ const detectSourceInfo = async (source) => {
   });
 };
 
+// Probe de codecs (video + audio) para decidir copy-vs-transcode en modo 'smart'.
+// Devuelve { videoCodec, audioCodec } en lowercase, o strings vacíos si falla.
+// Acepta opcionalmente headers HTTP (referer/user-agent/extra) para que el probe
+// pueda llegar a CDNs con autenticación por header (ej. M3U con #EXTVLCOPT).
+const detectSourceCodecs = async (source, httpHeaders = '', userAgent = '', referer = '') => {
+  return new Promise((resolve) => {
+    const args = ['-v', 'error'];
+    if (userAgent) args.push('-user_agent', userAgent);
+    if (referer) args.push('-referer', referer);
+    if (httpHeaders) args.push('-headers', httpHeaders);
+    args.push(
+      '-show_entries', 'stream=codec_type,codec_name',
+      '-of', 'json',
+      '-analyzeduration', '3000000',
+      '-probesize', '2000000',
+      source
+    );
+    const probe = spawn('ffprobe', args);
+    let output = '';
+    let errOut = '';
+    let done = false;
+    const finish = (result) => { if (done) return; done = true; resolve(result); };
+    probe.stdout.on('data', d => { output += d.toString(); });
+    probe.stderr.on('data', d => { errOut += d.toString(); });
+    probe.on('close', () => {
+      try {
+        const data = JSON.parse(output);
+        let videoCodec = '';
+        let audioCodec = '';
+        for (const s of (data.streams || [])) {
+          if (s.codec_type === 'video' && !videoCodec) videoCodec = String(s.codec_name || '').toLowerCase();
+          else if (s.codec_type === 'audio' && !audioCodec) audioCodec = String(s.codec_name || '').toLowerCase();
+        }
+        finish({ videoCodec, audioCodec, error: errOut.slice(0, 300) });
+      } catch (e) {
+        finish({ videoCodec: '', audioCodec: '', error: errOut.slice(0, 300) || e.message });
+      }
+    });
+    probe.on('error', (e) => finish({ videoCodec: '', audioCodec: '', error: e.message }));
+    // Timeout de seguridad: si ffprobe se cuelga, abortar a los 12s
+    setTimeout(() => { try { probe.kill('SIGKILL'); } catch {} finish({ videoCodec: '', audioCodec: '', error: 'probe-timeout' }); }, 12000);
+  });
+};
+
 // Endpoint para scraping LOCAL desde el VPS (para que el token se genere con la IP del VPS)
 // Esto es CRÍTICO para canales como Tigo cuyo CDN valida IP del token vs IP del consumidor
 app.post('/api/local-scrape', async (req, res) => {
