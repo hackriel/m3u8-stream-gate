@@ -1273,6 +1273,7 @@ export default function EmisorM3U8Panel() {
                 [DISNEY7_URL_INDEX]: 'Disney7',
                 [FUTV_ALTERNO_INDEX]: 'futv',
                 [FUTV_SRT_INDEX]: 'futv',
+                [RANDOM_DISNEY7_INDEX]: 'Disney7',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
