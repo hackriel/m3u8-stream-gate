@@ -313,13 +313,16 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16', '17', '18']);
+const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16', '17', '18', '19']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 // FUTV (11), FUTV ALTERNO (17) y FUTV SRT (18) comparten slug 'futv' a propósito:
 // los 3 emiten al MISMO destino HLS local (/live/futv/playlist.m3u8) por métodos distintos
 // (scraping, URL manual, SRT desde OBS). El bloqueo mutuo de slug evita que se pisen entre sí
 // — el usuario decide cuál de los 3 está activo en cada momento.
-const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv' };
+// Disney 7 SRT (16) y RANDOM Disney 7 (19) también comparten slug 'Disney7' por la
+// misma razón: los 2 emiten al mismo destino /live/Disney7/playlist.m3u8 por métodos
+// distintos (SRT desde OBS vs M3U passthrough). Mutuamente excluyentes.
+const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
@@ -1804,7 +1807,16 @@ app.post('/api/local-scrape', async (req, res) => {
 // Endpoint para iniciar emisión
 app.post('/api/emit', async (req, res) => {
   try {
-    const { source_m3u8, target_rtmp, process_id: rawProcessId = '0', is_recovery = false } = req.body;
+    const {
+      source_m3u8,
+      target_rtmp,
+      process_id: rawProcessId = '0',
+      is_recovery = false,
+      passthrough = false,
+      extra_headers = null,
+      referer: customReferer = null,
+      user_agent: customUserAgent = null,
+    } = req.body;
     const process_id = String(rawProcessId);
     const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
@@ -1828,10 +1840,10 @@ app.post('/api/emit', async (req, res) => {
       effectiveSourceM3u8 = `srt://obs:${cfg.port}`;
     }
 
-    // Validación de ID: debe ser un número entre 0 y 18
-    if (isNaN(numericId) || numericId < 0 || numericId > 18) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-18)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 18` });
+    // Validación de ID: debe ser un número entre 0 y 19
+    if (isNaN(numericId) || numericId < 0 || numericId > 19) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-19)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 19` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -2059,6 +2071,19 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
+    // RANDOM Disney 7 (ID 19) o cualquier proceso que envíe referer custom desde el M3U:
+    // sobreescribir refererDomain/originDomain con los valores que vienen del archivo M3U.
+    if (customReferer && typeof customReferer === 'string') {
+      refererDomain = customReferer;
+      try {
+        const refUrl = new URL(customReferer);
+        originDomain = `${refUrl.protocol}//${refUrl.host}`;
+      } catch (_) {
+        // Si el referer no es URL válida, dejar originDomain por defecto
+      }
+      sendLog(process_id, 'info', `🧾 Referer/Origin custom (M3U): ${refererDomain}`);
+    }
+
     const isTeleticaSource = (() => {
       try {
         return new URL(effectiveSourceM3u8).hostname.toLowerCase().includes('teletica.com');
@@ -2237,17 +2262,41 @@ app.post('/api/emit', async (req, res) => {
       'Connection: keep-alive',
     ].join('\r\n') + '\r\n' : '';
 
+    // Headers extra del M3U (RANDOM Disney 7 ID 19): cualquier header arbitrario
+    // (sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, etc.) que el archivo M3U
+    // declare con `#EXTVLCOPT:http-header=Key:Value`.
+    const customHeaderLines = [];
+    if (extra_headers && typeof extra_headers === 'object') {
+      for (const [k, v] of Object.entries(extra_headers)) {
+        if (!k || v === undefined || v === null) continue;
+        // Saltar headers que ya gestionamos por separado
+        const lk = String(k).toLowerCase();
+        if (lk === 'referer' || lk === 'origin' || lk === 'user-agent' || lk === 'authorization') continue;
+        customHeaderLines.push(`${k}: ${v}`);
+      }
+      if (customHeaderLines.length > 0) {
+        sendLog(process_id, 'info', `🧾 ${customHeaderLines.length} header(s) custom del M3U inyectados`);
+      }
+    }
+
     const combinedHeaders = [
       authorizationHeader,
       `Referer: ${refererDomain}`,
       `Origin: ${originDomain}`,
+      ...customHeaderLines,
     ].filter(Boolean).join('\r\n') + '\r\n' + univisionExtraHeaders;
 
     // FASE 1: User-Agent rotativo para Tigo (proxy). Cada arranque/recovery
     // elige un UA distinto del pool → cada reconexión = "cliente nuevo" para Wowza.
-    const sessionUserAgent = isProxyScrapedSource
-      ? pickRandomUserAgent()
-      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+    // Si viene un User-Agent custom desde el M3U, tiene prioridad absoluta.
+    const sessionUserAgent = customUserAgent
+      ? customUserAgent
+      : (isProxyScrapedSource
+          ? pickRandomUserAgent()
+          : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
+    if (customUserAgent) {
+      sendLog(process_id, 'info', `🧾 User-Agent custom (M3U): ${customUserAgent.substring(0, 60)}...`);
+    }
     if (isProxyScrapedSource) {
       sendLog(process_id, 'info', `🎭 UA rotativo: ${sessionUserAgent.substring(0, 60)}...`);
     }
@@ -2449,7 +2498,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Nombre del proceso para logs
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT' };
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
@@ -2495,6 +2544,33 @@ app.post('/api/emit', async (req, res) => {
       '-max_muxing_queue_size', '1024',
       '-reset_timestamps', '1',
     ];
+
+    // ── MODO PASSTHROUGH (RANDOM Disney 7 ID 19) ────────────────────────
+    // El usuario subió un M3U con su propia URL de origen y queremos REMUXEAR
+    // (no recodificar). Reemplazamos todo el bloque de transcoding por -c copy
+    // y dejamos los streams como vienen del origen. Útil cuando la fuente ya
+    // viene en H.264/AAC compatibles con HLS.
+    if (passthrough === true) {
+      const transcodeFlagsToStrip = new Set([
+        '-c:v', '-preset', '-profile:v', '-threads',
+        '-b:v', '-maxrate', '-bufsize',
+        '-vf', '-r', '-vsync',
+        '-g', '-keyint_min', '-sc_threshold',
+        '-c:a', '-b:a', '-ar',
+        '-max_muxing_queue_size', '-reset_timestamps',
+      ]);
+      const stripped = [];
+      for (let i = 0; i < ffmpegArgs.length; i++) {
+        if (transcodeFlagsToStrip.has(ffmpegArgs[i])) { i++; continue; }
+        stripped.push(ffmpegArgs[i]);
+      }
+      ffmpegArgs = [
+        ...stripped,
+        '-c', 'copy',
+        '-bsf:a', 'aac_adtstoasc',  // Necesario para muxear AAC a MPEG-TS limpio
+      ];
+      sendLog(process_id, 'success', `🎯 Modo PASSTHROUGH: -c copy (calidad de origen, sin recodificar)`);
+    }
 
     // === OUTPUT: HLS local o RTMP ===
     // Para Tigo (ID 12) con buffer activo: FFmpeg #1 escribe HLS CRUDO (-c copy)

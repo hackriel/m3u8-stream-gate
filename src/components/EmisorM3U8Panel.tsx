@@ -17,7 +17,7 @@ import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 19;
+const NUM_PROCESSES = 20;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
@@ -28,6 +28,7 @@ const CANAL6_URL_INDEX = 15;
 const DISNEY7_URL_INDEX = 16;
 const FUTV_ALTERNO_INDEX = 17; // Canal eventual con URL pegada del usuario, mismo destino que FUTV URL
 const FUTV_SRT_INDEX = 18; // FUTV SRT: ingest SRT desde OBS por puerto 9002
+const RANDOM_DISNEY7_INDEX = 19; // RANDOM Disney 7: M3U passthrough → mismo destino que Disney 7 SRT
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "srt://167.17.69.116:9000?streamid=tigo&latency=2000000";
 const DISNEY7_OBS_INGEST_URL = "srt://167.17.69.116:9001?streamid=disney7&latency=2000000";
@@ -41,11 +42,13 @@ const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 //   La lógica permanece en el código por si se necesita revertir; solo se ocultan los tabs.
 const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX]);
 // Procesos que reciben SRT desde OBS (entrada manual interna)
 const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX, FUTV_SRT_INDEX]);
 // Procesos eventuales que aceptan URL pegada del usuario y necesitan scraping dinámico
 const PASTE_URL_PROCESSES = new Set<number>([FUTV_ALTERNO_INDEX]);
+// Procesos que reciben un archivo M3U con headers + URL (passthrough -c copy)
+const M3U_FILE_PROCESSES = new Set<number>([RANDOM_DISNEY7_INDEX]);
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -165,6 +168,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "DISNEY 7 SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "FUTV ALTERNO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer de URL" },
   { name: "FUTV SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
+  { name: "RANDOM Disney 7", scrapeFn: null, channelId: null, fetchLabel: "" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -382,6 +386,15 @@ export default function EmisorM3U8Panel() {
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
   // URL pegada por el usuario para canales tipo FUTV ALTERNO (eventuales)
   const [pasteUrls, setPasteUrls] = useState<Record<number, string>>({});
+  // Payload parseado de archivos M3U subidos (RANDOM Disney 7 y similares)
+  interface M3uPayload {
+    fileName: string;
+    url: string;
+    referer?: string;
+    userAgent?: string;
+    headers: Record<string, string>;
+  }
+  const [m3uPayloads, setM3uPayloads] = useState<Record<number, M3uPayload>>({});
   const { metricsHistory, latestMetrics } = useServerMetrics();
 
   // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
@@ -398,6 +411,91 @@ export default function EmisorM3U8Panel() {
       return null;
     } catch {
       return null;
+    }
+  };
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Parser de archivo M3U (RANDOM Disney 7 / ID 19)
+  //   - Soporta `#EXTVLCOPT:http-referrer=...`
+  //   - Soporta `#EXTVLCOPT:http-user-agent=...`
+  //   - Soporta `#EXTVLCOPT:http-header=Key:Value` (múltiples)
+  //   - Toma la PRIMERA línea no-comentario como URL del stream
+  // Devuelve null si no se encuentra una URL válida.
+  // ───────────────────────────────────────────────────────────────────────
+  const parseM3uContent = (content: string): Omit<M3uPayload, 'fileName'> | null => {
+    if (!content) return null;
+    const lines = content.split(/\r?\n/);
+    let url = '';
+    let referer: string | undefined;
+    let userAgent: string | undefined;
+    const headers: Record<string, string> = {};
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      if (line.startsWith('#EXTVLCOPT:')) {
+        const opt = line.slice('#EXTVLCOPT:'.length);
+        const eqIdx = opt.indexOf('=');
+        if (eqIdx === -1) continue;
+        const key = opt.slice(0, eqIdx).trim().toLowerCase();
+        const value = opt.slice(eqIdx + 1).trim();
+        if (key === 'http-referrer' || key === 'http-referer') {
+          referer = value;
+        } else if (key === 'http-user-agent') {
+          userAgent = value;
+        } else if (key === 'http-header') {
+          // Formato: "Key:Value" (puede haber `:` extra dentro del value)
+          const colonIdx = value.indexOf(':');
+          if (colonIdx > 0) {
+            const hk = value.slice(0, colonIdx).trim();
+            const hv = value.slice(colonIdx + 1).trim();
+            if (hk && hv) headers[hk] = hv;
+          }
+        }
+        continue;
+      }
+
+      // Líneas de comentario / metadata las ignoramos
+      if (line.startsWith('#')) continue;
+
+      // Primera línea no-comentario = URL del stream
+      if (!url && /^https?:\/\//i.test(line)) {
+        url = line;
+        break; // Solo el primer canal del M3U
+      }
+    }
+
+    if (!url) return null;
+    return { url, referer, userAgent, headers };
+  };
+
+  const handleM3uFile = async (processIndex: number, file: File) => {
+    try {
+      if (file.size > 1024 * 1024) {
+        toast.error('Archivo demasiado grande (>1MB)');
+        return;
+      }
+      const text = await file.text();
+      const parsed = parseM3uContent(text);
+      if (!parsed) {
+        toast.error('No se encontró una URL válida en el archivo M3U');
+        return;
+      }
+      const payload: M3uPayload = { fileName: file.name, ...parsed };
+      setM3uPayloads(prev => ({ ...prev, [processIndex]: payload }));
+      // Reflejar la URL en el campo m3u8 del proceso para mantener compatibilidad
+      updateProcess(processIndex, { m3u8: parsed.url });
+      const headerCount = Object.keys(parsed.headers).length;
+      toast.success(
+        `M3U cargado: ${file.name}` +
+        (parsed.referer ? ` · referer ✓` : '') +
+        (parsed.userAgent ? ` · UA ✓` : '') +
+        (headerCount > 0 ? ` · ${headerCount} header(s)` : '')
+      );
+    } catch (e) {
+      console.error('Error leyendo M3U:', e);
+      toast.error('No se pudo leer el archivo M3U');
     }
   };
 
@@ -814,6 +912,36 @@ export default function EmisorM3U8Panel() {
 
     // Procesos M3U8 -> RTMP o HLS local
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
+    const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex);
+    const m3uPayload = isM3uFileProcess ? m3uPayloads[processIndex] : null;
+
+    // RANDOM Disney 7 (19) requiere que se haya cargado un archivo M3U
+    if (isM3uFileProcess && !m3uPayload) {
+      updateProcess(processIndex, {
+        emitStatus: "error",
+        emitMsg: "Sube un archivo M3U primero"
+      });
+      return;
+    }
+
+    // Mutex con DISNEY 7 SRT (16): comparten /live/Disney7/playlist.m3u8.
+    // Si el otro está activo, lo paramos antes de iniciar el nuestro.
+    if (processIndex === RANDOM_DISNEY7_INDEX || processIndex === DISNEY7_URL_INDEX) {
+      const otherIdx = processIndex === RANDOM_DISNEY7_INDEX ? DISNEY7_URL_INDEX : RANDOM_DISNEY7_INDEX;
+      if (processes[otherIdx]?.isEmitiendo) {
+        toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Disney7)...`);
+        try {
+          await fetch("/api/emit/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ process_id: otherIdx.toString() })
+          });
+        } catch (e) {
+          console.warn(`No se pudo detener proceso ${otherIdx}:`, e);
+        }
+      }
+    }
+
     if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
@@ -840,7 +968,13 @@ export default function EmisorM3U8Panel() {
         body: JSON.stringify({
           source_m3u8: process.m3u8,
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
-          process_id: processIndex.toString()
+          process_id: processIndex.toString(),
+          ...(isM3uFileProcess && m3uPayload ? {
+            passthrough: true,
+            referer: m3uPayload.referer || null,
+            user_agent: m3uPayload.userAgent || null,
+            extra_headers: m3uPayload.headers || {},
+          } : {}),
         })
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -1116,6 +1250,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-gray-400", text: "text-gray-300", stroke: "#d1d5db", name: "DISNEY 7 SRT" },
       { bg: "bg-rose-500", text: "text-rose-500", stroke: "#f43f5e", name: "FUTV ALTERNO" },
       { bg: "bg-fuchsia-500", text: "text-fuchsia-500", stroke: "#d946ef", name: "FUTV SRT" },
+      { bg: "bg-violet-500", text: "text-violet-500", stroke: "#8b5cf6", name: "RANDOM Disney 7" },
     ];
     return colors[processIndex];
   };
@@ -1179,12 +1314,56 @@ export default function EmisorM3U8Panel() {
               // Procesos M3U8 normales
               <>
                 <label className="block text-sm mb-2 text-muted-foreground">
-                  {OBS_INGEST_PROCESSES.has(processIndex)
+                  {M3U_FILE_PROCESSES.has(processIndex)
+                    ? 'Archivo M3U (con headers)'
+                    : OBS_INGEST_PROCESSES.has(processIndex)
                     ? 'Entrada SRT (OBS)'
                     : PASTE_URL_PROCESSES.has(processIndex)
                       ? 'URL del player TDMax (pega aquí)'
                       : 'URL M3U8 (fuente)'}
                 </label>
+                {M3U_FILE_PROCESSES.has(processIndex) && (
+                  <div className="mb-3">
+                    <input
+                      type="file"
+                      accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleM3uFile(processIndex, f);
+                        e.target.value = '';
+                      }}
+                      className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-2 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+                    />
+                    {m3uPayloads[processIndex] && (
+                      <div className="p-3 rounded-xl bg-card/50 border border-violet-400/30 space-y-1.5">
+                        <p className="text-xs text-muted-foreground">
+                          📄 <span className="text-foreground font-medium">{m3uPayloads[processIndex].fileName}</span>
+                        </p>
+                        <p className="text-xs text-muted-foreground break-all">
+                          🔗 <span className="text-foreground font-mono">{m3uPayloads[processIndex].url}</span>
+                        </p>
+                        {m3uPayloads[processIndex].referer && (
+                          <p className="text-xs text-muted-foreground">
+                            🧾 referer: <span className="text-foreground">{m3uPayloads[processIndex].referer}</span>
+                          </p>
+                        )}
+                        {m3uPayloads[processIndex].userAgent && (
+                          <p className="text-xs text-muted-foreground">
+                            🧾 user-agent: <span className="text-foreground">{m3uPayloads[processIndex].userAgent.substring(0, 80)}{m3uPayloads[processIndex].userAgent.length > 80 ? '…' : ''}</span>
+                          </p>
+                        )}
+                        {Object.keys(m3uPayloads[processIndex].headers).length > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            🧾 headers extra: <span className="text-foreground">{Object.keys(m3uPayloads[processIndex].headers).length}</span>
+                          </p>
+                        )}
+                        <p className="text-xs text-violet-400 mt-2">
+                          🎯 Modo PASSTHROUGH (-c copy): salida con calidad de origen, sin recodificar
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {PASTE_URL_PROCESSES.has(processIndex) && (
                   <div className="flex gap-2 mb-2">
                     <input
@@ -1211,6 +1390,7 @@ export default function EmisorM3U8Panel() {
                     </button>
                   </div>
                 )}
+                {!M3U_FILE_PROCESSES.has(processIndex) && (
                 <div className="flex gap-2 mb-4">
                   <input
                     type="url"
@@ -1255,6 +1435,7 @@ export default function EmisorM3U8Panel() {
                     </button>
                   )}
                 </div>
+                )}
                 {/* Backup URL field removed - Canal 6 now uses single URL */}
               </>
             )}
@@ -1268,6 +1449,7 @@ export default function EmisorM3U8Panel() {
                 [DISNEY7_URL_INDEX]: 'Disney7',
                 [FUTV_ALTERNO_INDEX]: 'futv',
                 [FUTV_SRT_INDEX]: 'futv',
+                [RANDOM_DISNEY7_INDEX]: 'Disney7',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
