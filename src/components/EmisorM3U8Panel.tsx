@@ -1362,11 +1362,42 @@ export default function EmisorM3U8Panel() {
                             🧾 headers extra: <span className="text-foreground">{Object.keys(m3uPayloads[processIndex].headers).length}</span>
                           </p>
                         )}
-                        <p className="text-xs text-violet-400 mt-2">
-                          🎯 Modo PASSTHROUGH (-c copy): salida con calidad de origen, sin recodificar
-                        </p>
                       </div>
                     )}
+                    {/* Selector de modo de salida (solo procesos con archivo M3U) */}
+                    <div className="mt-3 p-3 rounded-xl bg-card/50 border border-violet-400/20">
+                      <p className="text-xs text-muted-foreground mb-2">Modo de salida (compatibilidad Xui / IPTV Smarters):</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          { id: 'copy', label: 'Copy puro', desc: '-c copy · calidad exacta · requiere H.264/AAC' },
+                          { id: 'smart', label: 'Smart', desc: 'copy si es compatible, sino transcode mínimo' },
+                          { id: 'transcode', label: 'Transcode', desc: 'H.264 + AAC 720p 2000k · máxima compat.' },
+                        ] as const).map(opt => {
+                          const current = m3uModes[processIndex] || 'copy';
+                          const active = current === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setM3uModes(prev => ({ ...prev, [processIndex]: opt.id }))}
+                              title={opt.desc}
+                              className={`px-2 py-2 rounded-lg text-xs font-medium transition-all duration-150 border ${
+                                active
+                                  ? 'bg-violet-500 text-violet-50 border-violet-400 shadow-md'
+                                  : 'bg-card text-muted-foreground border-border hover:border-violet-400/50'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[11px] text-violet-400/80 mt-2">
+                        {(m3uModes[processIndex] || 'copy') === 'copy' && '🎯 Copy puro: máxima calidad. Si IPTV Smarters falla, probá Smart.'}
+                        {(m3uModes[processIndex] || 'copy') === 'smart' && '🧠 Smart: analiza el origen y copia/transcodea solo lo necesario.'}
+                        {(m3uModes[processIndex] || 'copy') === 'transcode' && '⚙️ Transcode: garantiza compatibilidad con Xui / Smarters Pro.'}
+                      </p>
+                    </div>
                   </div>
                 )}
                 {PASTE_URL_PROCESSES.has(processIndex) && (
