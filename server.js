@@ -1867,10 +1867,15 @@ app.post('/api/emit', async (req, res) => {
     // el flag para que NO se ejecute el bloque de strip de transcoding.
     const normalizedMode = (() => {
       const m = (passthrough_mode || '').toString().toLowerCase();
-      if (['copy', 'smart', 'transcode'].includes(m)) return m;
-      return passthrough === true ? 'copy' : null;
+      if (['copy', 'smart', 'transcode', 'rawvideo'].includes(m)) return m;
+      // Compat histórica: passthrough:true sin mode → para ID 19 ahora default 'rawvideo'
+      // (video crudo + audio AAC re-encode), para otros 'copy' como antes.
+      if (passthrough === true) {
+        return String(rawProcessId) === '19' ? 'rawvideo' : 'copy';
+      }
+      return null;
     })();
-    const isPassthroughBlock = normalizedMode === 'copy' || normalizedMode === 'smart';
+    const isPassthroughBlock = normalizedMode === 'copy' || normalizedMode === 'smart' || normalizedMode === 'rawvideo';
     const process_id = String(rawProcessId);
     const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
@@ -2195,6 +2200,17 @@ app.post('/api/emit', async (req, res) => {
         '-thread_queue_size', '16384'
       );
       sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1 endurecida): max_reload=50, hold=50, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
+    } else if (process_id === '19') {
+      // RANDOM Disney 7 (M3U file passthrough): perfil VLC-like idéntico a
+      // Disney 7 (ID 0) — max_reload/hold altos + genpts. NO usamos variant
+      // pinning ni pre-check (la URL del M3U puede ser playlist directa).
+      hardenedLiveInputArgs.push(
+        '-http_seekable', '0',
+        '-max_reload', '1000',
+        '-m3u8_hold_counters', '1000',
+        '-fflags', '+genpts'
+      );
+      sendLog(process_id, 'info', `🛡️ RANDOM Disney 7 HLS resiliente: max_reload=1000, hold=1000`);
     } else if (isManualProcess || needsTdmaxLikePinning) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
@@ -2208,7 +2224,8 @@ app.post('/api/emit', async (req, res) => {
     // Quitar -re hace que FFmpeg lea a velocidad CPU, agote segmentos y termine en EOF.
     // Los reloads deben mitigarse fijando la variante HLS final antes de FFmpeg,
     // no dejando el master playlist completo al analizador interno.
-    const usesReFlag = RE_FLAG_PROCESSES.has(String(process_id));
+    // ID 19 (RANDOM Disney 7) hereda -re de Disney 7 para pacing HLS correcto.
+    const usesReFlag = RE_FLAG_PROCESSES.has(String(process_id)) || String(process_id) === '19';
     if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
       sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
@@ -2288,6 +2305,19 @@ app.post('/api/emit', async (req, res) => {
         '-rw_timeout', '30000000',
       ];
       sendLog(process_id, 'info', `🔧 Tigo/Teletica via Pi5: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
+    } else if (process_id === '19') {
+      // RANDOM Disney 7: misma resiliencia que Disney 7 (ID 0) manual.
+      // reconnect_at_eof + reconnect_streamed + delay_max=15s cubren caídas
+      // transitorias del CDN sin matar el demuxer.
+      effectiveResilienceArgs = [
+        '-rw_timeout', '15000000',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_on_http_error', '4xx,5xx',
+        '-reconnect_delay_max', '15',
+      ];
+      sendLog(process_id, 'info', `🔧 RANDOM Disney 7: resiliencia tipo Disney 7 (reconnect 4xx/5xx, eof, 15s)`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
@@ -2600,11 +2630,14 @@ app.post('/api/emit', async (req, res) => {
     ];
 
     // ── MODOS DE SALIDA (RANDOM Disney 7 ID 19) ─────────────────────────
-    // 'copy'      → -c copy puro: máxima calidad, requiere H.264/AAC.
-    // 'smart'     → probe de codecs: copy si compatible, transcode mínimo del
-    //               stream que no lo sea. Ideal para Xui/IPTV Smarters.
-    // 'transcode' → no toca este bloque; usa el perfil estándar de arriba
-    //               (CBR 2000k 720p libx264 + AAC 128k).
+    // 'rawvideo'  → ÚNICO modo activo en UI: video CRUDO (-c:v copy) + audio
+    //               re-encodeado a AAC 128k 48kHz estéreo. Mantiene calidad
+    //               original del video y garantiza audio compatible con Xui /
+    //               IPTV Smarters Pro (muchos M3U traen AC3/MP2/HE-AAC que no
+    //               decodifican bien en clientes IPTV → "video sin sonido").
+    // 'copy'      → -c copy puro (legacy, oculto en UI).
+    // 'smart'     → probe de codecs: copy si compatible, transcode mínimo (legacy).
+    // 'transcode' → no toca este bloque; usa el perfil estándar de arriba.
     if (isPassthroughBlock) {
       const transcodeFlagsToStrip = new Set([
         '-c:v', '-preset', '-profile:v', '-threads',
@@ -2623,7 +2656,21 @@ app.post('/api/emit', async (req, res) => {
       let videoOut = ['-c:v', 'copy'];
       let audioOut = ['-c:a', 'copy', '-bsf:a', 'aac_adtstoasc'];
 
-      if (normalizedMode === 'smart') {
+      if (normalizedMode === 'rawvideo') {
+        // Video crudo, audio siempre re-encodeado a AAC estéreo 48kHz.
+        // Esto resuelve el problema de "sin audio" en IPTV Smarters cuando
+        // el origen viene en AC3/EAC3/MP2/HE-AACv2 (códecs que XUI/Smarters
+        // no demuxean bien dentro de TS via HLS).
+        videoOut = ['-c:v', 'copy'];
+        audioOut = [
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '48000',
+          '-ac', '2',
+          '-aac_coder', 'twoloop',
+        ];
+        sendLog(process_id, 'info', `🎧 RAWVIDEO: video crudo (-c:v copy) + audio AAC 128k/48kHz estéreo (compat Xui/Smarters)`);
+      } else if (normalizedMode === 'smart') {
         // Probe del origen para decidir per-stream. Construir headers HTTP.
         const probeHeaderStr = (combinedHeaders && typeof combinedHeaders === 'string') ? combinedHeaders : '';
         const probeUA = customUserAgent || sessionUserAgent || '';
@@ -2661,7 +2708,11 @@ app.post('/api/emit', async (req, res) => {
       }
 
       ffmpegArgs = [...stripped, ...videoOut, ...audioOut];
-      const modeLabel = normalizedMode === 'smart' ? 'SMART (copy compatible)' : 'COPY puro';
+      const modeLabel = normalizedMode === 'smart'
+        ? 'SMART (copy compatible)'
+        : normalizedMode === 'rawvideo'
+          ? 'RAWVIDEO (video crudo + AAC)'
+          : 'COPY puro';
       sendLog(process_id, 'success', `🎯 Modo ${modeLabel}: salida HLS lista`);
     }
 

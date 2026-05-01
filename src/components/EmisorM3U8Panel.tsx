@@ -397,8 +397,9 @@ export default function EmisorM3U8Panel() {
   const [m3uPayloads, setM3uPayloads] = useState<Record<number, M3uPayload>>({});
   // Modo de salida para procesos M3U file (RANDOM Disney 7).
   // 'copy' = -c copy puro · 'smart' = copy compatible con fallback · 'transcode' = perfil estándar 2000k
-  type M3uMode = 'copy' | 'smart' | 'transcode';
-  const [m3uModes, setM3uModes] = useState<Record<number, M3uMode>>({});
+  // RANDOM Disney 7 (ID 19) ahora usa un único modo "rawvideo": video crudo
+  // (-c:v copy) + audio re-encodeado a AAC 128k/48kHz estéreo. Esto preserva
+  // calidad de origen y garantiza audio en Xui / IPTV Smarters Pro.
   const { metricsHistory, latestMetrics } = useServerMetrics();
 
   // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
@@ -975,7 +976,7 @@ export default function EmisorM3U8Panel() {
           process_id: processIndex.toString(),
           ...(isM3uFileProcess && m3uPayload ? {
             passthrough: true, // compat
-            passthrough_mode: m3uModes[processIndex] || 'copy',
+            passthrough_mode: 'rawvideo',
             referer: m3uPayload.referer || null,
             user_agent: m3uPayload.userAgent || null,
             extra_headers: m3uPayload.headers || {},
@@ -1364,38 +1365,16 @@ export default function EmisorM3U8Panel() {
                         )}
                       </div>
                     )}
-                    {/* Selector de modo de salida (solo procesos con archivo M3U) */}
+                    {/* Modo de salida: único — video crudo + audio AAC compatible Xui/Smarters */}
                     <div className="mt-3 p-3 rounded-xl bg-card/50 border border-violet-400/20">
-                      <p className="text-xs text-muted-foreground mb-2">Modo de salida (compatibilidad Xui / IPTV Smarters):</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {([
-                          { id: 'copy', label: 'Copy puro', desc: '-c copy · calidad exacta · requiere H.264/AAC' },
-                          { id: 'smart', label: 'Smart', desc: 'copy si es compatible, sino transcode mínimo' },
-                          { id: 'transcode', label: 'Transcode', desc: 'H.264 + AAC 720p 2000k · máxima compat.' },
-                        ] as const).map(opt => {
-                          const current = m3uModes[processIndex] || 'copy';
-                          const active = current === opt.id;
-                          return (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              onClick={() => setM3uModes(prev => ({ ...prev, [processIndex]: opt.id }))}
-                              title={opt.desc}
-                              className={`px-2 py-2 rounded-lg text-xs font-medium transition-all duration-150 border ${
-                                active
-                                  ? 'bg-violet-500 text-violet-50 border-violet-400 shadow-md'
-                                  : 'bg-card text-muted-foreground border-border hover:border-violet-400/50'
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <p className="text-[11px] text-violet-400/80 mt-2">
-                        {(m3uModes[processIndex] || 'copy') === 'copy' && '🎯 Copy puro: máxima calidad. Si IPTV Smarters falla, probá Smart.'}
-                        {(m3uModes[processIndex] || 'copy') === 'smart' && '🧠 Smart: analiza el origen y copia/transcodea solo lo necesario.'}
-                        {(m3uModes[processIndex] || 'copy') === 'transcode' && '⚙️ Transcode: garantiza compatibilidad con Xui / Smarters Pro.'}
+                      <p className="text-xs text-violet-300 font-medium mb-1">
+                        🎬 Modo: <span className="text-violet-100">VIDEO CRUDO + AUDIO AAC</span>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Perfil tipo Disney 7 (VLC-like). Video se emite tal cual llega del origen
+                        (<code className="text-violet-400">-c:v copy</code>, sin recompresión). Audio se
+                        re-encodea a AAC 128k 48 kHz estéreo para garantizar reproducción en
+                        Xui / IPTV Smarters Pro.
                       </p>
                     </div>
                   </div>
