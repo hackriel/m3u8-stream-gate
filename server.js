@@ -2630,11 +2630,14 @@ app.post('/api/emit', async (req, res) => {
     ];
 
     // ── MODOS DE SALIDA (RANDOM Disney 7 ID 19) ─────────────────────────
-    // 'copy'      → -c copy puro: máxima calidad, requiere H.264/AAC.
-    // 'smart'     → probe de codecs: copy si compatible, transcode mínimo del
-    //               stream que no lo sea. Ideal para Xui/IPTV Smarters.
-    // 'transcode' → no toca este bloque; usa el perfil estándar de arriba
-    //               (CBR 2000k 720p libx264 + AAC 128k).
+    // 'rawvideo'  → ÚNICO modo activo en UI: video CRUDO (-c:v copy) + audio
+    //               re-encodeado a AAC 128k 48kHz estéreo. Mantiene calidad
+    //               original del video y garantiza audio compatible con Xui /
+    //               IPTV Smarters Pro (muchos M3U traen AC3/MP2/HE-AAC que no
+    //               decodifican bien en clientes IPTV → "video sin sonido").
+    // 'copy'      → -c copy puro (legacy, oculto en UI).
+    // 'smart'     → probe de codecs: copy si compatible, transcode mínimo (legacy).
+    // 'transcode' → no toca este bloque; usa el perfil estándar de arriba.
     if (isPassthroughBlock) {
       const transcodeFlagsToStrip = new Set([
         '-c:v', '-preset', '-profile:v', '-threads',
@@ -2653,7 +2656,21 @@ app.post('/api/emit', async (req, res) => {
       let videoOut = ['-c:v', 'copy'];
       let audioOut = ['-c:a', 'copy', '-bsf:a', 'aac_adtstoasc'];
 
-      if (normalizedMode === 'smart') {
+      if (normalizedMode === 'rawvideo') {
+        // Video crudo, audio siempre re-encodeado a AAC estéreo 48kHz.
+        // Esto resuelve el problema de "sin audio" en IPTV Smarters cuando
+        // el origen viene en AC3/EAC3/MP2/HE-AACv2 (códecs que XUI/Smarters
+        // no demuxean bien dentro de TS via HLS).
+        videoOut = ['-c:v', 'copy'];
+        audioOut = [
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '48000',
+          '-ac', '2',
+          '-aac_coder', 'twoloop',
+        ];
+        sendLog(process_id, 'info', `🎧 RAWVIDEO: video crudo (-c:v copy) + audio AAC 128k/48kHz estéreo (compat Xui/Smarters)`);
+      } else if (normalizedMode === 'smart') {
         // Probe del origen para decidir per-stream. Construir headers HTTP.
         const probeHeaderStr = (combinedHeaders && typeof combinedHeaders === 'string') ? combinedHeaders : '';
         const probeUA = customUserAgent || sessionUserAgent || '';
@@ -2691,7 +2708,11 @@ app.post('/api/emit', async (req, res) => {
       }
 
       ffmpegArgs = [...stripped, ...videoOut, ...audioOut];
-      const modeLabel = normalizedMode === 'smart' ? 'SMART (copy compatible)' : 'COPY puro';
+      const modeLabel = normalizedMode === 'smart'
+        ? 'SMART (copy compatible)'
+        : normalizedMode === 'rawvideo'
+          ? 'RAWVIDEO (video crudo + AAC)'
+          : 'COPY puro';
       sendLog(process_id, 'success', `🎯 Modo ${modeLabel}: salida HLS lista`);
     }
 
