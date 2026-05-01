@@ -397,8 +397,9 @@ export default function EmisorM3U8Panel() {
   const [m3uPayloads, setM3uPayloads] = useState<Record<number, M3uPayload>>({});
   // Modo de salida para procesos M3U file (RANDOM Disney 7).
   // 'copy' = -c copy puro · 'smart' = copy compatible con fallback · 'transcode' = perfil estándar 2000k
-  type M3uMode = 'copy' | 'smart' | 'transcode';
-  const [m3uModes, setM3uModes] = useState<Record<number, M3uMode>>({});
+  // RANDOM Disney 7 (ID 19) ahora usa un único modo "rawvideo": video crudo
+  // (-c:v copy) + audio re-encodeado a AAC 128k/48kHz estéreo. Esto preserva
+  // calidad de origen y garantiza audio en Xui / IPTV Smarters Pro.
   const { metricsHistory, latestMetrics } = useServerMetrics();
 
   // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
@@ -975,7 +976,7 @@ export default function EmisorM3U8Panel() {
           process_id: processIndex.toString(),
           ...(isM3uFileProcess && m3uPayload ? {
             passthrough: true, // compat
-            passthrough_mode: m3uModes[processIndex] || 'copy',
+            passthrough_mode: 'rawvideo',
             referer: m3uPayload.referer || null,
             user_agent: m3uPayload.userAgent || null,
             extra_headers: m3uPayload.headers || {},
