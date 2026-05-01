@@ -1867,10 +1867,15 @@ app.post('/api/emit', async (req, res) => {
     // el flag para que NO se ejecute el bloque de strip de transcoding.
     const normalizedMode = (() => {
       const m = (passthrough_mode || '').toString().toLowerCase();
-      if (['copy', 'smart', 'transcode'].includes(m)) return m;
-      return passthrough === true ? 'copy' : null;
+      if (['copy', 'smart', 'transcode', 'rawvideo'].includes(m)) return m;
+      // Compat histórica: passthrough:true sin mode → para ID 19 ahora default 'rawvideo'
+      // (video crudo + audio AAC re-encode), para otros 'copy' como antes.
+      if (passthrough === true) {
+        return String(rawProcessId) === '19' ? 'rawvideo' : 'copy';
+      }
+      return null;
     })();
-    const isPassthroughBlock = normalizedMode === 'copy' || normalizedMode === 'smart';
+    const isPassthroughBlock = normalizedMode === 'copy' || normalizedMode === 'smart' || normalizedMode === 'rawvideo';
     const process_id = String(rawProcessId);
     const numericId = parseInt(process_id, 10);
     let effectiveSourceM3u8 = source_m3u8;
