@@ -2200,6 +2200,17 @@ app.post('/api/emit', async (req, res) => {
         '-thread_queue_size', '16384'
       );
       sendLog(process_id, 'info', `🌊 Tigo VLC-like (Fase 1 endurecida): max_reload=50, hold=50, start ${liveStartIndex}${isRecovery ? ' [recovery]' : ''}`);
+    } else if (process_id === '19') {
+      // RANDOM Disney 7 (M3U file passthrough): perfil VLC-like idéntico a
+      // Disney 7 (ID 0) — max_reload/hold altos + genpts. NO usamos variant
+      // pinning ni pre-check (la URL del M3U puede ser playlist directa).
+      hardenedLiveInputArgs.push(
+        '-http_seekable', '0',
+        '-max_reload', '1000',
+        '-m3u8_hold_counters', '1000',
+        '-fflags', '+genpts'
+      );
+      sendLog(process_id, 'info', `🛡️ RANDOM Disney 7 HLS resiliente: max_reload=1000, hold=1000`);
     } else if (isManualProcess || needsTdmaxLikePinning) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
@@ -2213,7 +2224,8 @@ app.post('/api/emit', async (req, res) => {
     // Quitar -re hace que FFmpeg lea a velocidad CPU, agote segmentos y termine en EOF.
     // Los reloads deben mitigarse fijando la variante HLS final antes de FFmpeg,
     // no dejando el master playlist completo al analizador interno.
-    const usesReFlag = RE_FLAG_PROCESSES.has(String(process_id));
+    // ID 19 (RANDOM Disney 7) hereda -re de Disney 7 para pacing HLS correcto.
+    const usesReFlag = RE_FLAG_PROCESSES.has(String(process_id)) || String(process_id) === '19';
     if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
       sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
