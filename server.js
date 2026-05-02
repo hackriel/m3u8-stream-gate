@@ -5313,6 +5313,75 @@ server.listen(PORT, () => {
     }, 60 * 1000); // chequea cada 1 min (ventana de actuación de 5 min al inicio de la hora objetivo)
   }
 
+  // ====== WATCHDOG ALWAYS-ON (Canal 6 URL / ID 15) ======
+  // Si el switch "Encendido siempre" está activo y el proceso está caído (no emitiendo)
+  // SIN parada manual ni descanso nocturno, lo relanzamos automáticamente con la URL
+  // guardada. Cubre el caso donde el recovery se rinde (cdn_unavailable / circuit_breaker)
+  // y el proceso queda muerto hasta que alguien lo levanta a mano.
+  setInterval(async () => {
+    try {
+      if (!supabase) return;
+      const PID = '15';
+      const PID_NUM = 15;
+
+      // Respetar parada manual y descanso nocturno (1-5 AM)
+      if (manualStopProcesses.has(PID) || manualStopProcesses.has(PID_NUM)) return;
+      if (nightRestStoppedProcesses.has(PID)) return;
+      const { hour: crHour } = getCostaRicaHour();
+      if (crHour >= 1 && crHour < 5) return;
+
+      // Si ya hay un FFmpeg vivo o un recovery en curso, no tocar
+      const procData = ffmpegProcesses.get(PID) || ffmpegProcesses.get(PID_NUM);
+      if (procData?.process && !procData.process.killed) return;
+      if (autoRecoveryInProgress.get(PID)) return;
+
+      const { data: row } = await supabase
+        .from('emission_processes')
+        .select('id, source_url, m3u8, rtmp, always_on, is_emitting, emit_status')
+        .eq('id', PID_NUM)
+        .single();
+
+      if (!row || !row.always_on) return;
+      if (row.is_emitting) return; // ya está emitiendo (o intentándolo)
+
+      const sourceUrl = row.source_url || row.m3u8;
+      const targetRtmp = row.rtmp;
+      if (!sourceUrl || !targetRtmp) {
+        return; // sin URL guardada, no podemos relanzar solos
+      }
+
+      sendLog(PID, 'warn', `🔁 Watchdog always-on: CANAL 6 URL caído con switch activo. Relanzando automáticamente...`);
+
+      // Limpiar fallos previos para que un circuit breaker viejo no nos bloquee
+      try { failureTimestamps.delete(PID); } catch (_) {}
+
+      await supabase.from('emission_processes').update({
+        emit_status: 'starting',
+        is_emitting: true,
+        is_active: true,
+        failure_reason: null,
+        failure_details: null,
+      }).eq('id', PID_NUM);
+
+      try {
+        await fetch(`http://localhost:${PORT}/api/emit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_m3u8: sourceUrl,
+            target_rtmp: targetRtmp,
+            process_id: PID,
+            is_recovery: true,
+          }),
+        });
+      } catch (e) {
+        sendLog(PID, 'error', `❌ Watchdog always-on: error al relanzar: ${e.message}`);
+      }
+    } catch (err) {
+      console.error('Watchdog always-on (ID 15) error:', err);
+    }
+  }, 2 * 60 * 1000); // cada 2 min
+
   setTimeout(async () => {
     try {
       const tigoRunning = ffmpegProcesses.get('12');
