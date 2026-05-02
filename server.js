@@ -5353,7 +5353,7 @@ server.listen(PORT, () => {
       sendLog(PID, 'warn', `🔁 Watchdog always-on: CANAL 6 URL caído con switch activo. Relanzando automáticamente...`);
 
       // Limpiar fallos previos para que un circuit breaker viejo no nos bloquee
-      try { recoveryFailures && recoveryFailures.delete && recoveryFailures.delete(PID); } catch (_) {}
+      try { failureTimestamps.delete(PID); } catch (_) {}
 
       await supabase.from('emission_processes').update({
         emit_status: 'starting',
