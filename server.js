@@ -3381,6 +3381,15 @@ app.post('/api/emit', async (req, res) => {
       // Resetear métricas SRT (modo HDMI)
       if (String(process_id) === '12') resetTigoSrtMetric(process_id);
       const processInfo = ffmpegProcesses.get(process_id);
+      // GUARD anti-condición de carrera: si el mapa ya tiene OTRO ffmpeg
+      // (porque un /api/emit/restart o /api/emit nuevo tomó el slot mientras
+      // este close llegaba tarde), NO debemos tocar el estado ni Supabase,
+      // o apagaríamos el proceso recién arrancado.
+      const stillOurs = !processInfo || processInfo.process === ffmpegProcess;
+      if (!stillOurs) {
+        sendLog(process_id, 'info', `ℹ️ Close tardío de FFmpeg viejo (pid ${ffmpegProcess.pid}) ignorado — un proceso nuevo ya tomó el slot`);
+        return;
+      }
       const runtime = processInfo ? Date.now() - processInfo.startTime : 0;
       const statusAtClose = emissionStatuses.get(process_id);
       const isManualStop =
