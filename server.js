@@ -890,6 +890,9 @@ const scrapeSessionCache = new Map(); // Map<processId, { cookies, accessToken, 
 
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
+// Teletica URL (ID 13) usa wmsAuthSign de vida corta: si cae después de horas,
+// reusar la misma URL solo provoca 403/404. Debe ir directo a scraping fresco.
+const QUICK_RETRY_DISABLED_PROCESSES = new Set(['13']);
 
 // Última configuración útil conocida para no depender 100% de la base en un recovery
 const lastKnownStreamState = new Map(); // Map<processId, { source_m3u8, target_rtmp, updatedAt }>
@@ -1352,8 +1355,21 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
   }
   
   autoRecoveryInProgress.set(process_id, true);
-  const attempts = (recoveryAttempts.get(process_id) || 0) + 1;
-  recoveryAttempts.set(process_id, attempts);
+    const attempts = (recoveryAttempts.get(process_id) || 0) + 1;
+    recoveryAttempts.set(process_id, attempts);
+    const isAlwaysOnScrapedProcess = async () => {
+      if (!supabase) return false;
+      try {
+        const { data } = await supabase
+          .from('emission_processes')
+          .select('always_on')
+          .eq('id', parseInt(process_id))
+          .maybeSingle();
+        return Boolean(data?.always_on);
+      } catch {
+        return false;
+      }
+    };
   
   let newUrl = null;
   const fallbackUrl = CHANNEL_FALLBACK_URLS[process_id];
@@ -3540,15 +3556,32 @@ app.post('/api/emit', async (req, res) => {
               failure_details: `Demasiadas caídas consecutivas (${CIRCUIT_BREAKER_MAX_FAILURES} en ${CIRCUIT_BREAKER_WINDOW_MS / 60000} min). Reiniciar manualmente.`
             }).eq('id', parseInt(process_id));
           }
-          // No hacer recovery, dejar el proceso muerto
+          if (CHANNEL_MAP[process_id] && await isAlwaysOnScrapedProcess()) {
+            const retryDelayMs = 5 * 60 * 1000;
+            sendLog(process_id, 'warn', `🟢 Encendido siempre activo: circuito pausado temporalmente; reintentando recovery en ${retryDelayMs / 60000} min`);
+            failureTimestamps.delete(String(process_id));
+            recoveryAttempts.set(process_id, 0);
+            setTimeout(() => {
+              if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) return;
+              enqueueRecovery(process_id, async () => {
+                const { channelId, channelName } = CHANNEL_MAP[process_id];
+                await autoRecoverChannel(process_id, channelId, channelName);
+              });
+            }, retryDelayMs);
+          }
+          // Sin always_on, no hacer recovery y dejar el proceso muerto para evitar saturación.
         } else {
         
         // MEJORA #2: Retry con misma URL antes de recovery completo
         // Para canales scrapeados (1-6, 8, 9), intentar primero con la misma URL
         // ya que muchas caídas son micro-cortes del CDN donde la URL sigue válida
-        const shouldRetryFirst = !!CHANNEL_MAP[process_id];
+        const shouldRetryFirst = !!CHANNEL_MAP[process_id] && !QUICK_RETRY_DISABLED_PROCESSES.has(String(process_id));
         const lastQuickRetryAt = quickRetryState.get(process_id) || 0;
         const quickRetryRecentlyFailed = lastQuickRetryAt > 0 && (Date.now() - lastQuickRetryAt) < 30000;
+
+        if (CHANNEL_MAP[process_id] && QUICK_RETRY_DISABLED_PROCESSES.has(String(process_id))) {
+          sendLog(process_id, 'info', '🔁 RETRY RÁPIDO omitido: URL con token corto, se hará scraping fresco directo');
+        }
 
         // Si duró estable suficiente tiempo, permitimos nuevamente retry rápido en futuras caídas.
         if (runtime > 30000 && lastQuickRetryAt > 0) {
