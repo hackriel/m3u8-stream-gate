@@ -3123,6 +3123,11 @@ app.post('/api/emit', async (req, res) => {
           }
 
           const outPlaylist = path.join(outDir, 'playlist.m3u8');
+          // Disney 7 (ID 16) usa bitrate más alto + preset mejor calidad para deportes/fútbol
+          const isDisney7 = String(process_id) === '16';
+          const vBitrate = isDisney7 ? '3500k' : '2000k';
+          const vBufsize = isDisney7 ? '7000k' : '4000k';
+          const vPreset  = isDisney7 ? 'faster' : 'veryfast';
           const stage2Args = [
             '-re',
             '-fflags', '+genpts+discardcorrupt',
@@ -3132,12 +3137,12 @@ app.post('/api/emit', async (req, res) => {
             '-map', '0:v:0?',
             '-map', '0:a:0?',
             '-c:v', 'libx264',
-            '-preset', 'veryfast',
+            '-preset', vPreset,
             '-profile:v', 'main',
             '-threads', '4',
-            '-b:v', '2000k',
-            '-maxrate', '2000k',
-            '-bufsize', '4000k',
+            '-b:v', vBitrate,
+            '-maxrate', vBitrate,
+            '-bufsize', vBufsize,
             '-vf', 'scale=-2:720',
             '-r', '30',
             '-vsync', 'cfr',
@@ -3161,7 +3166,7 @@ app.post('/api/emit', async (req, res) => {
           ];
           const stage2 = spawn('ffmpeg', stage2Args);
           tigoOutputProcesses.set(String(process_id), stage2);
-          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode 720p CBR 2000k @ 30fps)`);
+          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode 720p CBR ${vBitrate} @ 30fps, preset ${vPreset})`);
 
           stage2.stderr.on('data', (data) => {
             const out = data.toString();
