@@ -3549,9 +3549,13 @@ app.post('/api/emit', async (req, res) => {
         // MEJORA #2: Retry con misma URL antes de recovery completo
         // Para canales scrapeados (1-6, 8, 9), intentar primero con la misma URL
         // ya que muchas caídas son micro-cortes del CDN donde la URL sigue válida
-        const shouldRetryFirst = !!CHANNEL_MAP[process_id];
+        const shouldRetryFirst = !!CHANNEL_MAP[process_id] && !QUICK_RETRY_DISABLED_PROCESSES.has(String(process_id));
         const lastQuickRetryAt = quickRetryState.get(process_id) || 0;
         const quickRetryRecentlyFailed = lastQuickRetryAt > 0 && (Date.now() - lastQuickRetryAt) < 30000;
+
+        if (CHANNEL_MAP[process_id] && QUICK_RETRY_DISABLED_PROCESSES.has(String(process_id))) {
+          sendLog(process_id, 'info', '🔁 RETRY RÁPIDO omitido: URL con token corto, se hará scraping fresco directo');
+        }
 
         // Si duró estable suficiente tiempo, permitimos nuevamente retry rápido en futuras caídas.
         if (runtime > 30000 && lastQuickRetryAt > 0) {
