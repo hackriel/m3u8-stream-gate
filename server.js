@@ -890,6 +890,9 @@ const scrapeSessionCache = new Map(); // Map<processId, { cookies, accessToken, 
 
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
+// Teletica URL (ID 13) usa wmsAuthSign de vida corta: si cae después de horas,
+// reusar la misma URL solo provoca 403/404. Debe ir directo a scraping fresco.
+const QUICK_RETRY_DISABLED_PROCESSES = new Set(['13']);
 
 // Última configuración útil conocida para no depender 100% de la base en un recovery
 const lastKnownStreamState = new Map(); // Map<processId, { source_m3u8, target_rtmp, updatedAt }>
