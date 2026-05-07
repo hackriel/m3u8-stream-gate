@@ -3736,7 +3736,16 @@ app.post('/api/emit', async (req, res) => {
             sendLog(process_id, 'warn', `🔄 ${channelName} caído (código ${code}) - Iniciando recovery completo...`);
           }
           enqueueRecovery(process_id, async () => {
-            await sleep(500);
+            // Backoff especial para Teletica (IDs 4 y 13): el CDN a veces devuelve 404
+            // instantáneo en URLs recién scrapeadas (token de 1 min + propagación lenta).
+            // Esperar 1.5s adicional reduce los bucles de re-scrape inmediato.
+            const isTeletica = String(process_id) === '4' || String(process_id) === '13';
+            const instantFail = runtime <= 2000;
+            const backoffMs = (isTeletica && instantFail) ? 2000 : 500;
+            if (isTeletica && instantFail) {
+              sendLog(process_id, 'info', `⏳ Backoff Teletica: esperando ${backoffMs}ms antes de re-scrape (evita 404 por token recién emitido)`);
+            }
+            await sleep(backoffMs);
             // Verificar si el usuario detuvo manualmente mientras esperábamos
             if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
               sendLog(process_id, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
