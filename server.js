@@ -2609,7 +2609,14 @@ app.post('/api/emit', async (req, res) => {
     const outputFps = isCfrOutput ? '29.97' : '30';
     const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
-    const fflags = (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
+    // Teletica HLS (IDs 4, 13, 14) entrega segmentos con DTS rotos / PTS hacia atrás
+    // → reproductor escucha audio repetido y luego salta adelante. Aplicamos el mismo
+    // combo de saneo de timestamps que usamos para Univision/Akamai + igndts y
+    // avoid_negative_ts make_zero + async 1 para forzar línea de tiempo monotónica.
+    const isTeleticaTimestampFix = ['4', '13', '14'].includes(String(process_id));
+    const fflags = isTeleticaTimestampFix
+      ? '+genpts+discardcorrupt+igndts'
+      : (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
 
     ffmpegArgs = [
       ...inputArgs,
@@ -2645,6 +2652,14 @@ app.post('/api/emit', async (req, res) => {
       '-max_muxing_queue_size', '1024',
       '-reset_timestamps', '1',
     ];
+
+    // Teletica: forzar timestamps monotónicos a la salida + resync suave de audio.
+    // make_zero: si llega un PTS negativo, lo pone en 0 y sigue lineal (nunca retrocede).
+    // -async 1: ajusta drift de audio sin pegar saltos audibles.
+    if (isTeleticaTimestampFix) {
+      ffmpegArgs.push('-avoid_negative_ts', 'make_zero', '-async', '1');
+      sendLog(process_id, 'info', `🕒 Teletica timestamp fix: +igndts+discardcorrupt / avoid_negative_ts=make_zero / async=1`);
+    }
 
     // ── MODOS DE SALIDA (RANDOM Disney 7 ID 19) ─────────────────────────
     // 'rawvideo'  → ÚNICO modo activo en UI: video CRUDO (-c:v copy) + audio
