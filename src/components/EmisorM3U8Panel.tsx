@@ -395,6 +395,8 @@ export default function EmisorM3U8Panel() {
     headers: Record<string, string>;
   }
   const [m3uPayloads, setM3uPayloads] = useState<Record<number, M3uPayload>>({});
+  // Texto pegado del contenido M3U (RANDOM Disney 7) — alternativa a subir archivo
+  const [m3uPasteText, setM3uPasteText] = useState<Record<number, string>>({});
   // Modo de salida para procesos M3U file (RANDOM Disney 7).
   // 'copy' = -c copy puro · 'smart' = copy compatible con fallback · 'transcode' = perfil estándar 2000k
   // RANDOM Disney 7 (ID 19) ahora usa un único modo "rawvideo": video crudo
@@ -502,6 +504,34 @@ export default function EmisorM3U8Panel() {
       console.error('Error leyendo M3U:', e);
       toast.error('No se pudo leer el archivo M3U');
     }
+  };
+
+  // Procesa texto M3U pegado directamente (sin archivo)
+  const handleM3uPaste = (processIndex: number) => {
+    const text = (m3uPasteText[processIndex] || '').trim();
+    if (!text) {
+      toast.error('Pega el contenido del M3U primero');
+      return;
+    }
+    if (text.length > 1024 * 1024) {
+      toast.error('Texto demasiado grande (>1MB)');
+      return;
+    }
+    const parsed = parseM3uContent(text);
+    if (!parsed) {
+      toast.error('No se encontró una URL válida en el texto pegado');
+      return;
+    }
+    const payload: M3uPayload = { fileName: 'pegado.m3u', ...parsed };
+    setM3uPayloads(prev => ({ ...prev, [processIndex]: payload }));
+    updateProcess(processIndex, { m3u8: parsed.url });
+    const headerCount = Object.keys(parsed.headers).length;
+    toast.success(
+      `M3U procesado` +
+      (parsed.referer ? ` · referer ✓` : '') +
+      (parsed.userAgent ? ` · UA ✓` : '') +
+      (headerCount > 0 ? ` · ${headerCount} header(s)` : '')
+    );
   };
 
   // Scraping para FUTV ALTERNO: el channel_id viene de la URL pegada.
