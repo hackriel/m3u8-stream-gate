@@ -475,37 +475,34 @@ export default function EmisorM3U8Panel() {
     return { url, referer, userAgent, headers };
   };
 
-  const handleM3uContent = (processIndex: number, text: string, sourceLabel = 'pegado') => {
-    if (!text || !text.trim()) {
-      setM3uPayloads(prev => {
-        const next = { ...prev };
-        delete next[processIndex];
-        return next;
-      });
-      return;
+  const handleM3uFile = async (processIndex: number, file: File) => {
+    try {
+      if (file.size > 1024 * 1024) {
+        toast.error('Archivo demasiado grande (>1MB)');
+        return;
+      }
+      const text = await file.text();
+      const parsed = parseM3uContent(text);
+      if (!parsed) {
+        toast.error('No se encontró una URL válida en el archivo M3U');
+        return;
+      }
+      const payload: M3uPayload = { fileName: file.name, ...parsed };
+      setM3uPayloads(prev => ({ ...prev, [processIndex]: payload }));
+      // Reflejar la URL en el campo m3u8 del proceso para mantener compatibilidad
+      updateProcess(processIndex, { m3u8: parsed.url });
+      const headerCount = Object.keys(parsed.headers).length;
+      toast.success(
+        `M3U cargado: ${file.name}` +
+        (parsed.referer ? ` · referer ✓` : '') +
+        (parsed.userAgent ? ` · UA ✓` : '') +
+        (headerCount > 0 ? ` · ${headerCount} header(s)` : '')
+      );
+    } catch (e) {
+      console.error('Error leyendo M3U:', e);
+      toast.error('No se pudo leer el archivo M3U');
     }
-    if (text.length > 1024 * 1024) {
-      toast.error('Contenido demasiado grande (>1MB)');
-      return;
-    }
-    const parsed = parseM3uContent(text);
-    if (!parsed) {
-      toast.error('No se encontró una URL válida en el M3U');
-      return;
-    }
-    const payload: M3uPayload = { fileName: sourceLabel, ...parsed };
-    setM3uPayloads(prev => ({ ...prev, [processIndex]: payload }));
-    updateProcess(processIndex, { m3u8: parsed.url });
-    const headerCount = Object.keys(parsed.headers).length;
-    toast.success(
-      `M3U interpretado` +
-      (parsed.referer ? ` · referer ✓` : '') +
-      (parsed.userAgent ? ` · UA ✓` : '') +
-      (headerCount > 0 ? ` · ${headerCount} header(s)` : '')
-    );
   };
-  // Texto crudo pegado por el usuario para procesos M3U file (ID 19).
-  const [m3uRawTexts, setM3uRawTexts] = useState<Record<number, string>>({});
 
   // Scraping para FUTV ALTERNO: el channel_id viene de la URL pegada.
   const fetchPastedChannelUrl = useCallback(async (processIndex: number) => {
@@ -1333,30 +1330,20 @@ export default function EmisorM3U8Panel() {
                 </label>
                 {M3U_FILE_PROCESSES.has(processIndex) && (
                   <div className="mb-3">
-                    <textarea
-                      placeholder={'#EXTM3U\n#EXTVLCOPT:http-referrer=https://...\n#EXTVLCOPT:http-user-agent=Mozilla/5.0 ...\n#EXTINF:-1,Canal\nhttps://.../playlist.m3u8'}
-                      value={m3uRawTexts[processIndex] || ''}
+                    <input
+                      type="file"
+                      accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl"
                       onChange={(e) => {
-                        const v = e.target.value;
-                        setM3uRawTexts(prev => ({ ...prev, [processIndex]: v }));
+                        const f = e.target.files?.[0];
+                        if (f) handleM3uFile(processIndex, f);
+                        e.target.value = '';
                       }}
-                      onBlur={(e) => handleM3uContent(processIndex, e.target.value)}
-                      onPaste={(e) => {
-                        const pasted = e.clipboardData.getData('text');
-                        if (pasted) {
-                          setTimeout(() => handleM3uContent(processIndex, pasted), 0);
-                        }
-                      }}
-                      rows={6}
-                      className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-2 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 font-mono text-xs resize-y"
+                      className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-2 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
                     />
-                    <p className="text-[11px] text-muted-foreground mb-2">
-                      Pega aquí el contenido completo del M3U (con <code>#EXTVLCOPT</code> si aplica). Se interpreta automáticamente.
-                    </p>
                     {m3uPayloads[processIndex] && (
                       <div className="p-3 rounded-xl bg-card/50 border border-violet-400/30 space-y-1.5">
                         <p className="text-xs text-muted-foreground">
-                          📄 <span className="text-foreground font-medium">M3U interpretado ({m3uPayloads[processIndex].fileName})</span>
+                          📄 <span className="text-foreground font-medium">{m3uPayloads[processIndex].fileName}</span>
                         </p>
                         <p className="text-xs text-muted-foreground break-all">
                           🔗 <span className="text-foreground font-mono">{m3uPayloads[processIndex].url}</span>
@@ -1378,17 +1365,16 @@ export default function EmisorM3U8Panel() {
                         )}
                       </div>
                     )}
-                    {/* Modo de salida: transcode CBR 2000k (mismo perfil estándar que el resto) */}
+                    {/* Modo de salida: único — video crudo + audio AAC compatible Xui/Smarters */}
                     <div className="mt-3 p-3 rounded-xl bg-card/50 border border-violet-400/20">
                       <p className="text-xs text-violet-300 font-medium mb-1">
-                        🎬 Modo: <span className="text-violet-100">VLC-like + VIDEO CRUDO + AUDIO AAC</span>
+                        🎬 Modo: <span className="text-violet-100">VIDEO CRUDO + AUDIO AAC</span>
                       </p>
                       <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        Mismo perfil de lectura que <strong>Disney 7</strong> (VLC-like): <code className="text-violet-400">-re</code>,
-                        <code className="text-violet-400"> max_reload=1000</code>, <code className="text-violet-400">hold_counters=1000</code>,
-                        reconnect en 4xx/5xx/EOF, <code className="text-violet-400">+genpts</code>. Lee bien
-                        cualquier M3U con headers raros. Salida: <code className="text-violet-400">-c:v copy</code> (sin recomprimir,
-                        respeta el origen tal cual) + audio AAC 128k 48 kHz estéreo (compat Xui/Smarters).
+                        Perfil tipo Disney 7 (VLC-like). Video se emite tal cual llega del origen
+                        (<code className="text-violet-400">-c:v copy</code>, sin recompresión). Audio se
+                        re-encodea a AAC 128k 48 kHz estéreo para garantizar reproducción en
+                        Xui / IPTV Smarters Pro.
                       </p>
                     </div>
                   </div>

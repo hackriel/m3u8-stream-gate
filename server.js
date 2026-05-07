@@ -2796,8 +2796,8 @@ app.post('/api/emit', async (req, res) => {
       const hlsPlaylistPath = path.join(hlsDir, 'playlist.m3u8');
       ffmpegArgs.push(
         '-f', 'hls',
-        '-hls_time', '4',
-        '-hls_list_size', '6',
+        '-hls_time', '10',
+        '-hls_list_size', '8',
         '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
         '-hls_segment_type', 'mpegts',
         '-hls_segment_filename', path.join(hlsDir, 'seg_%05d.ts'),
@@ -2805,7 +2805,7 @@ app.post('/api/emit', async (req, res) => {
         '-hls_start_number_source', 'epoch',  // Números de segmento únicos por sesión
         hlsPlaylistPath
       );
-      sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8 (4s×6, baja latencia)`);
+      sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8 (10s×8, estable)`);
     } else {
       ffmpegArgs.push(
         '-f', 'flv',
@@ -3736,16 +3736,7 @@ app.post('/api/emit', async (req, res) => {
             sendLog(process_id, 'warn', `🔄 ${channelName} caído (código ${code}) - Iniciando recovery completo...`);
           }
           enqueueRecovery(process_id, async () => {
-            // Backoff especial para Teletica (IDs 4 y 13): el CDN a veces devuelve 404
-            // instantáneo en URLs recién scrapeadas (token de 1 min + propagación lenta).
-            // Esperar 1.5s adicional reduce los bucles de re-scrape inmediato.
-            const isTeletica = String(process_id) === '4' || String(process_id) === '13';
-            const instantFail = runtime <= 2000;
-            const backoffMs = (isTeletica && instantFail) ? 2000 : 500;
-            if (isTeletica && instantFail) {
-              sendLog(process_id, 'info', `⏳ Backoff Teletica: esperando ${backoffMs}ms antes de re-scrape (evita 404 por token recién emitido)`);
-            }
-            await sleep(backoffMs);
+            await sleep(500);
             // Verificar si el usuario detuvo manualmente mientras esperábamos
             if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
               sendLog(process_id, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
