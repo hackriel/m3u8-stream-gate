@@ -979,7 +979,7 @@ export default function EmisorM3U8Panel() {
           process_id: processIndex.toString(),
           ...(isM3uFileProcess && m3uPayload ? {
             passthrough: true, // compat
-            passthrough_mode: 'rawvideo',
+            passthrough_mode: 'transcode',
             referer: m3uPayload.referer || null,
             user_agent: m3uPayload.userAgent || null,
             extra_headers: m3uPayload.headers || {},
