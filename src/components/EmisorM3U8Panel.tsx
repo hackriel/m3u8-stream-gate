@@ -979,7 +979,7 @@ export default function EmisorM3U8Panel() {
           process_id: processIndex.toString(),
           ...(isM3uFileProcess && m3uPayload ? {
             passthrough: true, // compat
-            passthrough_mode: 'transcode',
+            passthrough_mode: 'rawvideo',
             referer: m3uPayload.referer || null,
             user_agent: m3uPayload.userAgent || null,
             extra_headers: m3uPayload.headers || {},
@@ -1381,12 +1381,14 @@ export default function EmisorM3U8Panel() {
                     {/* Modo de salida: transcode CBR 2000k (mismo perfil estándar que el resto) */}
                     <div className="mt-3 p-3 rounded-xl bg-card/50 border border-violet-400/20">
                       <p className="text-xs text-violet-300 font-medium mb-1">
-                        🎬 Modo: <span className="text-violet-100">TRANSCODE 720p CBR 2000k + AAC 128k</span>
+                        🎬 Modo: <span className="text-violet-100">VLC-like + VIDEO CRUDO + AUDIO AAC</span>
                       </p>
                       <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        Mismo perfil unificado que los demás canales: libx264 veryfast, 720p @ 29.97fps,
-                        CBR 2000k, AAC 128k. Garantiza compatibilidad total con Xui/IPTV Smarters Pro
-                        y bitrate predecible para tu salida HLS.
+                        Mismo perfil de lectura que <strong>Disney 7</strong> (VLC-like): <code className="text-violet-400">-re</code>,
+                        <code className="text-violet-400"> max_reload=1000</code>, <code className="text-violet-400">hold_counters=1000</code>,
+                        reconnect en 4xx/5xx/EOF, <code className="text-violet-400">+genpts</code>. Lee bien
+                        cualquier M3U con headers raros. Salida: <code className="text-violet-400">-c:v copy</code> (sin recomprimir,
+                        respeta el origen tal cual) + audio AAC 128k 48 kHz estéreo (compat Xui/Smarters).
                       </p>
                     </div>
                   </div>
