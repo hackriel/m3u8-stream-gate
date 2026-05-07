@@ -1370,13 +1370,13 @@ export default function EmisorM3U8Panel() {
                     {/* Modo de salida: único — video crudo + audio AAC compatible Xui/Smarters */}
                     <div className="mt-3 p-3 rounded-xl bg-card/50 border border-violet-400/20">
                       <p className="text-xs text-violet-300 font-medium mb-1">
-                        🎬 Modo: <span className="text-violet-100">VIDEO CRUDO + AUDIO AAC</span>
+                        🎬 Modo: <span className="text-violet-100">TRANSCODE 720p CBR 2000k (perfil Disney 7)</span>
                       </p>
                       <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        Perfil tipo Disney 7 (VLC-like). Video se emite tal cual llega del origen
-                        (<code className="text-violet-400">-c:v copy</code>, sin recompresión). Audio se
-                        re-encodea a AAC 128k 48 kHz estéreo para garantizar reproducción en
-                        Xui / IPTV Smarters Pro.
+                        Mismo perfil que Disney 7 (ID 0): input HLS resiliente VLC-like
+                        (<code className="text-violet-400">max_reload=1000</code>, <code className="text-violet-400">-re</code>) +
+                        re-encode a <strong className="text-violet-200">libx264 720p @ 29.97fps CBR 2000k</strong> (preset veryfast,
+                        GOP 2s) + AAC 128k. Garantiza compatibilidad y estabilidad en Xui / IPTV Smarters Pro.
                       </p>
                     </div>
                   </div>
