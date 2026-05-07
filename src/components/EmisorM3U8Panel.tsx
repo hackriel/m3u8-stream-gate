@@ -975,8 +975,10 @@ export default function EmisorM3U8Panel() {
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString(),
           ...(isM3uFileProcess && m3uPayload ? {
-            passthrough: true, // compat
-            passthrough_mode: 'rawvideo',
+            // passthrough_mode: 'transcode' → usa el perfil estándar 720p CBR 2000k
+            // (mismo que Disney 7 ID 0). Resuelve el "video crudo no va bien" en Xui/IPTV.
+            passthrough: false,
+            passthrough_mode: 'transcode',
             referer: m3uPayload.referer || null,
             user_agent: m3uPayload.userAgent || null,
             extra_headers: m3uPayload.headers || {},
