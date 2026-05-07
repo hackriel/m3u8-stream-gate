@@ -2609,12 +2609,10 @@ app.post('/api/emit', async (req, res) => {
     const outputFps = isCfrOutput ? '29.97' : '30';
     const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
-    // HLS scrapeados (Teletica 4/13, TDMAS 3/14, FUTV 1/11/17) entregan segmentos con
-    // DTS rotos / PTS hacia atrás → el reproductor escucha audio repetido y salta adelante.
-    // Aplicamos saneo de timestamps + igndts + avoid_negative_ts make_zero + async 1
-    // para forzar línea de tiempo monotónica al RTMP.
-    // ID 18 (FUTV SRT) excluido: ya viene de OBS local con timestamps limpios.
-    const isHlsTimestampFix = ['1', '3', '4', '11', '13', '14', '17'].includes(String(process_id));
+    // Saneo de timestamps para evitar audio repetido / saltos hacia atrás.
+    // Cubre tabs visibles: FUTV URL (11), Teletica URL (13), TDMAS 1 URL (14), FUTV SRT (18)
+    // y también los procesos scrapeados base (1, 3, 4, 17) que comparten las mismas fuentes.
+    const isHlsTimestampFix = ['1', '3', '4', '11', '13', '14', '17', '18'].includes(String(process_id));
     const fflags = isHlsTimestampFix
       ? '+genpts+discardcorrupt+igndts'
       : (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
