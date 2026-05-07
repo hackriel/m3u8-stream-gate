@@ -395,6 +395,8 @@ export default function EmisorM3U8Panel() {
     headers: Record<string, string>;
   }
   const [m3uPayloads, setM3uPayloads] = useState<Record<number, M3uPayload>>({});
+  // Texto pegado del contenido M3U (RANDOM Disney 7) — alternativa a subir archivo
+  const [m3uPasteText, setM3uPasteText] = useState<Record<number, string>>({});
   // Modo de salida para procesos M3U file (RANDOM Disney 7).
   // 'copy' = -c copy puro · 'smart' = copy compatible con fallback · 'transcode' = perfil estándar 2000k
   // RANDOM Disney 7 (ID 19) ahora usa un único modo "rawvideo": video crudo
@@ -502,6 +504,34 @@ export default function EmisorM3U8Panel() {
       console.error('Error leyendo M3U:', e);
       toast.error('No se pudo leer el archivo M3U');
     }
+  };
+
+  // Procesa texto M3U pegado directamente (sin archivo)
+  const handleM3uPaste = (processIndex: number) => {
+    const text = (m3uPasteText[processIndex] || '').trim();
+    if (!text) {
+      toast.error('Pega el contenido del M3U primero');
+      return;
+    }
+    if (text.length > 1024 * 1024) {
+      toast.error('Texto demasiado grande (>1MB)');
+      return;
+    }
+    const parsed = parseM3uContent(text);
+    if (!parsed) {
+      toast.error('No se encontró una URL válida en el texto pegado');
+      return;
+    }
+    const payload: M3uPayload = { fileName: 'pegado.m3u', ...parsed };
+    setM3uPayloads(prev => ({ ...prev, [processIndex]: payload }));
+    updateProcess(processIndex, { m3u8: parsed.url });
+    const headerCount = Object.keys(parsed.headers).length;
+    toast.success(
+      `M3U procesado` +
+      (parsed.referer ? ` · referer ✓` : '') +
+      (parsed.userAgent ? ` · UA ✓` : '') +
+      (headerCount > 0 ? ` · ${headerCount} header(s)` : '')
+    );
   };
 
   // Scraping para FUTV ALTERNO: el channel_id viene de la URL pegada.
@@ -1332,16 +1362,35 @@ export default function EmisorM3U8Panel() {
                 </label>
                 {M3U_FILE_PROCESSES.has(processIndex) && (
                   <div className="mb-3">
-                    <input
-                      type="file"
-                      accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) handleM3uFile(processIndex, f);
-                        e.target.value = '';
-                      }}
-                      className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-2 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+                    <textarea
+                      placeholder={"#EXTM3U\n#EXTVLCOPT:http-referrer=https://...\n#EXTVLCOPT:http-user-agent=Mozilla/5.0 ...\n#EXTINF:-1,Canal\nhttps://servidor.com/stream.m3u8"}
+                      value={m3uPasteText[processIndex] || ''}
+                      onChange={(e) => setM3uPasteText(prev => ({ ...prev, [processIndex]: e.target.value }))}
+                      rows={6}
+                      className="w-full bg-card border border-border rounded-xl px-4 py-3 mb-2 outline-none focus:ring-2 focus:ring-violet-400/50 transition-all duration-200 font-mono text-xs resize-y"
                     />
+                    <div className="flex gap-2 mb-2">
+                      <button
+                        type="button"
+                        onClick={() => handleM3uPaste(processIndex)}
+                        className="flex-1 px-4 py-2 rounded-xl bg-violet-500 hover:bg-violet-600 text-white text-sm font-medium transition-colors"
+                      >
+                        📋 Procesar M3U pegado
+                      </button>
+                      <label className="px-4 py-2 rounded-xl bg-card border border-border hover:bg-muted text-sm font-medium cursor-pointer transition-colors">
+                        📂 Archivo
+                        <input
+                          type="file"
+                          accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleM3uFile(processIndex, f);
+                            e.target.value = '';
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
                     {m3uPayloads[processIndex] && (
                       <div className="p-3 rounded-xl bg-card/50 border border-violet-400/30 space-y-1.5">
                         <p className="text-xs text-muted-foreground">
