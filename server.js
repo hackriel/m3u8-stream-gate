@@ -2796,8 +2796,8 @@ app.post('/api/emit', async (req, res) => {
       const hlsPlaylistPath = path.join(hlsDir, 'playlist.m3u8');
       ffmpegArgs.push(
         '-f', 'hls',
-        '-hls_time', '10',
-        '-hls_list_size', '8',
+        '-hls_time', '4',
+        '-hls_list_size', '6',
         '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
         '-hls_segment_type', 'mpegts',
         '-hls_segment_filename', path.join(hlsDir, 'seg_%05d.ts'),
@@ -2805,7 +2805,7 @@ app.post('/api/emit', async (req, res) => {
         '-hls_start_number_source', 'epoch',  // Números de segmento únicos por sesión
         hlsPlaylistPath
       );
-      sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8 (10s×8, estable)`);
+      sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8 (4s×6, baja latencia)`);
     } else {
       ffmpegArgs.push(
         '-f', 'flv',
