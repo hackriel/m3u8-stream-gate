@@ -475,34 +475,37 @@ export default function EmisorM3U8Panel() {
     return { url, referer, userAgent, headers };
   };
 
-  const handleM3uFile = async (processIndex: number, file: File) => {
-    try {
-      if (file.size > 1024 * 1024) {
-        toast.error('Archivo demasiado grande (>1MB)');
-        return;
-      }
-      const text = await file.text();
-      const parsed = parseM3uContent(text);
-      if (!parsed) {
-        toast.error('No se encontró una URL válida en el archivo M3U');
-        return;
-      }
-      const payload: M3uPayload = { fileName: file.name, ...parsed };
-      setM3uPayloads(prev => ({ ...prev, [processIndex]: payload }));
-      // Reflejar la URL en el campo m3u8 del proceso para mantener compatibilidad
-      updateProcess(processIndex, { m3u8: parsed.url });
-      const headerCount = Object.keys(parsed.headers).length;
-      toast.success(
-        `M3U cargado: ${file.name}` +
-        (parsed.referer ? ` · referer ✓` : '') +
-        (parsed.userAgent ? ` · UA ✓` : '') +
-        (headerCount > 0 ? ` · ${headerCount} header(s)` : '')
-      );
-    } catch (e) {
-      console.error('Error leyendo M3U:', e);
-      toast.error('No se pudo leer el archivo M3U');
+  const handleM3uContent = (processIndex: number, text: string, sourceLabel = 'pegado') => {
+    if (!text || !text.trim()) {
+      setM3uPayloads(prev => {
+        const next = { ...prev };
+        delete next[processIndex];
+        return next;
+      });
+      return;
     }
+    if (text.length > 1024 * 1024) {
+      toast.error('Contenido demasiado grande (>1MB)');
+      return;
+    }
+    const parsed = parseM3uContent(text);
+    if (!parsed) {
+      toast.error('No se encontró una URL válida en el M3U');
+      return;
+    }
+    const payload: M3uPayload = { fileName: sourceLabel, ...parsed };
+    setM3uPayloads(prev => ({ ...prev, [processIndex]: payload }));
+    updateProcess(processIndex, { m3u8: parsed.url });
+    const headerCount = Object.keys(parsed.headers).length;
+    toast.success(
+      `M3U interpretado` +
+      (parsed.referer ? ` · referer ✓` : '') +
+      (parsed.userAgent ? ` · UA ✓` : '') +
+      (headerCount > 0 ? ` · ${headerCount} header(s)` : '')
+    );
   };
+  // Texto crudo pegado por el usuario para procesos M3U file (ID 19).
+  const [m3uRawTexts, setM3uRawTexts] = useState<Record<number, string>>({});
 
   // Scraping para FUTV ALTERNO: el channel_id viene de la URL pegada.
   const fetchPastedChannelUrl = useCallback(async (processIndex: number) => {
