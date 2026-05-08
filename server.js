@@ -4747,7 +4747,7 @@ app.get('/api/status', (req, res) => {
   } else {
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i <= 15; i++) {
+    for (let i = 0; i <= 20; i++) {
       const id = i.toString();
       const processData = ffmpegProcesses.get(id) ?? ffmpegProcesses.get(String(id));
       allStatuses[id] = {
@@ -5216,7 +5216,7 @@ server.listen(PORT, () => {
     })();
 
     // Fijar presets SRT al arrancar (Tigo, Disney 7, FUTV SRT)
-    for (const id of [12, 16, 18]) {
+    for (const id of [12, 16, 18, 20]) {
       supabase
         .from('emission_processes')
         .update({ m3u8: 'srt://obs', rtmp: 'hls-local' })
