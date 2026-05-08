@@ -872,7 +872,10 @@ const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11', '13
 // Procesos con cadencia CFR (vsync cfr + 29.97fps) - canales de emisión EXCEPTO Disney 7 (TUDN)
 // Disney 7 (ID 0) usa valores enteros (30fps/GOP60) porque el servidor RTMP destino
 // rechaza conexiones con GOP decimal (59.94) causando Broken pipe a los ~120s
-const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '5', '6', '10', '11', '13', '14', '15']);
+// Canal 6 (5/15) entrega 30 fps reales (no 29.97). Forzar CFR 29.97 hace que
+// FFmpeg tire 1 frame cada ~33s, lo cual provoca buffering/reload en el player.
+// Por eso 5 y 15 quedan FUERA: usan 30fps nativo sin -vsync cfr.
+const CFR_OUTPUT_PROCESSES = new Set(['1', '3', '4', '6', '10', '11', '13', '14']);
 
 // Fallback URLs oficiales por canal (se usan si el scraping falla)
 const CHANNEL_FALLBACK_URLS = {
