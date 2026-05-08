@@ -996,6 +996,23 @@ export default function EmisorM3U8Panel() {
       }
     }
 
+    // Mutex CANAL 6 URL (15) ↔ CANAL 6 SRT (20): comparten /live/Canal6/playlist.m3u8.
+    if (processIndex === CANAL6_URL_INDEX || processIndex === CANAL6_SRT_INDEX) {
+      const otherIdx = processIndex === CANAL6_URL_INDEX ? CANAL6_SRT_INDEX : CANAL6_URL_INDEX;
+      if (processes[otherIdx]?.isEmitiendo) {
+        toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Canal6)...`);
+        try {
+          await fetch("/api/emit/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ process_id: otherIdx.toString() })
+          });
+        } catch (e) {
+          console.warn(`No se pudo detener proceso ${otherIdx}:`, e);
+        }
+      }
+    }
+
     if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
