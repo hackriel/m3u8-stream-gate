@@ -171,6 +171,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "FUTV ALTERNO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer de URL" },
   { name: "FUTV SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "RANDOM Disney 7", scrapeFn: null, channelId: null, fetchLabel: "" },
+  { name: "Canal 6 SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
