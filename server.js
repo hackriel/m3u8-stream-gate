@@ -1929,9 +1929,9 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Validación de ID: debe ser un número entre 0 y 19
-    if (isNaN(numericId) || numericId < 0 || numericId > 19) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-19)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 19` });
+    if (isNaN(numericId) || numericId < 0 || numericId > 20) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-20)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 20` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -2611,7 +2611,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Nombre del proceso para logs
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7' };
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
@@ -5077,7 +5077,7 @@ const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
   '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
-  '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT',
+  '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT',
 };
 
 // Endpoint para toggle night_rest
@@ -5189,7 +5189,7 @@ server.listen(PORT, () => {
           .select('id');
         const existingIds = new Set((existingRows || []).map(r => r.id));
         const missingRows = [];
-        for (let id = 0; id <= 18; id++) {
+        for (let id = 0; id <= 20; id++) {
           if (!existingIds.has(id)) {
             missingRows.push({
               id,
