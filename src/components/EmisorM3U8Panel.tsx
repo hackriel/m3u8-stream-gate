@@ -608,6 +608,7 @@ export default function EmisorM3U8Panel() {
     const tigoPreset = CHANNEL_CONFIGS[TIGO_URL_INDEX]?.presetUrl;
     const disney7Preset = CHANNEL_CONFIGS[DISNEY7_URL_INDEX]?.presetUrl;
     const futvSrtPreset = CHANNEL_CONFIGS[FUTV_SRT_INDEX]?.presetUrl;
+    const canal6SrtPreset = CHANNEL_CONFIGS[CANAL6_SRT_INDEX]?.presetUrl;
     const tigoRtmp = 'hls-local';
     setProcesses(prev => {
       let changed = false;
@@ -625,6 +626,11 @@ export default function EmisorM3U8Panel() {
 
       if (futvSrtPreset && (next[FUTV_SRT_INDEX]?.m3u8 !== futvSrtPreset || next[FUTV_SRT_INDEX]?.rtmp !== tigoRtmp)) {
         next[FUTV_SRT_INDEX] = { ...next[FUTV_SRT_INDEX], m3u8: futvSrtPreset, rtmp: tigoRtmp };
+        changed = true;
+      }
+
+      if (canal6SrtPreset && (next[CANAL6_SRT_INDEX]?.m3u8 !== canal6SrtPreset || next[CANAL6_SRT_INDEX]?.rtmp !== tigoRtmp)) {
+        next[CANAL6_SRT_INDEX] = { ...next[CANAL6_SRT_INDEX], m3u8: canal6SrtPreset, rtmp: tigoRtmp };
         changed = true;
       }
 
@@ -663,6 +669,16 @@ export default function EmisorM3U8Panel() {
         .eq('id', FUTV_SRT_INDEX)
         .then(({ error }) => {
           if (error) console.error('Error guardando preset de FUTV SRT:', error);
+        });
+    }
+
+    if (canal6SrtPreset) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: canal6SrtPreset, rtmp: tigoRtmp })
+        .eq('id', CANAL6_SRT_INDEX)
+        .then(({ error }) => {
+          if (error) console.error('Error guardando preset de CANAL 6 SRT:', error);
         });
     }
 
