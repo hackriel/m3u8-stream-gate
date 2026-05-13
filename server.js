@@ -3258,6 +3258,23 @@ app.post('/api/emit', async (req, res) => {
     const SEG_FAIL_STALL_THRESHOLD = 25;
     const SEG_FAIL_FLUSH_INTERVAL = 5_000;
 
+    // ── Detector de "404 storm de playlist" (Canal 6 / ID 5 y 15) ──
+    // CloudFront a veces deja la URL viva pero el manifest apunta a una
+    // ventana de segmentos vacía → FFmpeg entra en bucle infinito de
+    // "HTTP error 404" + "Failed to reload playlist 0" SIN salir nunca.
+    // Watchdog tampoco salta porque técnicamente sigue vivo.
+    // Solución: si vemos 6+ "Failed to reload playlist" en ≤8s → matar
+    // FFmpeg para que la auto-recovery dispare un scrape NUEVO (y, al 2º
+    // intento, fallback a Multimedios — lógica ya existente).
+    const playlist404State = {
+      count: 0,
+      windowStart: Date.now(),
+      restartTriggered: false,
+    };
+    const PLAYLIST_404_WINDOW_MS = 8_000;
+    const PLAYLIST_404_THRESHOLD = 6;
+    const isCanal6Stream = process_id === '5' || process_id === '15';
+
     // Manejar errores con análisis mejorado
     ffmpegProcess.stderr.on('data', (data) => {
       const output = data.toString();
@@ -3267,6 +3284,35 @@ app.post('/api/emit', async (req, res) => {
       for (const line of lines) {
         stderrBuffer.push(line.trim());
         if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
+      }
+
+      // ── Canal 6: detector de 404 storm de playlist ──
+      if (isCanal6Stream && !playlist404State.restartTriggered) {
+        const reloadFails = (output.match(/Failed to reload playlist/g) || []).length;
+        if (reloadFails > 0) {
+          const now = Date.now();
+          if (now - playlist404State.windowStart > PLAYLIST_404_WINDOW_MS) {
+            playlist404State.windowStart = now;
+            playlist404State.count = 0;
+          }
+          playlist404State.count += reloadFails;
+          if (playlist404State.count >= PLAYLIST_404_THRESHOLD) {
+            playlist404State.restartTriggered = true;
+            sendLog(process_id, 'error', `🚨 Canal 6: 404-storm de playlist (${playlist404State.count} fails en ${Math.round((now - playlist404State.windowStart)/1000)}s) → matando FFmpeg para forzar scrape nuevo`);
+            try {
+              scrapeSessionCache.delete(process_id);
+              if (typeof ffmpegProcess.kill === 'function') {
+                ffmpegProcess.kill('SIGTERM');
+                setTimeout(() => {
+                  try { ffmpegProcess.kill('SIGKILL'); } catch (_) {}
+                }, 3000);
+              }
+            } catch (e) {
+              console.error('Error en 404-storm restart:', e);
+            }
+            return;
+          }
+        }
       }
 
       // ── Interceptar "Failed to open segment" ANTES del logging normal ──
