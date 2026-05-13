@@ -3273,7 +3273,7 @@ app.post('/api/emit', async (req, res) => {
     };
     const PLAYLIST_404_WINDOW_MS = 8_000;
     const PLAYLIST_404_THRESHOLD = 6;
-    const isCanal6Stream = process_id === '5' || process_id === '15';
+    const isCanal6Stream = process_id === '5';
 
     // Manejar errores con análisis mejorado
     ffmpegProcess.stderr.on('data', (data) => {
