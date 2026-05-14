@@ -216,6 +216,41 @@ app.use('/live', (req, res, next) => {
   next();
 }, express.static(HLS_OUTPUT_DIR));
 
+// ───────────────────────────────────────────────────────────────────
+// EXT-X-START PATCHER (reduce latencia de arranque ~15s)
+// Cada 1s revisa TODOS los playlist.m3u8 activos y, si no tienen el tag
+// `#EXT-X-START:TIME-OFFSET=0,PRECISE=YES`, lo inyecta justo después de
+// `#EXTM3U`. Esto le dice al player/XUI: "empezá desde el inicio de la
+// ventana disponible, no desde el final" → la reproducción comienza apenas
+// hay 3 segmentos (≈30s), en vez de esperar la latencia clásica de HLS
+// (~45s). Es una directiva estándar HLS (RFC 8216 §4.3.5.2): si el player
+// no la entiende, simplemente la ignora — riesgo cero.
+// FFmpeg sobreescribe el playlist en cada segmento (~10s), por eso el
+// patcher reinyecta de forma continua. El costo es despreciable
+// (lectura/escritura de un archivo <1KB cada 1s por slug activo).
+// ───────────────────────────────────────────────────────────────────
+setInterval(() => {
+  try {
+    const slugs = fs.readdirSync(HLS_OUTPUT_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name);
+    for (const slug of slugs) {
+      const pl = path.join(HLS_OUTPUT_DIR, slug, 'playlist.m3u8');
+      if (!fs.existsSync(pl)) continue;
+      try {
+        const content = fs.readFileSync(pl, 'utf8');
+        if (content.includes('#EXT-X-START')) continue;
+        if (!content.startsWith('#EXTM3U')) continue;
+        const patched = content.replace(
+          '#EXTM3U',
+          '#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES'
+        );
+        fs.writeFileSync(pl, patched);
+      } catch (_) {}
+    }
+  } catch (_) {}
+}, 1000);
+
 // Variables globales para manejo de múltiples procesos ffmpeg
 const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTime, target_rtmp }>
 const emissionStatuses = new Map(); // Map<processId, status>
