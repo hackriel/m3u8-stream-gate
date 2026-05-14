@@ -2279,15 +2279,12 @@ app.post('/api/emit', async (req, res) => {
         '-max_reload', '1000',
         '-m3u8_hold_counters', '1000'
       );
-      // ID 15 (Canal 6 URL): NO usar +genpts. VLC reproduce esta URL perfecto
-      // respetando los PTS originales de CloudFront. +genpts regenera timestamps
-      // y tras un reload desincroniza A/V (audio adelantado, video atrás).
-      // Resto de manuales/tdmax-like mantienen +genpts como antes.
-      if (!isCanal6UrlProcess) {
-        hardenedLiveInputArgs.push('-fflags', '+genpts');
-      } else {
+      // Canal 6 URL: el PTS original se rompe después del primer reload en FFmpeg.
+      // Volvemos a reloj generado lineal y sólo dejamos el master vivo + programa fijo.
+      hardenedLiveInputArgs.push('-fflags', '+genpts');
+      if (isCanal6UrlProcess) {
         hardenedLiveInputArgs.push('-live_start_index', '-2');
-        sendLog(process_id, 'info', `🎯 Canal 6 URL: PTS originales + inicio live -2 — perfil VLC-like`);
+        sendLog(process_id, 'info', `🎯 Canal 6 URL: reloj lineal + master vivo + inicio live -2`);
       }
       sendLog(process_id, 'info', `🛡️ HLS resiliente: max_reload=1000, hold=1000`);
     }
