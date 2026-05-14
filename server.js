@@ -2278,12 +2278,18 @@ app.post('/api/emit', async (req, res) => {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
         '-max_reload', '1000',
-        '-m3u8_hold_counters', '1000',
-        '-fflags', '+genpts'
+        '-m3u8_hold_counters', '1000'
       );
+      // ID 15 (Canal 6 URL): NO usar +genpts. VLC reproduce esta URL perfecto
+      // respetando los PTS originales de CloudFront. +genpts regenera timestamps
+      // y tras un reload desincroniza A/V (audio adelantado, video atrás).
+      // Resto de manuales/tdmax-like mantienen +genpts como antes.
+      if (String(process_id) !== '15') {
+        hardenedLiveInputArgs.push('-fflags', '+genpts');
+      } else {
+        sendLog(process_id, 'info', `🎯 ID 15: PTS originales (sin +genpts) — perfil VLC-like`);
+      }
       sendLog(process_id, 'info', `🛡️ HLS resiliente: max_reload=1000, hold=1000`);
-      // Canal 6 URL (ID 15): mantener HTTP simple. En pruebas reales,
-      // -http_persistent + -multiple_requests empeoró los reloads en XUI.
     }
     // Mantener -re como pacing de entrada para HLS live.
     // Quitar -re hace que FFmpeg lea a velocidad CPU, agote segmentos y termine en EOF.
