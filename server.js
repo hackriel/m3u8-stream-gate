@@ -2496,13 +2496,39 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // === Estrategia de selección de variante HLS ===
-    // MANUALES (Disney/Canal 6): pinnear URL hija directa y simplificar FFmpeg.
+    // Canal 6 URL (15): mantener el master vivo y fijar el programa 720p con -map,
+    // igual al método de los scrapeados. Así FFmpeg lee el archivo oficial, conserva
+    // los identificadores/programas del HLS y no queda amarrado a una sub-playlist vieja.
+    // Otros manuales: pinnear URL hija directa y simplificar FFmpeg.
     // SCRAPEADOS (TDMax): mantener master playlist vivo (token de 1min necesita renovación del CDN)
     //   pero forzar el programa 720p con -map 0:p:N para evitar cambios de calidad.
     const isManualUrlProcess = isManualProcess;
     let hlsProgramIndex = -1; // -1 = sin forzar programa específico
 
-    if (isManualUrlProcess && !isUnivisionLikeSource && !isAkamaiSource && !isRtmpInputSource) {
+    if (isCanal6UrlProcess) {
+      try {
+        const { allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
+          targetBandwidth: 0,
+          headers: {
+            Referer: refererDomain,
+            Origin: originDomain,
+            'User-Agent': sessionUserAgent,
+          },
+        });
+
+        const validVariants = (allVariants || []).filter(v => v.bandwidth > 0 && v.resolution);
+        if (validVariants.length > 0) {
+          const target720 = validVariants.find(v => v.resolution && v.resolution.includes('720'));
+          const best = target720 || validVariants[validVariants.length - 1];
+          hlsProgramIndex = best.programIndex;
+          sendLog(process_id, 'success', `📌 Canal 6 URL: master vivo + programa fijo p:${hlsProgramIndex} (${best.resolution} @ ${Math.round(best.bandwidth / 1000)}kbps) [SIN ABR]`);
+        } else {
+          sendLog(process_id, 'warn', `⚠️ Canal 6 URL: master sin variantes detectables — FFmpeg elegirá automáticamente`);
+        }
+      } catch (err) {
+        sendLog(process_id, 'warn', `⚠️ Canal 6 URL: no se pudo analizar master HLS (${err.message}) — FFmpeg elegirá automáticamente`);
+      }
+    } else if (isManualUrlProcess && !isUnivisionLikeSource && !isAkamaiSource && !isRtmpInputSource) {
       // Canales manuales con tokens estables: resolver y pinnear URL hija directamente
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
         targetBandwidth: 0,
