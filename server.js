@@ -2220,8 +2220,7 @@ app.post('/api/emit', async (req, res) => {
     const isScrapedChannel = !!CHANNEL_MAP[process_id];
     // FUTV ALTERNO (17) NO está en CHANNEL_MAP (para no chocar en recovery con FUTV/11),
     // pero recibe la misma URL master de TDMax → necesita Variant Pinning igual que los scrapeados.
-    // CANAL 6 URL (15) idem.
-    const needsTdmaxLikePinning = isScrapedChannel || process_id === '17' || process_id === '15';
+    const needsTdmaxLikePinning = isScrapedChannel || process_id === '17';
 
     if (isUnivisionLikeSource) {
       // Univision: minimal HLS flags, let the HLS demuxer handle everything internally.
@@ -2342,16 +2341,13 @@ app.post('/api/emit', async (req, res) => {
       ];
       sendLog(process_id, 'info', `🔧 Univision: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
     } else if (isMediatiqueSource) {
-      // Mediatiquestream (Canal 6): tokens expiran, reconnect_at_eof causa loop infinito en 401.
-      // Mantener reconnect básico para micro-cortes, pero sin reconnect_at_eof.
+      // Mediatiquestream (Canal 6): perfil simple tipo VLC.
+      // Sin reconnect HTTP: el demuxer HLS maneja playlist/segmentos y evitamos esperas
+      // largas que terminan en audio adelantado mientras el video intenta ponerse al día.
       effectiveResilienceArgs = [
-        '-rw_timeout', '15000000',
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_on_http_error', '5xx',
-        '-reconnect_delay_max', '10',
+        '-rw_timeout', '30000000',
       ];
-      sendLog(process_id, 'info', `🔧 Mediatiquestream: reconnect sin reconnect_at_eof (evita loop 401)`);
+      sendLog(process_id, 'info', `🔧 Mediatiquestream: modo VLC-like simple (sin reconnect HTTP)`);
     } else if (isAkamaiSource) {
       // Akamai CDN: modo VLC-like (igual que Disney 7/Univision).
       // reconnect_at_eof y reconnect_streamed causan reconexiones HTTP a byte-offset
@@ -2669,13 +2665,8 @@ app.post('/api/emit', async (req, res) => {
       ? '+genpts+discardcorrupt+igndts'
       : (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
 
-    // Canal 6 URL (ID 15): Mediatique rota tokens y CloudFront entrega micro-stalls de
-    // segmento (200-800ms). Sin colchón de entrada, esos stalls se propagan al RTMP y
-    // xui los repackagea como EXT-X-DISCONTINUITY → reload de ~1s en clientes IPTV.
-    // VLC los absorbe con buffer propio, por eso ahí no se ve. rtbufsize=32M absorbe
-    // el jitter dentro de FFmpeg sin afectar latencia perceptible.
-    const isCanal6UrlSmoothing = String(process_id) === '15';
-    const inputSmoothingArgs = isCanal6UrlSmoothing ? ['-rtbufsize', '32M'] : [];
+    // Sin buffer especial por canal: mantener entrada HLS lo más lineal posible.
+    const inputSmoothingArgs = [];
 
     ffmpegArgs = [
       ...inputArgs,
