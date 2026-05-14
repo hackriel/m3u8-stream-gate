@@ -2160,6 +2160,7 @@ app.post('/api/emit', async (req, res) => {
     // así que estas variables solo aplican a flujos HLS/RTMP convencionales.
     const isRtmpInputSource = isManualObsIngest; // (legacy alias, kept for branch below)
     const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id)) && !isRtmpInputSource;
+    const isCanal6UrlProcess = String(process_id) === '15';
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
     let isUnivisionLikeSource = false;
@@ -2284,10 +2285,11 @@ app.post('/api/emit', async (req, res) => {
       // respetando los PTS originales de CloudFront. +genpts regenera timestamps
       // y tras un reload desincroniza A/V (audio adelantado, video atrás).
       // Resto de manuales/tdmax-like mantienen +genpts como antes.
-      if (String(process_id) !== '15') {
+      if (!isCanal6UrlProcess) {
         hardenedLiveInputArgs.push('-fflags', '+genpts');
       } else {
-        sendLog(process_id, 'info', `🎯 ID 15: PTS originales (sin +genpts) — perfil VLC-like`);
+        hardenedLiveInputArgs.push('-live_start_index', '-2');
+        sendLog(process_id, 'info', `🎯 Canal 6 URL: PTS originales + inicio live -2 — perfil VLC-like`);
       }
       sendLog(process_id, 'info', `🛡️ HLS resiliente: max_reload=1000, hold=1000`);
     }
@@ -2443,7 +2445,9 @@ app.post('/api/emit', async (req, res) => {
     // Si viene un User-Agent custom desde el M3U, tiene prioridad absoluta.
     const sessionUserAgent = customUserAgent
       ? customUserAgent
-      : (isProxyScrapedSource
+      : (isCanal6UrlProcess
+          ? 'VLC/3.0.20 LibVLC/3.0.20'
+          : isProxyScrapedSource
           ? pickRandomUserAgent()
           : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
     if (customUserAgent) {
