@@ -2667,12 +2667,21 @@ app.post('/api/emit', async (req, res) => {
       ? '+genpts+discardcorrupt+igndts'
       : (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
 
+    // Canal 6 URL (ID 15): Mediatique rota tokens y CloudFront entrega micro-stalls de
+    // segmento (200-800ms). Sin colchón de entrada, esos stalls se propagan al RTMP y
+    // xui los repackagea como EXT-X-DISCONTINUITY → reload de ~1s en clientes IPTV.
+    // VLC los absorbe con buffer propio, por eso ahí no se ve. rtbufsize=32M absorbe
+    // el jitter dentro de FFmpeg sin afectar latencia perceptible.
+    const isCanal6UrlSmoothing = String(process_id) === '15';
+    const inputSmoothingArgs = isCanal6UrlSmoothing ? ['-rtbufsize', '32M'] : [];
+
     ffmpegArgs = [
       ...inputArgs,
       ...hardenedLiveInputArgs,
       '-fflags', fflags,
       '-analyzeduration', (isUnivisionLikeSource || isAkamaiSource || isProxyScrapedSource) ? '10000000' : analyzeDuration,  // 10s para VLC-like profiles + proxy
       '-probesize', (isUnivisionLikeSource || isAkamaiSource || isProxyScrapedSource) ? '5000000' : probeSize,               // 5MB para VLC-like profiles + proxy
+      ...inputSmoothingArgs,
       '-i', inputSourceUrl,
       // Univision: auto-selección + skip subtítulos EIA-608
       // Scrapeados: map por programa HLS
