@@ -2670,7 +2670,9 @@ app.post('/api/emit', async (req, res) => {
     // Canal 6 URL (15) queda fuera: el master oficial ya trae PTS correctos y se
     // estabiliza fijando programa HLS; regenerar/ignorar DTS le causa catch-up A/V.
     const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '17', '18'].includes(String(process_id));
-    const fflags = isHlsTimestampFix
+    const fflags = isCanal6UrlProcess
+      ? '+discardcorrupt'
+      : isHlsTimestampFix
       ? '+genpts+discardcorrupt+igndts'
       : (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
 
