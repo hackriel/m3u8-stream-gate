@@ -2846,16 +2846,24 @@ app.post('/api/emit', async (req, res) => {
     } else if (isHlsOutput) {
       const hlsSlug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
       const hlsDir = path.join(HLS_OUTPUT_DIR, hlsSlug);
-      if (!fs.existsSync(hlsDir)) {
-        fs.mkdirSync(hlsDir, { recursive: true });
-      }
-      // Limpiar segmentos anteriores
+      // ── WIPE AGRESIVO de la carpeta HLS antes de arrancar FFmpeg ──
+      // CRÍTICO: en este punto el FFmpeg viejo (si existía) ya fue matado y
+      // esperado en líneas 2041-2042 (waitForProcessDeath escala a SIGKILL),
+      // así que no quedan file handles abiertos sobre estos .ts/.m3u8.
+      // Borramos TODA la carpeta de raíz (recursive) en vez de unlink por
+      // archivo: evita que XUI pull un manifest con segmentos viejos
+      // mezclados con timestamps nuevos (causa raíz del "loop" tras caídas).
       try {
-        const oldFiles = fs.readdirSync(hlsDir);
-        for (const f of oldFiles) {
-          fs.unlinkSync(path.join(hlsDir, f));
+        if (fs.existsSync(hlsDir)) {
+          fs.rmSync(hlsDir, { recursive: true, force: true });
         }
+      } catch (e) {
+        sendLog(process_id, 'warn', `⚠️ No se pudo borrar ${hlsDir}: ${e.message} (FFmpeg sobreescribirá igual)`);
+      }
+      try {
+        fs.mkdirSync(hlsDir, { recursive: true });
       } catch (_) {}
+      sendLog(process_id, 'info', `🧹 Carpeta HLS limpiada: ${hlsDir} (sin segmentos viejos)`);
 
       const hlsPlaylistPath = path.join(hlsDir, 'playlist.m3u8');
       ffmpegArgs.push(
