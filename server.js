@@ -2662,12 +2662,9 @@ app.post('/api/emit', async (req, res) => {
 
     // Saneo de timestamps para evitar audio repetido / saltos hacia atrás
     // y reloads del player por EXT-X-DISCONTINUITY.
-    // Canal 6 URL (15) queda fuera: el master oficial ya trae PTS correctos y se
-    // estabiliza fijando programa HLS; regenerar/ignorar DTS le causa catch-up A/V.
-    const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '17', '18'].includes(String(process_id));
-    const fflags = isCanal6UrlProcess
-      ? '+discardcorrupt'
-      : isHlsTimestampFix
+    // Canal 6 URL (15) requiere el mismo saneo que los scrapeados, pero con salida 30fps.
+    const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '15', '17', '18'].includes(String(process_id));
+    const fflags = isHlsTimestampFix
       ? '+genpts+discardcorrupt+igndts'
       : (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
 
@@ -2697,9 +2694,9 @@ app.post('/api/emit', async (req, res) => {
       '-b:v', '2000k',
       '-maxrate', '2000k',
       '-bufsize', '4000k',
-      '-vf', 'scale=-2:720',
+      '-vf', isCanal6UrlProcess ? 'scale=-2:720,fps=30' : 'scale=-2:720',
       '-r', outputFps,
-      ...(isCfrOutput ? ['-vsync', 'cfr'] : []),
+      ...(isCfrOutput || isCanal6UrlProcess ? ['-vsync', 'cfr'] : []),
       '-g', gopSize,
       '-keyint_min', gopSize,
       '-sc_threshold', '0',
@@ -2715,7 +2712,7 @@ app.post('/api/emit', async (req, res) => {
     // -async 1: ajusta drift de audio sin pegar saltos audibles.
     if (isHlsTimestampFix) {
       ffmpegArgs.push('-avoid_negative_ts', 'make_zero', '-async', '1');
-      sendLog(process_id, 'info', `🕒 HLS timestamp fix: +igndts+discardcorrupt / avoid_negative_ts=make_zero / async=1`);
+      sendLog(process_id, 'info', `🕒 HLS timestamp fix: +genpts+igndts+discardcorrupt / avoid_negative_ts=make_zero / async=1${isCanal6UrlProcess ? ' / fps=30+cfr' : ''}`);
     }
 
     // ── MODOS DE SALIDA (RANDOM Disney 7 ID 19) ─────────────────────────
