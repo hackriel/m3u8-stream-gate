@@ -2160,6 +2160,7 @@ app.post('/api/emit', async (req, res) => {
     // así que estas variables solo aplican a flujos HLS/RTMP convencionales.
     const isRtmpInputSource = isManualObsIngest; // (legacy alias, kept for branch below)
     const isManualProcess = MANUAL_URL_PROCESSES.has(String(process_id)) && !isRtmpInputSource;
+    const isCanal6UrlProcess = String(process_id) === '15';
     let refererDomain = 'https://www.tdmax.com/';
     let originDomain = 'https://www.tdmax.com';
     let isUnivisionLikeSource = false;
@@ -2284,10 +2285,11 @@ app.post('/api/emit', async (req, res) => {
       // respetando los PTS originales de CloudFront. +genpts regenera timestamps
       // y tras un reload desincroniza A/V (audio adelantado, video atrás).
       // Resto de manuales/tdmax-like mantienen +genpts como antes.
-      if (String(process_id) !== '15') {
+      if (!isCanal6UrlProcess) {
         hardenedLiveInputArgs.push('-fflags', '+genpts');
       } else {
-        sendLog(process_id, 'info', `🎯 ID 15: PTS originales (sin +genpts) — perfil VLC-like`);
+        hardenedLiveInputArgs.push('-live_start_index', '-2');
+        sendLog(process_id, 'info', `🎯 Canal 6 URL: PTS originales + inicio live -2 — perfil VLC-like`);
       }
       sendLog(process_id, 'info', `🛡️ HLS resiliente: max_reload=1000, hold=1000`);
     }
@@ -2443,7 +2445,9 @@ app.post('/api/emit', async (req, res) => {
     // Si viene un User-Agent custom desde el M3U, tiene prioridad absoluta.
     const sessionUserAgent = customUserAgent
       ? customUserAgent
-      : (isProxyScrapedSource
+      : (isCanal6UrlProcess
+          ? 'VLC/3.0.20 LibVLC/3.0.20'
+          : isProxyScrapedSource
           ? pickRandomUserAgent()
           : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
     if (customUserAgent) {
@@ -2492,13 +2496,39 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // === Estrategia de selección de variante HLS ===
-    // MANUALES (Disney/Canal 6): pinnear URL hija directa y simplificar FFmpeg.
+    // Canal 6 URL (15): mantener el master vivo y fijar el programa 720p con -map,
+    // igual al método de los scrapeados. Así FFmpeg lee el archivo oficial, conserva
+    // los identificadores/programas del HLS y no queda amarrado a una sub-playlist vieja.
+    // Otros manuales: pinnear URL hija directa y simplificar FFmpeg.
     // SCRAPEADOS (TDMax): mantener master playlist vivo (token de 1min necesita renovación del CDN)
     //   pero forzar el programa 720p con -map 0:p:N para evitar cambios de calidad.
     const isManualUrlProcess = isManualProcess;
     let hlsProgramIndex = -1; // -1 = sin forzar programa específico
 
-    if (isManualUrlProcess && !isUnivisionLikeSource && !isAkamaiSource && !isRtmpInputSource) {
+    if (isCanal6UrlProcess) {
+      try {
+        const { allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
+          targetBandwidth: 0,
+          headers: {
+            Referer: refererDomain,
+            Origin: originDomain,
+            'User-Agent': sessionUserAgent,
+          },
+        });
+
+        const validVariants = (allVariants || []).filter(v => v.bandwidth > 0 && v.resolution);
+        if (validVariants.length > 0) {
+          const target720 = validVariants.find(v => v.resolution && v.resolution.includes('720'));
+          const best = target720 || validVariants[validVariants.length - 1];
+          hlsProgramIndex = best.programIndex;
+          sendLog(process_id, 'success', `📌 Canal 6 URL: master vivo + programa fijo p:${hlsProgramIndex} (${best.resolution} @ ${Math.round(best.bandwidth / 1000)}kbps) [SIN ABR]`);
+        } else {
+          sendLog(process_id, 'warn', `⚠️ Canal 6 URL: master sin variantes detectables — FFmpeg elegirá automáticamente`);
+        }
+      } catch (err) {
+        sendLog(process_id, 'warn', `⚠️ Canal 6 URL: no se pudo analizar master HLS (${err.message}) — FFmpeg elegirá automáticamente`);
+      }
+    } else if (isManualUrlProcess && !isUnivisionLikeSource && !isAkamaiSource && !isRtmpInputSource) {
       // Canales manuales con tokens estables: resolver y pinnear URL hija directamente
       const { resolvedUrl, bandwidth, resolution, allVariants } = await resolveBestHLSVariant(inputSourceUrl, {
         targetBandwidth: 0,
@@ -2637,12 +2667,12 @@ app.post('/api/emit', async (req, res) => {
 
     // Saneo de timestamps para evitar audio repetido / saltos hacia atrás
     // y reloads del player por EXT-X-DISCONTINUITY.
-    // Cubre tabs visibles: FUTV URL (11), Teletica URL (13), TDMAS 1 URL (14), FUTV SRT (18),
-    // CANAL 6 URL (15) y también los procesos scrapeados base (1, 3, 4, 5, 17) que comparten
-    // las mismas fuentes. Canal 6 (5/15) sufre saltos de PTS por rotación de tokens Mediatique
-    // y fragmentos CloudFront con discontinuidades — sin este fix, el player recarga seguido.
-    const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '15', '17', '18'].includes(String(process_id));
-    const fflags = isHlsTimestampFix
+    // Canal 6 URL (15) queda fuera: el master oficial ya trae PTS correctos y se
+    // estabiliza fijando programa HLS; regenerar/ignorar DTS le causa catch-up A/V.
+    const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '17', '18'].includes(String(process_id));
+    const fflags = isCanal6UrlProcess
+      ? '+discardcorrupt'
+      : isHlsTimestampFix
       ? '+genpts+discardcorrupt+igndts'
       : (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
 
