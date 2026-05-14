@@ -216,6 +216,41 @@ app.use('/live', (req, res, next) => {
   next();
 }, express.static(HLS_OUTPUT_DIR));
 
+// ───────────────────────────────────────────────────────────────────
+// EXT-X-START PATCHER (reduce latencia de arranque ~15s)
+// Cada 1s revisa TODOS los playlist.m3u8 activos y, si no tienen el tag
+// `#EXT-X-START:TIME-OFFSET=0,PRECISE=YES`, lo inyecta justo después de
+// `#EXTM3U`. Esto le dice al player/XUI: "empezá desde el inicio de la
+// ventana disponible, no desde el final" → la reproducción comienza apenas
+// hay 3 segmentos (≈30s), en vez de esperar la latencia clásica de HLS
+// (~45s). Es una directiva estándar HLS (RFC 8216 §4.3.5.2): si el player
+// no la entiende, simplemente la ignora — riesgo cero.
+// FFmpeg sobreescribe el playlist en cada segmento (~10s), por eso el
+// patcher reinyecta de forma continua. El costo es despreciable
+// (lectura/escritura de un archivo <1KB cada 1s por slug activo).
+// ───────────────────────────────────────────────────────────────────
+setInterval(() => {
+  try {
+    const slugs = fs.readdirSync(HLS_OUTPUT_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name);
+    for (const slug of slugs) {
+      const pl = path.join(HLS_OUTPUT_DIR, slug, 'playlist.m3u8');
+      if (!fs.existsSync(pl)) continue;
+      try {
+        const content = fs.readFileSync(pl, 'utf8');
+        if (content.includes('#EXT-X-START')) continue;
+        if (!content.startsWith('#EXTM3U')) continue;
+        const patched = content.replace(
+          '#EXTM3U',
+          '#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES'
+        );
+        fs.writeFileSync(pl, patched);
+      } catch (_) {}
+    }
+  } catch (_) {}
+}, 1000);
+
 // Variables globales para manejo de múltiples procesos ffmpeg
 const ffmpegProcesses = new Map(); // Map<processId, { process, status, startTime, target_rtmp }>
 const emissionStatuses = new Map(); // Map<processId, status>
@@ -2811,16 +2846,24 @@ app.post('/api/emit', async (req, res) => {
     } else if (isHlsOutput) {
       const hlsSlug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
       const hlsDir = path.join(HLS_OUTPUT_DIR, hlsSlug);
-      if (!fs.existsSync(hlsDir)) {
-        fs.mkdirSync(hlsDir, { recursive: true });
-      }
-      // Limpiar segmentos anteriores
+      // ── WIPE AGRESIVO de la carpeta HLS antes de arrancar FFmpeg ──
+      // CRÍTICO: en este punto el FFmpeg viejo (si existía) ya fue matado y
+      // esperado en líneas 2041-2042 (waitForProcessDeath escala a SIGKILL),
+      // así que no quedan file handles abiertos sobre estos .ts/.m3u8.
+      // Borramos TODA la carpeta de raíz (recursive) en vez de unlink por
+      // archivo: evita que XUI pull un manifest con segmentos viejos
+      // mezclados con timestamps nuevos (causa raíz del "loop" tras caídas).
       try {
-        const oldFiles = fs.readdirSync(hlsDir);
-        for (const f of oldFiles) {
-          fs.unlinkSync(path.join(hlsDir, f));
+        if (fs.existsSync(hlsDir)) {
+          fs.rmSync(hlsDir, { recursive: true, force: true });
         }
+      } catch (e) {
+        sendLog(process_id, 'warn', `⚠️ No se pudo borrar ${hlsDir}: ${e.message} (FFmpeg sobreescribirá igual)`);
+      }
+      try {
+        fs.mkdirSync(hlsDir, { recursive: true });
       } catch (_) {}
+      sendLog(process_id, 'info', `🧹 Carpeta HLS limpiada: ${hlsDir} (sin segmentos viejos)`);
 
       const hlsPlaylistPath = path.join(hlsDir, 'playlist.m3u8');
       ffmpegArgs.push(
