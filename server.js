@@ -3664,6 +3664,44 @@ app.post('/api/emit', async (req, res) => {
         manualStopProcesses.delete(String(process_id));
         manualStopProcesses.delete(Number(process_id));
         quickRetryState.delete(process_id);
+      } else if (String(process_id) === '17' && (code !== null || signal)) {
+        // ───────────────────────────────────────────────────────────────
+        // FAILOVER ALTERNO (17) → FUTV URL (11)
+        // Si ALTERNO cae por cualquier motivo (404 de origen TDMax, token
+        // expirado, EOF, kill), NO reintentamos ALTERNO en bucle: levantamos
+        // FUTV URL (11) que tiene su propio scrape fresco con channel_id
+        // estable. Respeta paradas manuales y no se dispara si FUTV URL ya
+        // está activo. One-shot: FUTV URL maneja su propio recovery sin
+        // re-escalar a nada.
+        // ───────────────────────────────────────────────────────────────
+        const detectedAlt = detectedErrors.get(process_id);
+        const altReason = detectedAlt?.reason || (code === 0 ? 'EOF' : `exit ${code}`);
+        sendLog(process_id, 'error', `🚨 FUTV ALTERNO caído (${altReason}) — escalando a FUTV URL (failover automático)`);
+        // Limpiar estado ALTERNO para que NO siga reintentando solo
+        quickRetryState.delete(process_id);
+        recoveryAttempts.delete(process_id);
+        failureTimestamps.delete(String(process_id));
+        // Disparar FUTV URL (11) — autoRecoverChannel hace scrape fresco con channel_id estable
+        setTimeout(async () => {
+          try {
+            // Verificar que FUTV URL (11) no esté ya emitiendo
+            const futvUrlStatus = emissionStatuses.get('11');
+            const futvUrlAlive = ffmpegProcesses.has('11') || futvUrlStatus === 'running' || futvUrlStatus === 'starting';
+            if (futvUrlAlive) {
+              sendLog(process_id, 'info', `ℹ️ Failover omitido: FUTV URL (11) ya está activo`);
+              return;
+            }
+            // Respetar parada manual del usuario sobre FUTV URL
+            if (manualStopProcesses.has('11') || manualStopProcesses.has(11)) {
+              sendLog(process_id, 'warn', `⚠️ Failover omitido: FUTV URL (11) tiene parada manual activa`);
+              return;
+            }
+            sendLog(process_id, 'info', `🔄 Failover: arrancando FUTV URL (11) con scrape fresco...`);
+            await autoRecoverChannel('11', '641cba02e4b068d89b2344e3', 'FUTV URL');
+          } catch (e) {
+            sendLog(process_id, 'error', `❌ Failover ALTERNO→FUTV URL falló: ${e.message}`);
+          }
+        }, 1000);
       } else if (code !== null || signal) {
         // Auto-recovery para CUALQUIER cierre no manual (código de salida o señal como SIGKILL del watchdog)
         const isCleanExit = code === 0;
