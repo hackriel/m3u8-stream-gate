@@ -3195,11 +3195,13 @@ app.post('/api/emit', async (req, res) => {
           }
 
           const outPlaylist = path.join(outDir, 'playlist.m3u8');
-          // Disney 7 (ID 16) usa bitrate más alto + preset mejor calidad para deportes/fútbol
-          const isDisney7 = String(process_id) === '16';
-          const vBitrate = isDisney7 ? '3500k' : '2000k';
-          const vBufsize = isDisney7 ? '7000k' : '4000k';
-          const vPreset  = isDisney7 ? 'faster' : 'veryfast';
+          // Perfil unificado para TODOS los SRT ingest (incluido Disney 7 ID 16):
+          // CBR 2000k 720p30 AAC128k veryfast — mismo perfil que FUTV ALTERNO.
+          // 2000k es suficiente para verse "super bien" en SRT confiable y reduce
+          // carga de upload sin pérdida visible vs 3500k.
+          const vBitrate = '2000k';
+          const vBufsize = '4000k';
+          const vPreset  = 'veryfast';
           const stage2Args = [
             '-re',
             '-fflags', '+genpts+discardcorrupt',
