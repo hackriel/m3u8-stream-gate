@@ -2283,14 +2283,8 @@ app.post('/api/emit', async (req, res) => {
         '-fflags', '+genpts'
       );
       sendLog(process_id, 'info', `🛡️ HLS resiliente: max_reload=1000, hold=1000`);
-      // Canal 6 URL (ID 15) — CloudFront/MediaPackage soportan keep-alive HTTP.
-      // Sin -http_persistent FFmpeg abre handshake TLS nuevo cada segmento (~6-10s),
-      // ese handshake (100-400ms) es el micro-stall que xui repackagea como reload.
-      // CloudFront NO penaliza keep-alive (a diferencia de Wowza/Tigo), es lo esperado.
-      if (String(process_id) === '15') {
-        hardenedLiveInputArgs.push('-http_persistent', '1', '-multiple_requests', '1');
-        sendLog(process_id, 'info', `🔗 CloudFront keep-alive: http_persistent=1 + multiple_requests=1 (anti micro-stall)`);
-      }
+      // Canal 6 URL (ID 15): mantener HTTP simple. En pruebas reales,
+      // -http_persistent + -multiple_requests empeoró los reloads en XUI.
     }
     // Mantener -re como pacing de entrada para HLS live.
     // Quitar -re hace que FFmpeg lea a velocidad CPU, agote segmentos y termine en EOF.
