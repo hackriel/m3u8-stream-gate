@@ -2667,11 +2667,9 @@ app.post('/api/emit', async (req, res) => {
 
     // Saneo de timestamps para evitar audio repetido / saltos hacia atrás
     // y reloads del player por EXT-X-DISCONTINUITY.
-    // Cubre tabs visibles: FUTV URL (11), Teletica URL (13), TDMAS 1 URL (14), FUTV SRT (18),
-    // CANAL 6 URL (15) y también los procesos scrapeados base (1, 3, 4, 5, 17) que comparten
-    // las mismas fuentes. Canal 6 (5/15) sufre saltos de PTS por rotación de tokens Mediatique
-    // y fragmentos CloudFront con discontinuidades — sin este fix, el player recarga seguido.
-    const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '15', '17', '18'].includes(String(process_id));
+    // Canal 6 URL (15) queda fuera: el master oficial ya trae PTS correctos y se
+    // estabiliza fijando programa HLS; regenerar/ignorar DTS le causa catch-up A/V.
+    const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '17', '18'].includes(String(process_id));
     const fflags = isHlsTimestampFix
       ? '+genpts+discardcorrupt+igndts'
       : (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
