@@ -2860,13 +2860,6 @@ app.post('/api/emit', async (req, res) => {
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
         '-rtmp_live', 'live',
-        // Canal 6 URL (ID 15): suavizar salida RTMP para que xui no vea micro-gaps.
-        // muxdelay/muxpreload=0 → no acumula buffer extra que cause saltos al vaciar.
-        // flush_packets=1 → cada paquete sale inmediatamente, evita ráfagas que xui
-        // interpreta como discontinuidad en el lado HLS re-empaquetado.
-        ...(String(process_id) === '15'
-          ? ['-muxdelay', '0', '-muxpreload', '0', '-flush_packets', '1']
-          : []),
         target_rtmp,
       );
     }
