@@ -909,7 +909,10 @@ setTimeout(() => updateProxyHealth().catch(() => {}), 3_000);
 const MANUAL_URL_PROCESSES = new Set(['0', '5', '10', '15']);
 
 // Fuentes estables (watchdogs tolerantes + recovery lento) - canales con CDN fijo
-const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10', '15']);
+// ID 19 (RANDOM Disney 7) incluido: usa la misma URL/CDN que Disney 7 (ID 0),
+// necesita el mismo analyzeduration=3s/probesize=2MB para parsear correctamente
+// HLS multi-variante (TUDN, etc.).
+const STABLE_SOURCE_PROCESSES = new Set(['0', '5', '10', '15', '19']);
 // Fuentes que usan -re (lectura a tasa nativa) — TODOS los canales lo necesitan
 // Sin -re, FFmpeg lee a velocidad CPU (70-100fps), agota los segmentos HLS y causa EOF prematuro
 const RE_FLAG_PROCESSES = new Set(['0', '1', '3', '4', '5', '6', '10', '11', '13', '14', '15']);
