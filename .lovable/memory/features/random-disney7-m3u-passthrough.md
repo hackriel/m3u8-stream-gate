@@ -14,6 +14,8 @@ Nuevo canal (ID 19) "RANDOM Disney 7" que recibe un archivo `.m3u` con `#EXTVLCO
 ## Backend (`server.js`)
 - `/api/emit` acepta: `passthrough`, `passthrough_mode`, `extra_headers`, `referer`, `user_agent`.
 - `passthrough_mode` ∈ {`rawvideo` (default UI), `copy`, `smart`, `transcode`}. Compat: `passthrough:true` sin mode → `rawvideo` para ID 19, `copy` para otros.
+- **UI envía `passthrough_mode: 'transcode'`** (Apr 2026) — perfil idéntico a Disney 7 ID 0 (libx264 720p CBR 2000k + AAC 128k). Resuelve "video crudo no va bien en XUI/IPTV" cuando el origen tiene GOP irregular o cambia perfil H.264.
+- ID 19 incluido en `STABLE_SOURCE_PROCESSES` para usar `analyzeduration=3s/probesize=2MB` (mismo que ID 0). Sin esto, HLS multi-variante (TUDN) seleccionaba mal el programa.
   - **`rawvideo`** (ÚNICO modo expuesto en UI desde Apr 2026): `-c:v copy` + `-c:a aac -b:a 128k -ar 48000 -ac 2 -aac_coder twoloop`. Resuelve "video sin audio" en XUI/IPTV Smarters Pro cuando origen viene en AC3/EAC3/MP2/HE-AACv2.
   - `copy` (legacy): `-c copy -bsf:a aac_adtstoasc`. Requiere AAC en origen.
   - `smart` (legacy): `detectSourceCodecs()` per-stream.
