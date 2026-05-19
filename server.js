@@ -5259,11 +5259,10 @@ app.post('/api/always-on', async (req, res) => {
     if (!supabase) {
       return res.status(500).json({ error: 'Base de datos no disponible' });
     }
-    if (String(process_id) === '12' || String(process_id) === '16' || String(process_id) === '18') {
-      const labels = { '12': 'TIGO SRT', '16': 'DISNEY 7 SRT', '18': 'FUTV SRT' };
-      const label = labels[String(process_id)];
-      return res.status(400).json({ error: `${label} no admite "Encendido siempre" (depende de OBS local)` });
-    }
+    // Nota: TIGO SRT (12), DISNEY 7 SRT (16) y FUTV SRT (18) SÍ admiten "Encendido siempre".
+    // El listener SRT ya se auto-arranca al boot; activar always_on permite que, si el
+    // proceso cae en caliente, el watchdog/recovery lo vuelva a levantar sin intervención.
+    // Quedan excluidos del refresh horario 00:00/05:00 (no tienen URL que refrescar).
     // FUTV ALTERNO (17): solo permitir always_on si tiene player_url guardada
     if (String(process_id) === '17' && enabled) {
       const { data: row17 } = await supabase
