@@ -1677,8 +1677,8 @@ export default function EmisorM3U8Panel() {
               )}
             </div>
 
-            {/* Always-On Toggle (excluye TIGO SRT, DISNEY 7 SRT y FUTV SRT que dependen de OBS local) */}
-            {processIndex !== FILE_UPLOAD_INDEX && !OBS_INGEST_PROCESSES.has(processIndex) && (
+            {/* Always-On Toggle (excluye solo subida de archivo) */}
+            {processIndex !== FILE_UPLOAD_INDEX && (
               <div className="flex items-center gap-3 mt-4 p-3 rounded-xl bg-card/50 border border-primary/30">
                 <Switch
                   checked={process.alwaysOn}
@@ -1686,7 +1686,11 @@ export default function EmisorM3U8Panel() {
                 />
                 <div className="flex flex-col">
                   <span className="text-sm font-medium text-foreground">🔁 Encendido siempre</span>
-                  <span className="text-xs text-muted-foreground">Auto-relanza tras reinicios y refresca URL a las 12:00 AM y 5:00 AM (hora CR)</span>
+                  <span className="text-xs text-muted-foreground">
+                    {OBS_INGEST_PROCESSES.has(processIndex)
+                      ? 'Auto-relanza el listener SRT si cae (sin refresh horario; espera la señal del encoder local)'
+                      : 'Auto-relanza tras reinicios y refresca URL a las 12:00 AM y 5:00 AM (hora CR)'}
+                  </span>
                 </div>
               </div>
             )}
