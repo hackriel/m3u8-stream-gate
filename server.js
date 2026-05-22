@@ -217,22 +217,52 @@ app.use('/live', (req, res, next) => {
 }, express.static(HLS_OUTPUT_DIR));
 
 // ───────────────────────────────────────────────────────────────────
-// CANAL 6 TS — Endpoint de passthrough MPEG-TS sobre HTTP (chunked)
-// Toma el HLS local que ya genera CANAL 6 URL (ID 15) en
-// /live/Canal6/playlist.m3u8 y lo re-emite como UN solo stream MPEG-TS
-// continuo (sin re-segmentar, sin manifest). Esto elimina los reloads
-// y micro-pausas que sufren Smarters/TiviMate cuando consumen HLS:
-// el cliente abre 1 sola conexión TCP y recibe bytes infinitos.
-// Requiere que CANAL 6 URL (tab 15) esté emitiendo activamente.
-// Cada cliente que conecte arranca su propio ffmpeg -c copy (sin CPU)
-// y se mata al desconectar. Ideal para IPTV Smarters Pro, TiviMate, VLC.
+// CANAL 6 TS — Endpoint INDEPENDIENTE de passthrough MPEG-TS sobre HTTP
+// Tab autónomo: el usuario pega una URL HLS (.m3u8) de origen y presiona
+// Emitir. El servidor guarda la URL + estado activo en disco. Cuando un
+// cliente IPTV (Smarters/TiviMate/VLC) abre /canal6.ts, se levanta un
+// ffmpeg que tira de la URL guardada y emite UN MPEG-TS continuo (sin
+// re-segmentar, sin manifest). Independiente de CANAL 6 URL.
 // ───────────────────────────────────────────────────────────────────
+const CANAL6_TS_STATE_FILE = path.join(__dirname, 'canal6-ts-state.json');
+let canal6TsState = { sourceUrl: '', enabled: false };
+try {
+  if (fs.existsSync(CANAL6_TS_STATE_FILE)) {
+    canal6TsState = { ...canal6TsState, ...JSON.parse(fs.readFileSync(CANAL6_TS_STATE_FILE, 'utf8')) };
+    console.log(`[canal6.ts] estado restaurado: enabled=${canal6TsState.enabled} url=${canal6TsState.sourceUrl ? 'set' : 'empty'}`);
+  }
+} catch (e) {
+  console.warn('[canal6.ts] no se pudo leer estado:', e.message);
+}
+const saveCanal6TsState = () => {
+  try { fs.writeFileSync(CANAL6_TS_STATE_FILE, JSON.stringify(canal6TsState, null, 2)); } catch (e) { console.warn('[canal6.ts] save state:', e.message); }
+};
+
+app.get('/canal6-ts/status', (req, res) => {
+  res.json({ ...canal6TsState });
+});
+app.post('/canal6-ts/start', (req, res) => {
+  const url = (req.body?.url || '').trim();
+  if (!url || !/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ ok: false, error: 'URL inválida. Debe ser http(s)://...' });
+  }
+  canal6TsState = { sourceUrl: url, enabled: true };
+  saveCanal6TsState();
+  console.log(`[canal6.ts] START url=${url}`);
+  res.json({ ok: true, ...canal6TsState });
+});
+app.post('/canal6-ts/stop', (req, res) => {
+  canal6TsState.enabled = false;
+  saveCanal6TsState();
+  console.log('[canal6.ts] STOP');
+  res.json({ ok: true, ...canal6TsState });
+});
+
 app.get('/canal6.ts', (req, res) => {
-  const sourcePlaylist = path.join(HLS_OUTPUT_DIR, 'Canal6', 'playlist.m3u8');
-  if (!fs.existsSync(sourcePlaylist)) {
+  if (!canal6TsState.enabled || !canal6TsState.sourceUrl) {
     res.status(503)
       .set('Content-Type', 'text/plain; charset=utf-8')
-      .send('Canal 6 TS no disponible: la fuente CANAL 6 URL (tab 15) no está emitiendo.\nActiva el tab "CANAL 6 URL" primero.');
+      .send('Canal 6 TS no disponible: pega la URL fuente y presiona Emitir en el tab Canal 6 TS.');
     return;
   }
 
@@ -243,13 +273,22 @@ app.get('/canal6.ts', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
+  const src = canal6TsState.sourceUrl;
+  const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
   const ffArgs = [
     '-hide_banner',
     '-loglevel', 'error',
+    '-user_agent', ua,
+    '-headers', 'Referer: https://www.canal6.com.ni/\r\nOrigin: https://www.canal6.com.ni\r\n',
+    '-reconnect', '1',
+    '-reconnect_streamed', '1',
+    '-reconnect_on_network_error', '1',
+    '-reconnect_on_http_error', '404,500,502,503,504',
+    '-reconnect_delay_max', '5',
+    '-rw_timeout', '15000000',
     '-fflags', '+genpts+igndts+discardcorrupt',
     '-avoid_negative_ts', 'make_zero',
-    '-re',
-    '-i', `http://127.0.0.1:${PORT}/live/Canal6/playlist.m3u8`,
+    '-i', src,
     '-map', '0:v:0',
     '-map', '0:a:0?',
     '-c', 'copy',
@@ -262,7 +301,7 @@ app.get('/canal6.ts', (req, res) => {
   ];
 
   const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
-  console.log(`[canal6.ts] cliente conectado ${clientIp} → spawn ffmpeg`);
+  console.log(`[canal6.ts] cliente ${clientIp} → spawn ffmpeg src=${src}`);
 
   const ff = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
   let killed = false;
