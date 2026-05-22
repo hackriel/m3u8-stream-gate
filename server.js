@@ -217,6 +217,84 @@ app.use('/live', (req, res, next) => {
 }, express.static(HLS_OUTPUT_DIR));
 
 // ───────────────────────────────────────────────────────────────────
+// CANAL 6 TS — Endpoint de passthrough MPEG-TS sobre HTTP (chunked)
+// Toma el HLS local que ya genera CANAL 6 URL (ID 15) en
+// /live/Canal6/playlist.m3u8 y lo re-emite como UN solo stream MPEG-TS
+// continuo (sin re-segmentar, sin manifest). Esto elimina los reloads
+// y micro-pausas que sufren Smarters/TiviMate cuando consumen HLS:
+// el cliente abre 1 sola conexión TCP y recibe bytes infinitos.
+// Requiere que CANAL 6 URL (tab 15) esté emitiendo activamente.
+// Cada cliente que conecte arranca su propio ffmpeg -c copy (sin CPU)
+// y se mata al desconectar. Ideal para IPTV Smarters Pro, TiviMate, VLC.
+// ───────────────────────────────────────────────────────────────────
+app.get('/canal6.ts', (req, res) => {
+  const sourcePlaylist = path.join(HLS_OUTPUT_DIR, 'Canal6', 'playlist.m3u8');
+  if (!fs.existsSync(sourcePlaylist)) {
+    res.status(503)
+      .set('Content-Type', 'text/plain; charset=utf-8')
+      .send('Canal 6 TS no disponible: la fuente CANAL 6 URL (tab 15) no está emitiendo.\nActiva el tab "CANAL 6 URL" primero.');
+    return;
+  }
+
+  res.setHeader('Content-Type', 'video/mp2t');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  const ffArgs = [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-fflags', '+genpts+igndts+discardcorrupt',
+    '-avoid_negative_ts', 'make_zero',
+    '-re',
+    '-i', `http://127.0.0.1:${PORT}/live/Canal6/playlist.m3u8`,
+    '-map', '0:v:0',
+    '-map', '0:a:0?',
+    '-c', 'copy',
+    '-copyts',
+    '-muxdelay', '0',
+    '-muxpreload', '0',
+    '-f', 'mpegts',
+    '-mpegts_flags', '+resend_headers+initial_discontinuity',
+    'pipe:1'
+  ];
+
+  const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
+  console.log(`[canal6.ts] cliente conectado ${clientIp} → spawn ffmpeg`);
+
+  const ff = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+  let killed = false;
+
+  const cleanup = (reason) => {
+    if (killed) return;
+    killed = true;
+    try { ff.kill('SIGKILL'); } catch (_) {}
+    console.log(`[canal6.ts] cliente ${clientIp} desconectado (${reason})`);
+  };
+
+  ff.stdout.pipe(res, { end: true });
+
+  ff.stderr.on('data', (chunk) => {
+    const msg = chunk.toString();
+    if (msg.trim()) console.error(`[canal6.ts stderr] ${msg.trim().slice(0, 300)}`);
+  });
+
+  ff.on('exit', (code, signal) => {
+    if (!killed) {
+      console.log(`[canal6.ts] ffmpeg salió code=${code} signal=${signal}`);
+      try { res.end(); } catch (_) {}
+    }
+  });
+
+  req.on('close', () => cleanup('req close'));
+  req.on('aborted', () => cleanup('req aborted'));
+  res.on('close', () => cleanup('res close'));
+  res.on('error', () => cleanup('res error'));
+});
+
+// ───────────────────────────────────────────────────────────────────
 // EXT-X-START PATCHER (reduce latencia de arranque ~15s)
 // Cada 1s revisa TODOS los playlist.m3u8 activos y, si no tienen el tag
 // `#EXT-X-START:TIME-OFFSET=0,PRECISE=YES`, lo inyecta justo después de
