@@ -202,6 +202,53 @@ export default function EmisorM3U8Panel() {
   const [canal6TsStatus, setCanal6TsStatus] = useState<{ enabled: boolean; sourceUrl: string }>({ enabled: false, sourceUrl: '' });
   const [canal6TsInput, setCanal6TsInput] = useState<string>('');
   const [canal6TsBusy, setCanal6TsBusy] = useState(false);
+
+  // Polling estado Canal 6 TS
+  useEffect(() => {
+    let cancelled = false;
+    const fetchStatus = async () => {
+      try {
+        const r = await fetch(`${PUBLIC_HLS_BASE_URL}/canal6-ts/status`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled) return;
+        setCanal6TsStatus({ enabled: !!j.enabled, sourceUrl: j.sourceUrl || '' });
+        setCanal6TsInput((prev) => (prev ? prev : (j.sourceUrl || '')));
+      } catch (_) { /* offline */ }
+    };
+    fetchStatus();
+    const id = setInterval(fetchStatus, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  const canal6TsStart = async () => {
+    const url = canal6TsInput.trim();
+    if (!url) { toast.error('Pega la URL fuente .m3u8'); return; }
+    setCanal6TsBusy(true);
+    try {
+      const r = await fetch(`${PUBLIC_HLS_BASE_URL}/canal6-ts/start`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || 'Error');
+      setCanal6TsStatus({ enabled: true, sourceUrl: url });
+      toast.success('Canal 6 TS emitiendo');
+    } catch (e: any) {
+      toast.error(`No se pudo iniciar: ${e.message}`);
+    } finally { setCanal6TsBusy(false); }
+  };
+  const canal6TsStop = async () => {
+    setCanal6TsBusy(true);
+    try {
+      const r = await fetch(`${PUBLIC_HLS_BASE_URL}/canal6-ts/stop`, { method: 'POST' });
+      if (!r.ok) throw new Error('Error');
+      setCanal6TsStatus((s) => ({ ...s, enabled: false }));
+      toast.success('Canal 6 TS detenido');
+    } catch (e: any) {
+      toast.error(`No se pudo detener: ${e.message}`);
+    } finally { setCanal6TsBusy(false); }
+  };
   const [isLoading, setIsLoading] = useState(true);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const wsRef = useRef<WebSocket | null>(null);
