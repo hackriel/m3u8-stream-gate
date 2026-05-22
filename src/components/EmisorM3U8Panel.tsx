@@ -2043,8 +2043,7 @@ export default function EmisorM3U8Panel() {
           <TabsContent key="canal6-ts" value="canal6-ts">
             {(() => {
               const tsUrl = `${PUBLIC_HLS_BASE_URL}/canal6.ts`;
-              const c6 = processes[CANAL6_URL_INDEX];
-              const c6Active = c6?.isEmitiendo;
+              const active = canal6TsStatus.enabled;
               return (
                 <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-broadcast-border/50">
                   <header className="mb-5">
@@ -2055,12 +2054,53 @@ export default function EmisorM3U8Panel() {
                       </span>
                     </h2>
                     <p className="text-sm text-muted-foreground mt-2">
-                      Variante de Canal 6 servida como <b>UN solo stream MPEG-TS continuo</b> sobre HTTP (chunked),
-                      sin manifest HLS ni re-segmentación. Pensada para IPTV Smarters Pro / TiviMate / VLC: el
-                      cliente abre 1 sola conexión TCP y recibe bytes infinitos, eliminando los <i>reloads</i> y
-                      micro-pausas que ocasiona el HLS estricto.
+                      Tab <b>independiente</b>: pega la URL fuente <code>.m3u8</code> de Canal 6 y presiona <b>Emitir</b>.
+                      El servidor entrega <b>UN solo stream MPEG-TS continuo</b> sobre HTTP (chunked), sin manifest
+                      ni re-segmentación. Ideal para IPTV Smarters Pro / TiviMate / VLC: 1 conexión TCP, bytes infinitos,
+                      cero reloads.
                     </p>
                   </header>
+
+                  {/* Input URL fuente + acciones */}
+                  <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
+                    <label className="text-xs text-muted-foreground mb-2 block">URL fuente HLS (.m3u8) de Canal 6:</label>
+                    <textarea
+                      value={canal6TsInput}
+                      onChange={(e) => setCanal6TsInput(e.target.value)}
+                      placeholder="https://d2qsan2ut81n2k.cloudfront.net/live/.../ts:abr.m3u8"
+                      rows={2}
+                      className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 break-all resize-none"
+                    />
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {!active ? (
+                        <button
+                          onClick={canal6TsStart}
+                          disabled={canal6TsBusy || !canal6TsInput.trim()}
+                          className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-all"
+                        >
+                          {canal6TsBusy ? 'Iniciando…' : '▶ Emitir'}
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={canal6TsStop}
+                            disabled={canal6TsBusy}
+                            className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-all"
+                          >
+                            {canal6TsBusy ? 'Deteniendo…' : '■ Detener'}
+                          </button>
+                          <button
+                            onClick={canal6TsStart}
+                            disabled={canal6TsBusy || !canal6TsInput.trim() || canal6TsInput.trim() === canal6TsStatus.sourceUrl}
+                            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-medium transition-all"
+                            title="Actualiza la URL fuente sin detener"
+                          >
+                            ↻ Actualizar URL
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
 
                   <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
                     <p className="text-xs text-muted-foreground mb-2">URL estable para tu reproductor IPTV:</p>
@@ -2078,31 +2118,19 @@ export default function EmisorM3U8Panel() {
                         📋
                       </button>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-3">
-                      💡 Es la misma señal de <b>CANAL 6 URL</b> (tab #{CANAL6_URL_INDEX}), pero entregada como flujo
-                      MPEG-TS continuo. Ideal cuando IPTV Smarters muestra pausas o recargas con la URL <code>.m3u8</code>.
-                    </p>
                   </div>
 
-                  <div className={`rounded-xl p-4 border ${c6Active
+                  <div className={`rounded-xl p-4 border ${active
                     ? 'bg-green-500/10 border-green-500/30 text-green-300'
                     : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>
                     <div className="flex items-center gap-2 font-medium mb-1">
-                      {c6Active ? '🟢 Fuente activa' : '🟡 Fuente inactiva'}
+                      {active ? '🟢 Emitiendo' : '🟡 Detenido'}
                     </div>
                     <p className="text-sm">
-                      {c6Active
-                        ? 'CANAL 6 URL está emitiendo: puedes abrir esta URL en tu IPTV en cualquier momento.'
-                        : 'Para que este endpoint funcione necesitas iniciar primero la emisión en el tab CANAL 6 URL. Sin esa fuente activa, el endpoint responderá 503.'}
+                      {active
+                        ? <>Puedes abrir la URL en tu IPTV. Fuente actual: <code className="break-all">{canal6TsStatus.sourceUrl}</code></>
+                        : 'Pega la URL fuente arriba y presiona Emitir. Sin esto, el endpoint responde 503.'}
                     </p>
-                    {!c6Active && (
-                      <button
-                        onClick={() => setActiveTab(CANAL6_URL_INDEX.toString())}
-                        className="mt-3 px-4 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-sm transition-all border border-amber-500/40"
-                      >
-                        Ir a CANAL 6 URL →
-                      </button>
-                    )}
                   </div>
 
                   <details className="mt-5 bg-card/40 border border-border rounded-xl p-4">
@@ -2110,10 +2138,11 @@ export default function EmisorM3U8Panel() {
                       🔧 ¿Cómo funciona?
                     </summary>
                     <ul className="mt-3 text-sm text-muted-foreground list-disc pl-5 space-y-1">
-                      <li>El servidor lee el HLS local de Canal 6 (<code>/live/Canal6/playlist.m3u8</code>) que ya está generando el tab CANAL 6 URL.</li>
-                      <li>Lo re-emite con FFmpeg en modo <code>-c copy</code> (sin re-encode, sin CPU extra) como <code>mpegts</code> hacia tu cliente.</li>
-                      <li>Cada cliente que conecta arranca su propio FFmpeg ligero y se libera al desconectar.</li>
-                      <li>Cero cambios al pipeline existente: la URL <code>.m3u8</code> tradicional sigue funcionando en paralelo.</li>
+                      <li>Tab 100% independiente: no depende de ningún otro proceso del panel.</li>
+                      <li>La URL fuente y el estado se guardan en disco; sobreviven a reinicios del servidor.</li>
+                      <li>Cuando un cliente IPTV abre <code>/canal6.ts</code>, FFmpeg tira directo de la URL fuente con <code>-c copy</code> (sin re-encode) y entrega <code>mpegts</code> continuo.</li>
+                      <li>Cada cliente conectado arranca su propio FFmpeg y se libera al desconectar.</li>
+                      <li>Si la fuente CloudFront se invalida, basta con pegar la nueva URL y "Actualizar URL".</li>
                     </ul>
                   </details>
                 </div>
