@@ -1955,6 +1955,30 @@ export default function EmisorM3U8Panel() {
                   </TabsTrigger>
                 );
               })}
+              {/* Tab especial: Canal 6 TS (passthrough MPEG-TS sobre HTTP) */}
+              {(() => {
+                const c6Active = processes[CANAL6_URL_INDEX]?.isEmitiendo;
+                return (
+                  <TabsTrigger
+                    key="canal6-ts"
+                    value="canal6-ts"
+                    className={`px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl transition-all duration-200 relative flex-shrink-0 ${
+                      c6Active
+                        ? 'bg-green-500/20 border-2 border-green-500 text-green-400 shadow-lg shadow-green-500/50 hover:bg-green-500/30'
+                        : activeTab === 'canal6-ts'
+                          ? 'bg-amber-600 text-white shadow-lg'
+                          : 'hover:bg-muted/50'
+                    }`}
+                  >
+                    <span className="relative flex items-center justify-center gap-1 sm:gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                      {c6Active && (
+                        <span className="inline-flex h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-green-500 animate-pulse"></span>
+                      )}
+                      Canal 6 TS
+                    </span>
+                  </TabsTrigger>
+                );
+              })()}
             </TabsList>
           </div>
 
@@ -1963,6 +1987,88 @@ export default function EmisorM3U8Panel() {
               {renderProcessTab(i)}
             </TabsContent>
           ))}
+
+          {/* Contenido tab Canal 6 TS */}
+          <TabsContent key="canal6-ts" value="canal6-ts">
+            {(() => {
+              const tsUrl = `${PUBLIC_HLS_BASE_URL}/canal6.ts`;
+              const c6 = processes[CANAL6_URL_INDEX];
+              const c6Active = c6?.isEmitiendo;
+              return (
+                <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-broadcast-border/50">
+                  <header className="mb-5">
+                    <h2 className="text-2xl font-bold text-accent flex items-center gap-2">
+                      📡 Canal 6 TS
+                      <span className="text-xs font-normal px-2 py-1 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                        MPEG-TS passthrough
+                      </span>
+                    </h2>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      Variante de Canal 6 servida como <b>UN solo stream MPEG-TS continuo</b> sobre HTTP (chunked),
+                      sin manifest HLS ni re-segmentación. Pensada para IPTV Smarters Pro / TiviMate / VLC: el
+                      cliente abre 1 sola conexión TCP y recibe bytes infinitos, eliminando los <i>reloads</i> y
+                      micro-pausas que ocasiona el HLS estricto.
+                    </p>
+                  </header>
+
+                  <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
+                    <p className="text-xs text-muted-foreground mb-2">URL estable para tu reproductor IPTV:</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
+                        {tsUrl}
+                      </code>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(tsUrl);
+                          toast.success('URL TS copiada al portapapeles');
+                        }}
+                        className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm transition-all"
+                      >
+                        📋
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-3">
+                      💡 Es la misma señal de <b>CANAL 6 URL</b> (tab #{CANAL6_URL_INDEX}), pero entregada como flujo
+                      MPEG-TS continuo. Ideal cuando IPTV Smarters muestra pausas o recargas con la URL <code>.m3u8</code>.
+                    </p>
+                  </div>
+
+                  <div className={`rounded-xl p-4 border ${c6Active
+                    ? 'bg-green-500/10 border-green-500/30 text-green-300'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>
+                    <div className="flex items-center gap-2 font-medium mb-1">
+                      {c6Active ? '🟢 Fuente activa' : '🟡 Fuente inactiva'}
+                    </div>
+                    <p className="text-sm">
+                      {c6Active
+                        ? 'CANAL 6 URL está emitiendo: puedes abrir esta URL en tu IPTV en cualquier momento.'
+                        : 'Para que este endpoint funcione necesitas iniciar primero la emisión en el tab CANAL 6 URL. Sin esa fuente activa, el endpoint responderá 503.'}
+                    </p>
+                    {!c6Active && (
+                      <button
+                        onClick={() => setActiveTab(CANAL6_URL_INDEX.toString())}
+                        className="mt-3 px-4 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-sm transition-all border border-amber-500/40"
+                      >
+                        Ir a CANAL 6 URL →
+                      </button>
+                    )}
+                  </div>
+
+                  <details className="mt-5 bg-card/40 border border-border rounded-xl p-4">
+                    <summary className="cursor-pointer text-sm font-medium text-accent">
+                      🔧 ¿Cómo funciona?
+                    </summary>
+                    <ul className="mt-3 text-sm text-muted-foreground list-disc pl-5 space-y-1">
+                      <li>El servidor lee el HLS local de Canal 6 (<code>/live/Canal6/playlist.m3u8</code>) que ya está generando el tab CANAL 6 URL.</li>
+                      <li>Lo re-emite con FFmpeg en modo <code>-c copy</code> (sin re-encode, sin CPU extra) como <code>mpegts</code> hacia tu cliente.</li>
+                      <li>Cada cliente que conecta arranca su propio FFmpeg ligero y se libera al desconectar.</li>
+                      <li>Cero cambios al pipeline existente: la URL <code>.m3u8</code> tradicional sigue funcionando en paralelo.</li>
+                    </ul>
+                  </details>
+                </div>
+              );
+            })()}
+          </TabsContent>
         </Tabs>
 
         {/* Panel de Métricas del Servidor */}
