@@ -198,6 +198,10 @@ export default function EmisorM3U8Panel() {
   const logContainerRefs = useRef<Array<HTMLDivElement | null>>([]);
   
   const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem("emisor-active-tab") || "0");
+  // Estado independiente del tab Canal 6 TS (passthrough MPEG-TS)
+  const [canal6TsStatus, setCanal6TsStatus] = useState<{ enabled: boolean; sourceUrl: string }>({ enabled: false, sourceUrl: '' });
+  const [canal6TsInput, setCanal6TsInput] = useState<string>('');
+  const [canal6TsBusy, setCanal6TsBusy] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const wsRef = useRef<WebSocket | null>(null);
