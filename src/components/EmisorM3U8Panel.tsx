@@ -1957,7 +1957,7 @@ export default function EmisorM3U8Panel() {
               })}
               {/* Tab especial: Canal 6 TS (passthrough MPEG-TS sobre HTTP) */}
               {(() => {
-                const c6Active = processes[CANAL6_URL_INDEX]?.isEmitiendo;
+                const c6Active = canal6TsStatus.enabled;
                 return (
                   <TabsTrigger
                     key="canal6-ts"
