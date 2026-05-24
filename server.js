@@ -57,7 +57,7 @@ const upload = multer({
 const app = express();
 const server = createServer(app);
 const PORT = process.env.PORT || 3001;
-const APP_BUILD_MARKER = 'tdmax-lb-params-2026-05-24';
+const APP_BUILD_MARKER = 'tdmax-app-headers-2026-05-24b';
 const TDMAX_LB_PARAM_MODE = 'device-id/access_token/country_code/device-name/device-type';
 
 // WebSocket server para logs en tiempo real
@@ -1321,10 +1321,17 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
     const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?${lbParams.toString()}`;
     
     const lbHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
       'Origin': 'https://www.app.tdmax.com',
       'Referer': 'https://www.app.tdmax.com/',
       'Authorization': `Bearer ${accessToken}`,
+      // Headers del cliente oficial TDMax (mayo 2026). Sin ellos el
+      // loadbalancer responde code 628 "redirect url is null or empty 1".
+      'x-app-name': 'TDMAX',
+      'x-app-platform': 'web',
+      'x-app-version': '3.1.1',
     };
     // Pasar cookies del login al loadbalancer
     if (loginCookieStr) {
