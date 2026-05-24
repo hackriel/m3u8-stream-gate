@@ -1277,8 +1277,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'Origin': 'https://www.tdmax.com',
-        'Referer': 'https://www.tdmax.com/',
+        'Origin': 'https://www.app.tdmax.com',
+        'Referer': 'https://www.app.tdmax.com/',
       },
       body: JSON.stringify({
         username: email.toLowerCase(),
@@ -1308,8 +1308,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
     
     const lbHeaders = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      'Origin': 'https://www.tdmax.com',
-      'Referer': 'https://www.tdmax.com/',
+      'Origin': 'https://www.app.tdmax.com',
+      'Referer': 'https://www.app.tdmax.com/',
       'Authorization': `Bearer ${accessToken}`,
     };
     // Pasar cookies del login al loadbalancer
@@ -1340,6 +1340,12 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
     
     if (!streamUrl) {
       return { url: null, error: 'No se encontró URL de stream en la respuesta' };
+    }
+
+    // Rechazar placeholder VOD ("canal no disponible"): TDMax devuelve cfvod.streann.tech
+    // cuando el canal está fuera de aire o la cuenta no tiene permiso real al live.
+    if (/cfvod\.streann\.tech/i.test(streamUrl)) {
+      return { url: null, error: 'TDMax devolvió placeholder VOD (cfvod.streann.tech) — canal fuera de aire o sin permisos live' };
     }
     
     const cookieCount = allCookieParts.filter(Boolean).length;
@@ -1984,6 +1990,9 @@ const detectSourceCodecs = async (source, httpHeaders = '', userAgent = '', refe
 
 // Endpoint para scraping LOCAL desde el VPS (para que el token se genere con la IP del VPS)
 // Esto es CRÍTICO para canales como Tigo cuyo CDN valida IP del token vs IP del consumidor
+// Rate-limit cap: máx 10 scrapes por canal en ventana de 5 min (evita "loco" como pasó hoy)
+const LOCAL_SCRAPE_RATE_LIMIT = { maxCalls: 10, windowMs: 5 * 60 * 1000 };
+const localScrapeCallLog = new Map(); // channel_id -> [timestamps]
 app.post('/api/local-scrape', async (req, res) => {
   try {
     const { channel_id, process_id, player_url } = req.body;
@@ -1991,7 +2000,20 @@ app.post('/api/local-scrape', async (req, res) => {
     if (!channel_id) {
       return res.status(400).json({ success: false, error: 'Falta channel_id' });
     }
-    
+
+    // Rate-limit por channel_id
+    const now = Date.now();
+    const key = String(channel_id);
+    const recent = (localScrapeCallLog.get(key) || []).filter(t => now - t < LOCAL_SCRAPE_RATE_LIMIT.windowMs);
+    if (recent.length >= LOCAL_SCRAPE_RATE_LIMIT.maxCalls) {
+      const oldestAge = Math.round((now - recent[0]) / 1000);
+      const waitSec = Math.round((LOCAL_SCRAPE_RATE_LIMIT.windowMs - (now - recent[0])) / 1000);
+      sendLog(String(process_id ?? 'system'), 'warn', `🛑 Rate-limit scraping: ${recent.length} intentos en últimos ${oldestAge}s para ${key.substring(0,8)} — espera ${waitSec}s`);
+      return res.status(429).json({ success: false, error: `Demasiados intentos de scraping (máx ${LOCAL_SCRAPE_RATE_LIMIT.maxCalls}/5min). Espera ${waitSec}s.` });
+    }
+    recent.push(now);
+    localScrapeCallLog.set(key, recent);
+
     const channelName = CHANNEL_MAP[process_id]?.channelName || `Canal ${channel_id.substring(0, 8)}`;
     const useProxy = PROXY_PROCESSES.has(String(process_id));
     const result = await scrapeStreamUrlLocal(channel_id, channelName, { useProxy });
