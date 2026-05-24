@@ -1990,6 +1990,9 @@ const detectSourceCodecs = async (source, httpHeaders = '', userAgent = '', refe
 
 // Endpoint para scraping LOCAL desde el VPS (para que el token se genere con la IP del VPS)
 // Esto es CRÍTICO para canales como Tigo cuyo CDN valida IP del token vs IP del consumidor
+// Rate-limit cap: máx 10 scrapes por canal en ventana de 5 min (evita "loco" como pasó hoy)
+const LOCAL_SCRAPE_RATE_LIMIT = { maxCalls: 10, windowMs: 5 * 60 * 1000 };
+const localScrapeCallLog = new Map(); // channel_id -> [timestamps]
 app.post('/api/local-scrape', async (req, res) => {
   try {
     const { channel_id, process_id, player_url } = req.body;
@@ -1997,7 +2000,20 @@ app.post('/api/local-scrape', async (req, res) => {
     if (!channel_id) {
       return res.status(400).json({ success: false, error: 'Falta channel_id' });
     }
-    
+
+    // Rate-limit por channel_id
+    const now = Date.now();
+    const key = String(channel_id);
+    const recent = (localScrapeCallLog.get(key) || []).filter(t => now - t < LOCAL_SCRAPE_RATE_LIMIT.windowMs);
+    if (recent.length >= LOCAL_SCRAPE_RATE_LIMIT.maxCalls) {
+      const oldestAge = Math.round((now - recent[0]) / 1000);
+      const waitSec = Math.round((LOCAL_SCRAPE_RATE_LIMIT.windowMs - (now - recent[0])) / 1000);
+      sendLog(String(process_id ?? 'system'), 'warn', `🛑 Rate-limit scraping: ${recent.length} intentos en últimos ${oldestAge}s para ${key.substring(0,8)} — espera ${waitSec}s`);
+      return res.status(429).json({ success: false, error: `Demasiados intentos de scraping (máx ${LOCAL_SCRAPE_RATE_LIMIT.maxCalls}/5min). Espera ${waitSec}s.` });
+    }
+    recent.push(now);
+    localScrapeCallLog.set(key, recent);
+
     const channelName = CHANNEL_MAP[process_id]?.channelName || `Canal ${channel_id.substring(0, 8)}`;
     const useProxy = PROXY_PROCESSES.has(String(process_id));
     const result = await scrapeStreamUrlLocal(channel_id, channelName, { useProxy });
