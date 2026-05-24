@@ -1304,7 +1304,19 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
     sendLog('system', 'info', `✅ Login exitoso para ${channelName}${loginCookies.length > 0 ? ` (${loginCookies.length} cookies capturadas)` : ''}, obteniendo stream URL...`);
     
     // Paso 2: Obtener URL del stream — pasar cookies del login y capturar nuevas
-    const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?r=${STREANN_RESELLER_ID}&deviceId=${FIXED_DEVICE_ID}&accessToken=${encodeURIComponent(accessToken)}&doNotUseRedirect=true&countryCode=CR&deviceType=web&appType=web`;
+    // TDMax cambió el contrato del loadbalancer en mayo 2026: ahora valida los
+    // nombres exactos usados por su web app (`device-id`, `access_token`, etc.).
+    // Los nombres anteriores camelCase devuelven code 628: "redirect url is null".
+    const lbParams = new URLSearchParams({
+      r: STREANN_RESELLER_ID,
+      'device-id': FIXED_DEVICE_ID,
+      access_token: accessToken,
+      country_code: 'CR',
+      doNotUseRedirect: 'true',
+      'device-name': 'web',
+      'device-type': 'web',
+    });
+    const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?${lbParams.toString()}`;
     
     const lbHeaders = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -1342,10 +1354,10 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
       return { url: null, error: 'No se encontró URL de stream en la respuesta' };
     }
 
-    // Rechazar placeholder VOD ("canal no disponible"): TDMax devuelve cfvod.streann.tech
-    // cuando el canal está fuera de aire o la cuenta no tiene permiso real al live.
-    if (/cfvod\.streann\.tech/i.test(streamUrl)) {
-      return { url: null, error: 'TDMax devolvió placeholder VOD (cfvod.streann.tech) — canal fuera de aire o sin permisos live' };
+    // Rechazar placeholders/VOD ("canal no disponible") en vez de aceptarlos
+    // como señal live. TDMax puede devolver dominios o rutas de slate/offline.
+    if (/(cfvod\.streann\.tech|isVodPlaylist=true|not[_-]?available|unavailable|offline|placeholder|slate|barker)/i.test(streamUrl)) {
+      return { url: null, error: `TDMax devolvió placeholder/VOD en lugar de señal live: ${streamUrl.substring(0, 140)}` };
     }
     
     const cookieCount = allCookieParts.filter(Boolean).length;
