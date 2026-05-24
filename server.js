@@ -5076,6 +5076,8 @@ app.get('/api/log-snapshots/:processId', async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     healthy: true,
+    build: APP_BUILD_MARKER,
+    tdmax_lb_params: TDMAX_LB_PARAM_MODE,
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     timestamp: new Date().toISOString()
