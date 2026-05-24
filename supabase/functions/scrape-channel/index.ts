@@ -18,8 +18,8 @@ const CHANNEL_MAP: Record<string, string> = {
 
 const BROWSER_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Origin': 'https://www.tdmax.com',
-  'Referer': 'https://www.tdmax.com/',
+  'Origin': 'https://www.app.tdmax.com',
+  'Referer': 'https://www.app.tdmax.com/',
 };
 
 // Login and return accessToken + deviceId
@@ -76,6 +76,11 @@ async function getStreamUrl(channelId: string, accessToken: string, deviceId: st
 
   if (!streamUrl) {
     throw new Error('No se encontró URL de stream');
+  }
+
+  // Rechazar placeholder VOD ("canal no disponible")
+  if (/cfvod\.streann\.tech/i.test(streamUrl)) {
+    throw new Error('TDMax devolvió placeholder VOD (cfvod.streann.tech) — canal fuera de aire o sin permisos live');
   }
 
   return streamUrl;
