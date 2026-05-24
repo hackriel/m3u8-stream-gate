@@ -57,7 +57,7 @@ const upload = multer({
 const app = express();
 const server = createServer(app);
 const PORT = process.env.PORT || 3001;
-const APP_BUILD_MARKER = 'tdmax-lb-params-2026-05-24';
+const APP_BUILD_MARKER = 'tdmax-app-headers-2026-05-24b';
 const TDMAX_LB_PARAM_MODE = 'device-id/access_token/country_code/device-name/device-type';
 
 // WebSocket server para logs en tiempo real
