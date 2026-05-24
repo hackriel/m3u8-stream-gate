@@ -1277,8 +1277,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'Origin': 'https://www.tdmax.com',
-        'Referer': 'https://www.tdmax.com/',
+        'Origin': 'https://www.app.tdmax.com',
+        'Referer': 'https://www.app.tdmax.com/',
       },
       body: JSON.stringify({
         username: email.toLowerCase(),
@@ -1308,8 +1308,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
     
     const lbHeaders = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      'Origin': 'https://www.tdmax.com',
-      'Referer': 'https://www.tdmax.com/',
+      'Origin': 'https://www.app.tdmax.com',
+      'Referer': 'https://www.app.tdmax.com/',
       'Authorization': `Bearer ${accessToken}`,
     };
     // Pasar cookies del login al loadbalancer
@@ -1340,6 +1340,12 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
     
     if (!streamUrl) {
       return { url: null, error: 'No se encontró URL de stream en la respuesta' };
+    }
+
+    // Rechazar placeholder VOD ("canal no disponible"): TDMax devuelve cfvod.streann.tech
+    // cuando el canal está fuera de aire o la cuenta no tiene permiso real al live.
+    if (/cfvod\.streann\.tech/i.test(streamUrl)) {
+      return { url: null, error: 'TDMax devolvió placeholder VOD (cfvod.streann.tech) — canal fuera de aire o sin permisos live' };
     }
     
     const cookieCount = allCookieParts.filter(Boolean).length;
