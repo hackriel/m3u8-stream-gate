@@ -94,6 +94,14 @@ async function getStreamUrl(channelId: string, accessToken: string, deviceId: st
     throw new Error(`TDMax devolvió placeholder/VOD en lugar de señal live: ${streamUrl.substring(0, 140)}`);
   }
 
+  const verifyResp = await fetch(streamUrl, {
+    headers: { ...BROWSER_HEADERS },
+  });
+  const verifyText = await verifyResp.text();
+  if (!verifyResp.ok || !verifyText.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(verifyText)) {
+    throw new Error(`TDMax devolvió URL no-live/no válida: HTTP ${verifyResp.status}`);
+  }
+
   return streamUrl;
 }
 
