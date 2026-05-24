@@ -57,7 +57,18 @@ async function loginAndGetToken(email: string, password: string): Promise<{ acce
 
 // Use an existing token to get stream URL for a channel
 async function getStreamUrl(channelId: string, accessToken: string, deviceId: string): Promise<string> {
-  const lbUrl = `${BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?r=${RESELLER_ID}&deviceId=${deviceId}&accessToken=${encodeURIComponent(accessToken)}&doNotUseRedirect=true&countryCode=CR&deviceType=web&appType=web`;
+  // TDMax web app now uses dashed/snake_case query params. The old camelCase
+  // names can return code 628: "redirect url is null or empty".
+  const lbParams = new URLSearchParams({
+    r: RESELLER_ID,
+    'device-id': deviceId,
+    access_token: accessToken,
+    country_code: 'CR',
+    doNotUseRedirect: 'true',
+    'device-name': 'web',
+    'device-type': 'web',
+  });
+  const lbUrl = `${BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?${lbParams.toString()}`;
 
   const lbResp = await fetch(lbUrl, {
     headers: {
@@ -78,9 +89,9 @@ async function getStreamUrl(channelId: string, accessToken: string, deviceId: st
     throw new Error('No se encontró URL de stream');
   }
 
-  // Rechazar placeholder VOD ("canal no disponible")
-  if (/cfvod\.streann\.tech/i.test(streamUrl)) {
-    throw new Error('TDMax devolvió placeholder VOD (cfvod.streann.tech) — canal fuera de aire o sin permisos live');
+  // Rechazar placeholder/VOD ("canal no disponible")
+  if (/(cfvod\.streann\.tech|isVodPlaylist=true|not[_-]?available|unavailable|offline|placeholder|slate|barker)/i.test(streamUrl)) {
+    throw new Error(`TDMax devolvió placeholder/VOD en lugar de señal live: ${streamUrl.substring(0, 140)}`);
   }
 
   return streamUrl;
