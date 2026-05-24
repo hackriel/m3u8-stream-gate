@@ -3881,20 +3881,13 @@ app.post('/api/emit', async (req, res) => {
               failure_details: `Demasiadas caídas consecutivas (${CIRCUIT_BREAKER_MAX_FAILURES} en ${CIRCUIT_BREAKER_WINDOW_MS / 60000} min). Reiniciar manualmente.`
             }).eq('id', parseInt(process_id));
           }
-          if (CHANNEL_MAP[process_id] && await isAlwaysOnScrapedProcess()) {
-            const retryDelayMs = 5 * 60 * 1000;
-            sendLog(process_id, 'warn', `🟢 Encendido siempre activo: circuito pausado temporalmente; reintentando recovery en ${retryDelayMs / 60000} min`);
-            failureTimestamps.delete(String(process_id));
-            recoveryAttempts.set(process_id, 0);
-            setTimeout(() => {
-              if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) return;
-              enqueueRecovery(process_id, async () => {
-                const { channelId, channelName } = CHANNEL_MAP[process_id];
-                await autoRecoverChannel(process_id, channelId, channelName);
-              });
-            }, retryDelayMs);
-          }
-          // Sin always_on, no hacer recovery y dejar el proceso muerto para evitar saturación.
+          // No reintentar automáticamente aunque esté "Encendido siempre": cuando TDMax
+          // cambia login/loadbalancer, cada relanzamiento vuelve a fallar y puede disparar
+          // cientos de scrapes. El usuario debe revisar y arrancar manualmente.
+          autoRecoveryInProgress.set(String(process_id), false);
+          quickRetryState.delete(String(process_id));
+          recoveryAttempts.set(String(process_id), 0);
+          // No hacer recovery y dejar el proceso muerto para evitar saturación.
         } else {
         
         // MEJORA #2: Retry con misma URL antes de recovery completo
