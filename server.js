@@ -57,6 +57,8 @@ const upload = multer({
 const app = express();
 const server = createServer(app);
 const PORT = process.env.PORT || 3001;
+const APP_BUILD_MARKER = 'tdmax-lb-params-2026-05-24';
+const TDMAX_LB_PARAM_MODE = 'device-id/access_token/country_code/device-name/device-type';
 
 // WebSocket server para logs en tiempo real
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -1304,7 +1306,19 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
     sendLog('system', 'info', `✅ Login exitoso para ${channelName}${loginCookies.length > 0 ? ` (${loginCookies.length} cookies capturadas)` : ''}, obteniendo stream URL...`);
     
     // Paso 2: Obtener URL del stream — pasar cookies del login y capturar nuevas
-    const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?r=${STREANN_RESELLER_ID}&deviceId=${FIXED_DEVICE_ID}&accessToken=${encodeURIComponent(accessToken)}&doNotUseRedirect=true&countryCode=CR&deviceType=web&appType=web`;
+    // TDMax cambió el contrato del loadbalancer en mayo 2026: ahora valida los
+    // nombres exactos usados por su web app (`device-id`, `access_token`, etc.).
+    // Los nombres anteriores camelCase devuelven code 628: "redirect url is null".
+    const lbParams = new URLSearchParams({
+      r: STREANN_RESELLER_ID,
+      'device-id': FIXED_DEVICE_ID,
+      access_token: accessToken,
+      country_code: 'CR',
+      doNotUseRedirect: 'true',
+      'device-name': 'web',
+      'device-type': 'web',
+    });
+    const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?${lbParams.toString()}`;
     
     const lbHeaders = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -1342,10 +1356,24 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
       return { url: null, error: 'No se encontró URL de stream en la respuesta' };
     }
 
-    // Rechazar placeholder VOD ("canal no disponible"): TDMax devuelve cfvod.streann.tech
-    // cuando el canal está fuera de aire o la cuenta no tiene permiso real al live.
-    if (/cfvod\.streann\.tech/i.test(streamUrl)) {
-      return { url: null, error: 'TDMax devolvió placeholder VOD (cfvod.streann.tech) — canal fuera de aire o sin permisos live' };
+    // Rechazar placeholders/VOD ("canal no disponible") en vez de aceptarlos
+    // como señal live. TDMax puede devolver dominios o rutas de slate/offline.
+    if (/(cfvod\.streann\.tech|isVodPlaylist=true|not[_-]?available|unavailable|offline|placeholder|slate|barker)/i.test(streamUrl)) {
+      return { url: null, error: `TDMax devolvió placeholder/VOD en lugar de señal live: ${streamUrl.substring(0, 140)}` };
+    }
+
+    // Validación desde el mismo VPS antes de entregar la URL: si TDMax/Teletica
+    // responde HTML/Forbidden o una playlist VOD terminada, no la aceptamos.
+    const verifyResp = await fetchWithOptionalProxy(streamUrl, {
+      headers: {
+        'User-Agent': lbHeaders['User-Agent'],
+        ...(allCookieStr ? { Cookie: allCookieStr } : {}),
+      },
+      signal: AbortSignal.timeout(10000),
+    }, useProxy);
+    const verifyText = await verifyResp.text();
+    if (!verifyResp.ok || !verifyText.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(verifyText)) {
+      return { url: null, error: `TDMax devolvió URL no-live/no válida para ${channelName}: HTTP ${verifyResp.status}` };
     }
     
     const cookieCount = allCookieParts.filter(Boolean).length;
@@ -3867,20 +3895,13 @@ app.post('/api/emit', async (req, res) => {
               failure_details: `Demasiadas caídas consecutivas (${CIRCUIT_BREAKER_MAX_FAILURES} en ${CIRCUIT_BREAKER_WINDOW_MS / 60000} min). Reiniciar manualmente.`
             }).eq('id', parseInt(process_id));
           }
-          if (CHANNEL_MAP[process_id] && await isAlwaysOnScrapedProcess()) {
-            const retryDelayMs = 5 * 60 * 1000;
-            sendLog(process_id, 'warn', `🟢 Encendido siempre activo: circuito pausado temporalmente; reintentando recovery en ${retryDelayMs / 60000} min`);
-            failureTimestamps.delete(String(process_id));
-            recoveryAttempts.set(process_id, 0);
-            setTimeout(() => {
-              if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) return;
-              enqueueRecovery(process_id, async () => {
-                const { channelId, channelName } = CHANNEL_MAP[process_id];
-                await autoRecoverChannel(process_id, channelId, channelName);
-              });
-            }, retryDelayMs);
-          }
-          // Sin always_on, no hacer recovery y dejar el proceso muerto para evitar saturación.
+          // No reintentar automáticamente aunque esté "Encendido siempre": cuando TDMax
+          // cambia login/loadbalancer, cada relanzamiento vuelve a fallar y puede disparar
+          // cientos de scrapes. El usuario debe revisar y arrancar manualmente.
+          autoRecoveryInProgress.set(String(process_id), false);
+          quickRetryState.delete(String(process_id));
+          recoveryAttempts.set(String(process_id), 0);
+          // No hacer recovery y dejar el proceso muerto para evitar saturación.
         } else {
         
         // MEJORA #2: Retry con misma URL antes de recovery completo
@@ -5062,6 +5083,8 @@ app.get('/api/log-snapshots/:processId', async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     healthy: true,
+    build: APP_BUILD_MARKER,
+    tdmax_lb_params: TDMAX_LB_PARAM_MODE,
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     timestamp: new Date().toISOString()
