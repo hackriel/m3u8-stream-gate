@@ -17,9 +17,16 @@ const CHANNEL_MAP: Record<string, string> = {
 };
 
 const BROWSER_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
   'Origin': 'https://www.app.tdmax.com',
   'Referer': 'https://www.app.tdmax.com/',
+  // Required by TDMax loadbalancer since May 2026. Without these the
+  // service responds code 628 "redirect url is null or empty 1".
+  'x-app-name': 'TDMAX',
+  'x-app-platform': 'web',
+  'x-app-version': '3.1.1',
 };
 
 // Login and return accessToken + deviceId
