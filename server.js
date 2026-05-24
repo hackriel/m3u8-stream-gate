@@ -1361,6 +1361,20 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
     if (/(cfvod\.streann\.tech|isVodPlaylist=true|not[_-]?available|unavailable|offline|placeholder|slate|barker)/i.test(streamUrl)) {
       return { url: null, error: `TDMax devolvió placeholder/VOD en lugar de señal live: ${streamUrl.substring(0, 140)}` };
     }
+
+    // Validación desde el mismo VPS antes de entregar la URL: si TDMax/Teletica
+    // responde HTML/Forbidden o una playlist VOD terminada, no la aceptamos.
+    const verifyResp = await fetchWithOptionalProxy(streamUrl, {
+      headers: {
+        'User-Agent': lbHeaders['User-Agent'],
+        ...(allCookieStr ? { Cookie: allCookieStr } : {}),
+      },
+      signal: AbortSignal.timeout(10000),
+    }, useProxy);
+    const verifyText = await verifyResp.text();
+    if (!verifyResp.ok || !verifyText.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(verifyText)) {
+      return { url: null, error: `TDMax devolvió URL no-live/no válida para ${channelName}: HTTP ${verifyResp.status}` };
+    }
     
     const cookieCount = allCookieParts.filter(Boolean).length;
     sendLog('system', 'success', `✅ URL LOCAL obtenida para ${channelName}${cookieCount > 0 ? ` (${cookieCount} cookies para CDN)` : ''}`);
