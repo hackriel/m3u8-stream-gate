@@ -1698,7 +1698,8 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       return;
     }
 
-    rememberStreamState(process_id, { source_m3u8: newUrl, target_rtmp: targetRtmp });
+    const recoveryOutputProfile = rememberedState?.output_profile || getStoredOutputProfile(process_id);
+    rememberStreamState(process_id, { source_m3u8: newUrl, target_rtmp: targetRtmp, output_profile: recoveryOutputProfile });
     
     if (supabase) {
       await supabase
@@ -1717,6 +1718,7 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
         source_m3u8: newUrl,
         target_rtmp: targetRtmp || 'hls-local',
         process_id: process_id,
+        output_profile: recoveryOutputProfile,
         is_recovery: true
       })
     });
