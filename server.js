@@ -2049,6 +2049,85 @@ const detectSourceCodecs = async (source, httpHeaders = '', userAgent = '', refe
   });
 };
 
+// Detecta el framerate REAL de la fuente vía ffprobe y lo mapea al estándar
+// más cercano para evitar drift / frames duplicados. Devuelve null si falla
+// (el caller debe usar su fallback). Acepta headers HTTP igual que detectSourceCodecs.
+//
+// Mapeo a fps "limpios":
+//   23.5–24.5  → si decimal ~0.976 → 23.976, si entero → 24
+//   24.5–25.5  → 25
+//   29–30.5    → si ~0.97 → 29.97, si entero → 30
+//   49–50.5    → 50
+//   58–60.5    → si ~0.94 → 59.94, si entero → 60
+const detectSourceFps = async (source, httpHeaders = '', userAgent = '', referer = '') => {
+  return new Promise((resolve) => {
+    const args = ['-v', 'error'];
+    if (userAgent) args.push('-user_agent', userAgent);
+    if (referer) args.push('-referer', referer);
+    if (httpHeaders) args.push('-headers', httpHeaders);
+    args.push(
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=r_frame_rate,avg_frame_rate',
+      '-of', 'json',
+      '-analyzeduration', '3000000',
+      '-probesize', '2000000',
+      source
+    );
+    const probe = spawn('ffprobe', args);
+    let output = '';
+    let done = false;
+    const finish = (result) => { if (done) return; done = true; resolve(result); };
+    probe.stdout.on('data', d => { output += d.toString(); });
+    probe.on('close', () => {
+      try {
+        const data = JSON.parse(output);
+        const s = (data.streams || [])[0] || {};
+        const parseFrac = (str) => {
+          if (!str || typeof str !== 'string' || str === '0/0') return 0;
+          const [n, d] = str.split('/').map(Number);
+          if (!n || !d) return 0;
+          return n / d;
+        };
+        const r = parseFrac(s.r_frame_rate);
+        const avg = parseFrac(s.avg_frame_rate);
+        // Preferimos avg_frame_rate (real), pero si es 0 o muy raro caemos a r_frame_rate.
+        let raw = avg > 0 ? avg : r;
+        if (!raw || !isFinite(raw) || raw <= 0 || raw > 120) {
+          return finish({ rawFps: 0, fps: null, gop: null });
+        }
+        // Mapear a estándar más cercano.
+        let fps = null;
+        if (raw >= 23 && raw <= 24.4) {
+          fps = raw < 23.95 ? 23.976 : 24;
+        } else if (raw > 24.4 && raw <= 25.5) {
+          fps = 25;
+        } else if (raw > 25.5 && raw <= 28.9) {
+          // valores raros (ej. 27fps) — redondeo simple
+          fps = Math.round(raw);
+        } else if (raw > 28.9 && raw <= 30.5) {
+          fps = raw < 29.99 ? 29.97 : 30;
+        } else if (raw > 30.5 && raw <= 49.5) {
+          fps = Math.round(raw);
+        } else if (raw > 49.5 && raw <= 50.5) {
+          fps = 50;
+        } else if (raw > 50.5 && raw <= 60.5) {
+          fps = raw < 59.99 ? 59.94 : 60;
+        } else {
+          fps = Math.round(raw);
+        }
+        // GOP = 2 segundos al fps elegido.
+        const gop = +(fps * 2).toFixed(3);
+        finish({ rawFps: +raw.toFixed(3), fps, gop });
+      } catch (_) {
+        finish({ rawFps: 0, fps: null, gop: null });
+      }
+    });
+    probe.on('error', () => finish({ rawFps: 0, fps: null, gop: null }));
+    // Timeout duro: 7s. Fuentes HTTP normales responden en <2s; si cuelga, seguimos con fallback.
+    setTimeout(() => { try { probe.kill('SIGKILL'); } catch {} finish({ rawFps: 0, fps: null, gop: null }); }, 7000);
+  });
+};
+
 // Endpoint para scraping LOCAL desde el VPS (para que el token se genere con la IP del VPS)
 // Esto es CRÍTICO para canales como Tigo cuyo CDN valida IP del token vs IP del consumidor
 // Rate-limit cap: máx 10 scrapes por canal en ventana de 5 min (evita "loco" como pasó hoy)
@@ -2863,8 +2942,33 @@ app.post('/api/emit', async (req, res) => {
     // Procesos CFR: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
     // Esto evita micro-jitter por forzar 30fps en una fuente 29.97fps (frame duplicado cada ~33s)
     const isCfrOutput = CFR_OUTPUT_PROCESSES.has(String(process_id));
-    const outputFps = isCfrOutput ? '29.97' : '30';
-    const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
+    let outputFps = isCfrOutput ? '29.97' : '30';
+    let gopSize  = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
+
+    // 🎯 Auto-detección de FPS de la fuente vía ffprobe.
+    // Mapea al estándar limpio más cercano (23.976/24/25/29.97/30/50/59.94/60)
+    // para que la salida coincida con el ingreso y evitemos frames duplicados/perdidos.
+    // Solo aplica a fuentes HTTP/HTTPS reales (no SRT/RTMP/passthrough/Tigo proxy).
+    const canProbeFps = !isPassthroughBlock
+      && !isSrtIngest
+      && !isRtmpInputSource
+      && !isTigoHdmiProcess
+      && typeof inputSourceUrl === 'string'
+      && /^https?:\/\//i.test(inputSourceUrl);
+    if (canProbeFps) {
+      try {
+        const probeRes = await detectSourceFps(inputSourceUrl, combinedHeaders, sessionUserAgent, refererDomain);
+        if (probeRes && probeRes.fps) {
+          outputFps = String(probeRes.fps);
+          gopSize   = String(probeRes.gop);
+          sendLog(process_id, 'info', `🎯 FPS auto-detectado: fuente ${probeRes.rawFps} → salida ${outputFps}fps (GOP ${gopSize})`);
+        } else {
+          sendLog(process_id, 'info', `🎯 FPS auto-detect: sin dato → fallback ${outputFps}fps`);
+        }
+      } catch (e) {
+        sendLog(process_id, 'warn', `🎯 FPS auto-detect falló: ${e.message} → fallback ${outputFps}fps`);
+      }
+    }
 
     // Saneo de timestamps para evitar audio repetido / saltos hacia atrás
     // y reloads del player por EXT-X-DISCONTINUITY.
@@ -3395,7 +3499,7 @@ app.post('/api/emit', async (req, res) => {
 
         let stage2RetryCount = 0;
         const STAGE2_MAX_RETRIES = 10;
-        const spawnSrtOutputStage = () => {
+        const spawnSrtOutputStage = async () => {
           if (manualStopProcesses.has(process_id) || manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
             return;
           }
@@ -3416,6 +3520,17 @@ app.post('/api/emit', async (req, res) => {
           const vHeight = stageProfile.width;
           const aBitrate = stageProfile.audioBitrate;
           const vPreset  = 'veryfast';
+          // 🎯 Auto-detección de FPS del buffer SRT (lo que OBS está enviando).
+          let srtFps = '30';
+          let srtGop = '60';
+          try {
+            const probeRes = await detectSourceFps(cfg.bufferPlaylist);
+            if (probeRes && probeRes.fps) {
+              srtFps = String(probeRes.fps);
+              srtGop = String(probeRes.gop);
+              sendLog(process_id, 'info', `🎯 ${cfg.label} FPS auto-detectado: OBS ${probeRes.rawFps} → salida ${srtFps}fps`);
+            }
+          } catch (_) {}
           const stage2Args = [
             '-re',
             '-fflags', '+genpts+discardcorrupt',
@@ -3432,10 +3547,10 @@ app.post('/api/emit', async (req, res) => {
             '-maxrate', vBitrate,
             '-bufsize', vBufsize,
             '-vf', `scale=-2:${vHeight}`,
-            '-r', '30',
+            '-r', srtFps,
             '-vsync', 'cfr',
-            '-g', '60',
-            '-keyint_min', '60',
+            '-g', srtGop,
+            '-keyint_min', srtGop,
             '-sc_threshold', '0',
             '-c:a', 'aac',
             '-b:a', aBitrate,
@@ -3454,7 +3569,7 @@ app.post('/api/emit', async (req, res) => {
           ];
           const stage2 = spawn('ffmpeg', stage2Args);
           tigoOutputProcesses.set(String(process_id), stage2);
-          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (perfil ${stageProfile.label}: ${vHeight}p CBR ${vBitrate} @ 30fps, preset ${vPreset})`);
+          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (perfil ${stageProfile.label}: ${vHeight}p CBR ${vBitrate} @ ${srtFps}fps, preset ${vPreset})`);
 
           stage2.stderr.on('data', (data) => {
             const out = data.toString();
