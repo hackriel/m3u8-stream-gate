@@ -2942,8 +2942,33 @@ app.post('/api/emit', async (req, res) => {
     // Procesos CFR: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
     // Esto evita micro-jitter por forzar 30fps en una fuente 29.97fps (frame duplicado cada ~33s)
     const isCfrOutput = CFR_OUTPUT_PROCESSES.has(String(process_id));
-    const outputFps = isCfrOutput ? '29.97' : '30';
-    const gopSize = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
+    let outputFps = isCfrOutput ? '29.97' : '30';
+    let gopSize  = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
+
+    // 🎯 Auto-detección de FPS de la fuente vía ffprobe.
+    // Mapea al estándar limpio más cercano (23.976/24/25/29.97/30/50/59.94/60)
+    // para que la salida coincida con el ingreso y evitemos frames duplicados/perdidos.
+    // Solo aplica a fuentes HTTP/HTTPS reales (no SRT/RTMP/passthrough/Tigo proxy).
+    const canProbeFps = !isPassthroughBlock
+      && !isSrtIngest
+      && !isRtmpInputSource
+      && !isTigoHdmiProcess
+      && typeof inputSourceUrl === 'string'
+      && /^https?:\/\//i.test(inputSourceUrl);
+    if (canProbeFps) {
+      try {
+        const probeRes = await detectSourceFps(inputSourceUrl, combinedHeaders, sessionUserAgent, refererDomain);
+        if (probeRes && probeRes.fps) {
+          outputFps = String(probeRes.fps);
+          gopSize   = String(probeRes.gop);
+          sendLog(process_id, 'info', `🎯 FPS auto-detectado: fuente ${probeRes.rawFps} → salida ${outputFps}fps (GOP ${gopSize})`);
+        } else {
+          sendLog(process_id, 'info', `🎯 FPS auto-detect: sin dato → fallback ${outputFps}fps`);
+        }
+      } catch (e) {
+        sendLog(process_id, 'warn', `🎯 FPS auto-detect falló: ${e.message} → fallback ${outputFps}fps`);
+      }
+    }
 
     // Saneo de timestamps para evitar audio repetido / saltos hacia atrás
     // y reloads del player por EXT-X-DISCONTINUITY.
