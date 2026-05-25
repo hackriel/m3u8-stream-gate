@@ -1160,6 +1160,23 @@ export default function EmisorM3U8Panel() {
       }
     }
 
+    // Mutex TELETICA URL (13) ↔ TELETICA SRT (21): comparten /live/Teletica/playlist.m3u8.
+    if (processIndex === TELETICA_URL_INDEX || processIndex === TELETICA_SRT_INDEX) {
+      const otherIdx = processIndex === TELETICA_URL_INDEX ? TELETICA_SRT_INDEX : TELETICA_URL_INDEX;
+      if (processes[otherIdx]?.isEmitiendo) {
+        toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Teletica)...`);
+        try {
+          await fetch("/api/emit/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ process_id: otherIdx.toString() })
+          });
+        } catch (e) {
+          console.warn(`No se pudo detener proceso ${otherIdx}:`, e);
+        }
+      }
+    }
+
     if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
