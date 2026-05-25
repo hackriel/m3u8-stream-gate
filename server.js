@@ -4342,12 +4342,15 @@ app.post('/api/emit', async (req, res) => {
 // Endpoint para emitir archivos locales
 app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
   try {
-    const { target_rtmp, process_id = '3' } = req.body;
+    const { target_rtmp, process_id = '3', output_profile = null } = req.body;
     const files = req.files;
+    const outputProfileKey = saveOutputProfileForProcess(process_id, output_profile || getStoredOutputProfile(process_id));
+    const outputProfile = getOutputProfileConfig(outputProfileKey);
 
     sendLog(process_id, 'info', `Nueva solicitud de emisión con archivos`, { 
       fileCount: files?.length || 0, 
-      target_rtmp 
+      target_rtmp,
+      output_profile: outputProfileKey,
     });
 
     // Validaciones
@@ -4472,16 +4475,16 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       videoParams = ['-c:v', 'copy'];
       audioParams = ['-c:a', 'copy'];
     } else {
-      // >5000kbps o no detectado: re-encodear con perfil unificado CBR 2000k
-      sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode CBR 2000k 720p30 (perfil unificado)`);
+      // >5000kbps o no detectado: re-encodear con perfil seleccionado
+      sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode ${outputProfile.label} CBR ${outputProfile.videoBitrate} ${outputProfile.width}p30`);
       videoParams = [
         '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'main',
         '-threads', '4',
-        '-b:v', '2000k', '-maxrate', '2000k', '-bufsize', '4000k',
-        '-vf', 'scale=-2:720',
+        '-b:v', outputProfile.videoBitrate, '-maxrate', outputProfile.videoBitrate, '-bufsize', outputProfile.bufsize,
+        '-vf', `scale=-2:${outputProfile.width}`,
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
-      audioParams = ['-c:a', 'aac', '-b:a', '128k', '-ar', '44100'];
+      audioParams = ['-c:a', 'aac', '-b:a', outputProfile.audioBitrate, '-ar', '44100'];
     }
     
     let ffmpegArgs;
