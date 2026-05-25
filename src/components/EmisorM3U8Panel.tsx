@@ -1675,7 +1675,9 @@ export default function EmisorM3U8Panel() {
                             ? FUTV_SRT_OBS_INGEST_URL
                             : processIndex === CANAL6_SRT_INDEX
                               ? CANAL6_SRT_OBS_INGEST_URL
-                              : PASTE_URL_PROCESSES.has(processIndex)
+                              : processIndex === TELETICA_SRT_INDEX
+                                ? TELETICA_SRT_OBS_INGEST_URL
+                                : PASTE_URL_PROCESSES.has(processIndex)
                             ? 'M3U8 extraído (auto-completado)'
                             : 'https://servidor/origen/playlist.m3u8'
                     }
