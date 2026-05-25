@@ -27,7 +27,6 @@ sudo bash install.sh
 | `SRT_LATENCY_US` | `2000000` | 2 s de buffer |
 | `SRT_PASSPHRASE` | *(vacío)* | Si lo activás, definí `TELETICA_SRT_PASSPHRASE` en el VPS con el mismo valor |
 | `TDMAX_EMAIL` / `TDMAX_PASSWORD` | — | Cuenta TDMax válida |
-| `REFRESH_MIN` | `8` | Re-loguear cada N minutos (token IP-locked ≈ 10 min) |
 | `LOG_VERBOSE` | `0` | `1` para ver todo el stderr de ffmpeg |
 
 ## Comandos útiles
@@ -41,8 +40,8 @@ sudo systemctl restart teletica-srt-pusher # reiniciar
 ## Resiliencia
 
 - Si TDMax falla → backoff incremental (3 → 30 s).
-- Si ffmpeg muere → reintenta automáticamente.
-- Refresh proactivo cada `REFRESH_MIN` minutos para evitar 403 por token expirado.
+- **Reactivo puro:** solo se re-scrapea TDMax cuando ffmpeg muere. Si está
+  emitiendo bien, no se interrumpe nunca (mismo enfoque que el VPS).
 - systemd `Restart=always` y `StartLimitIntervalSec=0` → nunca queda apagado.
 - El SRT caller falla suave si el VPS aún no escucha (switch OFF) y reintenta.
 

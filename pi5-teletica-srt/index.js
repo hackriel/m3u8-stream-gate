@@ -6,8 +6,9 @@
  *  IP del Pi5 (necesario para que el CDN no bloquee los segments)
  *  y la reenvía vía SRT en modo CALLER al puerto 9004 del VPS.
  *
- *  - Refresca la URL cada REFRESH_MIN minutos antes de que expire el token.
- *  - Si FFmpeg muere por cualquier motivo, reintenta con backoff incremental.
+ *  - Re-scrapea TDMax ÚNICAMENTE cuando ffmpeg muere (mismo enfoque que el VPS).
+ *    No se tocan procesos sanos: si está emitiendo, sigue emitiendo.
+ *  - Si FFmpeg muere por cualquier motivo, re-loguea y reintenta con backoff.
  *  - Si el VPS aún no abrió el SRT listener (el switch del panel está OFF),
  *    el SRT caller falla suave y el bucle vuelve a intentar — no se cae.
  *  - El dashboard manda; si el switch está OFF no habrá listener y
@@ -21,7 +22,6 @@
  *    SRT_PASSPHRASE     Passphrase (opcional, debe coincidir con TELETICA_SRT_PASSPHRASE del VPS)
  *    TDMAX_EMAIL        Correo de la cuenta TDMax            (REQUERIDO)
  *    TDMAX_PASSWORD     Password de la cuenta TDMax          (REQUERIDO)
- *    REFRESH_MIN        Cada cuántos minutos re-loguear      (default 8)
  *    LOG_VERBOSE        '1' para ver stderr crudo de ffmpeg  (default 0)
  */
 
@@ -37,7 +37,6 @@ const SRT_LATENCY_US = process.env.SRT_LATENCY_US || '2000000';
 const SRT_PASSPHRASE = process.env.SRT_PASSPHRASE || '';
 const TDMAX_EMAIL    = process.env.TDMAX_EMAIL    || '';
 const TDMAX_PASSWORD = process.env.TDMAX_PASSWORD || '';
-const REFRESH_MIN    = parseInt(process.env.REFRESH_MIN || '8', 10);
 const LOG_VERBOSE    = process.env.LOG_VERBOSE === '1';
 
 // Mismos valores que la edge function scrape-channel
@@ -209,7 +208,6 @@ function spawnFfmpeg(hlsUrl) {
 let currentProc = null;
 let stopRequested = false;
 let backoffMs = 3000;
-let refreshTimer = null;
 
 function killCurrent(signal = 'SIGTERM') {
   if (currentProc && !currentProc.killed) {
@@ -221,7 +219,7 @@ async function runOnce() {
   let hlsUrl;
   try {
     hlsUrl = await getTeleticaUrl();
-    log('🔑 URL Teletica obtenida (válida ~10 min).');
+    log('🔑 URL Teletica obtenida. ffmpeg corre indefinido; solo se re-scrapea si muere.');
     backoffMs = 3000; // reset backoff tras login OK
   } catch (e) {
     err(`Scrape TDMax falló: ${e.message}`);
@@ -230,15 +228,7 @@ async function runOnce() {
 
   currentProc = spawnFfmpeg(hlsUrl);
 
-  // Refrescar URL proactivamente antes de que expire (token IP-locked dura ~10 min)
-  if (refreshTimer) clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(() => {
-    log(`🔄 Refresh programado (cada ${REFRESH_MIN} min) — relanzando con URL nueva`);
-    killCurrent('SIGTERM');
-  }, REFRESH_MIN * 60 * 1000);
-
   currentProc.on('exit', (code, signal) => {
-    if (refreshTimer) clearTimeout(refreshTimer);
     currentProc = null;
     if (stopRequested) return;
     warn(`ffmpeg exit code=${code} signal=${signal} — reintentando en ${Math.round(backoffMs/1000)}s`);
@@ -257,7 +247,6 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     log(`📴 ${sig} recibido — apagando…`);
     stopRequested = true;
-    if (refreshTimer) clearTimeout(refreshTimer);
     killCurrent('SIGTERM');
     setTimeout(() => process.exit(0), 1500);
   });
@@ -266,5 +255,5 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 process.on('uncaughtException', (e) => { err('uncaughtException:', e?.stack || e?.message || e); });
 process.on('unhandledRejection', (e) => { err('unhandledRejection:', e?.stack || e?.message || e); });
 
-log(`🚀 Teletica SRT pusher iniciado → ${VPS_HOST}:${VPS_PORT} (streamid=${SRT_STREAMID}, refresh=${REFRESH_MIN}min)`);
+log(`🚀 Teletica SRT pusher iniciado → ${VPS_HOST}:${VPS_PORT} (streamid=${SRT_STREAMID}, modo reactivo)`);
 runOnce();
