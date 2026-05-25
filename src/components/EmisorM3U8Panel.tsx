@@ -2153,8 +2153,12 @@ export default function EmisorM3U8Panel() {
                   <header className="mb-5">
                     <h2 className="text-2xl font-bold text-accent flex items-center gap-2">
                       📡 Canal 6 TS
-                      <span className="text-xs font-normal px-2 py-1 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                        MPEG-TS passthrough
+                      <span className={`text-xs font-normal px-2 py-1 rounded-md border ${
+                        canal6TsStatus.profile === 'mejorado720'
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                      }`}>
+                        {canal6TsStatus.profile === 'mejorado720' ? 'Mejorado 720 · 2000k' : 'Normal · passthrough'}
                       </span>
                     </h2>
                     <p className="text-sm text-muted-foreground mt-2">
@@ -2164,6 +2168,57 @@ export default function EmisorM3U8Panel() {
                       cero reloads.
                     </p>
                   </header>
+
+                  {/* Selector de perfil */}
+                  <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <label className="text-xs text-muted-foreground">Perfil de salida:</label>
+                      {canal6TsStatus.profile === 'mejorado720' && (
+                        <span className="text-[11px] text-muted-foreground">
+                          Encoder: {canal6TsStatus.sharedEncoderRunning ? '🟢 corriendo' : '🔴 parado'}
+                          {canal6TsStatus.sharedEncoderRunning && (
+                            <> · {canal6TsStatus.sharedEncoderClients} clientes · {Math.floor((canal6TsStatus.sharedEncoderUptimeSec || 0) / 60)}m{(canal6TsStatus.sharedEncoderUptimeSec || 0) % 60}s</>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        onClick={() => canal6TsSwitchProfile('normal')}
+                        disabled={canal6TsBusy}
+                        className={`px-4 py-3 rounded-lg text-sm font-medium border transition-all text-left ${
+                          canal6TsStatus.profile === 'normal'
+                            ? 'bg-amber-500/20 border-amber-500/50 text-amber-200 ring-2 ring-amber-500/40'
+                            : 'bg-background border-border text-muted-foreground hover:border-amber-500/40 hover:text-foreground'
+                        }`}
+                      >
+                        <div className="font-semibold">Normal (actual)</div>
+                        <div className="text-[11px] opacity-80 mt-1">
+                          Passthrough <code>-c copy</code> por cliente. Calidad 100% original (~5000k).
+                          Sin re-encode. Funciona como hoy.
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => canal6TsSwitchProfile('mejorado720')}
+                        disabled={canal6TsBusy}
+                        className={`px-4 py-3 rounded-lg text-sm font-medium border transition-all text-left ${
+                          canal6TsStatus.profile === 'mejorado720'
+                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-200 ring-2 ring-emerald-500/40'
+                            : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40 hover:text-foreground'
+                        }`}
+                      >
+                        <div className="font-semibold">Mejorado 720</div>
+                        <div className="text-[11px] opacity-80 mt-1">
+                          Encode <b>único</b> always-on 720p/2000k. Fan-out a todos los clientes.
+                          Ahorra ~60% de egress. Watchdog auto-respawn.
+                        </div>
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
+                      💡 Si "Mejorado 720" da problemas en XUI, podés volver a "Normal" en cualquier momento.
+                      El cambio corta a los clientes ~5-10s mientras reconectan.
+                    </p>
+                  </div>
 
                   {/* Input URL fuente + acciones */}
                   <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
@@ -2243,9 +2298,9 @@ export default function EmisorM3U8Panel() {
                     </summary>
                     <ul className="mt-3 text-sm text-muted-foreground list-disc pl-5 space-y-1">
                       <li>Tab 100% independiente: no depende de ningún otro proceso del panel.</li>
-                      <li>La URL fuente y el estado se guardan en disco; sobreviven a reinicios del servidor.</li>
-                      <li>Cuando un cliente IPTV abre <code>/canal6.ts</code>, FFmpeg tira directo de la URL fuente con <code>-c copy</code> (sin re-encode) y entrega <code>mpegts</code> continuo.</li>
-                      <li>Cada cliente conectado arranca su propio FFmpeg y se libera al desconectar.</li>
+                      <li>La URL fuente, el perfil y el estado se guardan en disco; sobreviven a reinicios del servidor.</li>
+                      <li><b>Perfil Normal:</b> cada cliente IPTV que abre <code>/canal6.ts</code> arranca su propio FFmpeg con <code>-c copy</code>. Calidad 100% original, pero el egress y la CPU crecen lineal con cada viewer.</li>
+                      <li><b>Perfil Mejorado 720:</b> un <b>solo</b> FFmpeg always-on re-encodea a 720p/2000k CBR (mismo perfil "Normal" del resto del sistema) y todos los clientes leen del mismo stream compartido. Si el FFmpeg muere, un watchdog lo respawnea en 2s.</li>
                       <li>Si la fuente CloudFront se invalida, basta con pegar la nueva URL y "Actualizar URL".</li>
                     </ul>
                   </details>
