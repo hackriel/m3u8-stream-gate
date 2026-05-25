@@ -1431,6 +1431,7 @@ export default function EmisorM3U8Panel() {
     const liveElapsed = process.isEmitiendo && process.startTime > 0
       ? Math.max(0, Math.floor((clockNow - process.startTime) / 1000))
       : process.elapsed;
+    const outputProfile = getOutputProfile(processIndex);
 
     return (
       <div className="space-y-6">
@@ -1638,6 +1639,25 @@ export default function EmisorM3U8Panel() {
                 {/* Backup URL field removed - Canal 6 now uses single URL */}
               </>
             )}
+
+            <div className="mb-4 p-3 rounded-xl bg-card/50 border border-border">
+              <label className="block text-sm mb-2 text-muted-foreground">Formato de salida</label>
+              <select
+                value={outputProfile}
+                onChange={(e) => setOutputProfile(processIndex, e.target.value as OutputProfile)}
+                disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
+                <option value="optimized">{OUTPUT_PROFILE_LABELS.optimized}</option>
+              </select>
+              <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                {outputProfile === 'optimized'
+                  ? 'Para eventos con mucha audiencia: reduce ancho de banda saliente y presión sobre LB sin cambiar la URL HLS.'
+                  : 'Perfil actual de producción: más calidad, más consumo por usuario.'}
+              </p>
+            </div>
+
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
               const hlsSlugs: Record<number, string> = {
                 [0]: 'Disney7',
