@@ -952,6 +952,7 @@ export default function EmisorM3U8Panel() {
 
   async function startEmitToRTMP(processIndex: number) {
     const process = processesRef.current[processIndex];
+    const selectedProfile = getOutputProfile(processIndex);
     
     // Proceso Subida (file upload)
     if (processIndex === FILE_UPLOAD_INDEX) {
@@ -980,6 +981,7 @@ export default function EmisorM3U8Panel() {
         });
         formData.append('target_rtmp', process.rtmp);
         formData.append('process_id', processIndex.toString());
+        formData.append('output_profile', selectedProfile);
         
         const resp = await new Promise<FileUploadResponse>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -1130,6 +1132,7 @@ export default function EmisorM3U8Panel() {
           source_m3u8: process.m3u8,
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString(),
+          output_profile: selectedProfile,
           ...(isM3uFileProcess && m3uPayload ? {
             // passthrough_mode: 'transcode' → usa el perfil estándar 720p CBR 2000k
             // (mismo que Disney 7 ID 0). Resuelve el "video crudo no va bien" en Xui/IPTV.
@@ -1319,6 +1322,7 @@ export default function EmisorM3U8Panel() {
           process_id: processIndex.toString(),
           source_m3u8: proc.m3u8 || undefined,
           target_rtmp: proc.rtmp || undefined,
+          output_profile: getOutputProfile(processIndex),
         }),
       });
       const data = await resp.json().catch(() => ({}));
