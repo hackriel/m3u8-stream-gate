@@ -481,9 +481,14 @@ const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '
 const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6' };
 
 const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
+// Perfiles de salida (CBR x264).
+//   - preset:      compromiso CPU vs calidad visual (faster ≈ +15% calidad vs veryfast).
+//   - x264Params:  ajustes finos de compresión (rc-lookahead/ref/bframes) — solo donde aporta.
+//   - audioBitrate: 128k es el "sweet spot"; bajar a 96k apenas ahorra ancho de banda total.
 const OUTPUT_PROFILES = {
-  normal: { key: 'normal', label: 'Normal', width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k' },
-  optimized: { key: 'optimized', label: 'Optimizada', width: '480', videoBitrate: '1200k', bufsize: '2400k', audioBitrate: '96k' },
+  normal:     { key: 'normal',     label: 'Normal',     width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'veryfast', x264Params: '' },
+  balanced:   { key: 'balanced',   label: 'Balanceada', width: '540', videoBitrate: '1500k', bufsize: '3000k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
+  optimized:  { key: 'optimized',  label: 'Optimizada', width: '480', videoBitrate: '1200k', bufsize: '2400k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
 };
 let outputProfileState = {};
 try {
@@ -493,7 +498,10 @@ try {
 } catch (err) {
   console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
 }
-const normalizeOutputProfile = (profile) => (profile === 'optimized' ? 'optimized' : 'normal');
+const normalizeOutputProfile = (profile) => {
+  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal') return profile;
+  return 'normal';
+};
 const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
 const getStoredOutputProfile = (processId) => normalizeOutputProfile(outputProfileState[String(processId)] || 'normal');
 const saveOutputProfileForProcess = (processId, profile) => {
