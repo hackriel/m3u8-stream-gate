@@ -17,7 +17,7 @@ import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 21;
+const NUM_PROCESSES = 22;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
@@ -30,11 +30,13 @@ const FUTV_ALTERNO_INDEX = 17; // Canal eventual con URL pegada del usuario, mis
 const FUTV_SRT_INDEX = 18; // FUTV SRT: ingest SRT desde OBS por puerto 9002
 const RANDOM_DISNEY7_INDEX = 19; // RANDOM Disney 7: M3U passthrough → mismo destino que Disney 7 SRT
 const CANAL6_SRT_INDEX = 20; // CANAL 6 SRT: ingest SRT desde OBS por puerto 9003
+const TELETICA_SRT_INDEX = 21; // TELETICA SRT: ingest SRT desde Pi5 por puerto 9004
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "srt://167.17.69.116:9000?streamid=tigo&latency=2000000";
 const DISNEY7_OBS_INGEST_URL = "srt://167.17.69.116:9001?streamid=disney7&latency=2000000";
 const FUTV_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9002?streamid=futv&latency=2000000";
 const CANAL6_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9003?streamid=canal6&latency=2000000";
+const TELETICA_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9004?streamid=teletica&latency=2000000";
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
 type OutputProfile = "normal" | "balanced" | "optimized";
@@ -56,9 +58,9 @@ const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 19]);
 // Procesos que emiten HLS local (sin RTMP)
 // ID 0 (Disney 7) ahora emite HLS al slug 'Disney7' (igual que RANDOM Disney 7).
 // Disney 8 (ID 10) NO está aquí: usa RTMP destino manual pegado por el usuario.
-const HLS_OUTPUT_PROCESSES = new Set([0, FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX, CANAL6_SRT_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([0, FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX]);
 // Procesos que reciben SRT desde OBS (entrada manual interna)
-const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX, FUTV_SRT_INDEX, CANAL6_SRT_INDEX]);
+const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX, FUTV_SRT_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX]);
 // Procesos eventuales que aceptan URL pegada del usuario y necesitan scraping dinámico
 const PASTE_URL_PROCESSES = new Set<number>([FUTV_ALTERNO_INDEX]);
 // Procesos que reciben un archivo M3U con headers + URL (passthrough -c copy)
@@ -190,6 +192,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "FUTV SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "RANDOM Disney 7", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Canal 6 SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
+  { name: "Teletica SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
