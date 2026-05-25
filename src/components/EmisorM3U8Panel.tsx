@@ -37,6 +37,13 @@ const FUTV_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9002?streamid=futv&latency=
 const CANAL6_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9003?streamid=canal6&latency=2000000";
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
+type OutputProfile = "normal" | "optimized";
+const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
+const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
+  normal: "Normal · 720p CBR 2000k + AAC 128k",
+  optimized: "Optimizada · 480p CBR 1200k + AAC 96k",
+};
+
 // Procesos ocultos legacy
 // 2, 8, 9: Tigo legacy (descartados)
 // 1, 3, 4, 5, 6, 7: tabs antiguos (FUTV, TDmas 1, Teletica, Canal 6, Multimedios, Subida)
@@ -448,6 +455,16 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
+  const [outputProfiles, setOutputProfiles] = useState<Record<number, OutputProfile>>(() => {
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem("emisor-output-profiles") || "{}");
+      return Object.fromEntries(
+        Object.entries(parsed).filter(([, value]) => value === "normal" || value === "optimized"),
+      ) as Record<number, OutputProfile>;
+    } catch {
+      return {};
+    }
+  });
   // URL pegada por el usuario para canales tipo FUTV ALTERNO (eventuales)
   const [pasteUrls, setPasteUrls] = useState<Record<number, string>>({});
   // Payload parseado de archivos M3U subidos (RANDOM Disney 7 y similares)
@@ -467,6 +484,16 @@ export default function EmisorM3U8Panel() {
   // (-c:v copy) + audio re-encodeado a AAC 128k/48kHz estéreo. Esto preserva
   // calidad de origen y garantiza audio en Xui / IPTV Smarters Pro.
   const { metricsHistory, latestMetrics } = useServerMetrics();
+
+  useEffect(() => {
+    sessionStorage.setItem("emisor-output-profiles", JSON.stringify(outputProfiles));
+  }, [outputProfiles]);
+
+  const getOutputProfile = (processIndex: number): OutputProfile => outputProfiles[processIndex] || DEFAULT_OUTPUT_PROFILE;
+
+  const setOutputProfile = (processIndex: number, profile: OutputProfile) => {
+    setOutputProfiles((prev) => ({ ...prev, [processIndex]: profile }));
+  };
 
   // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
   // https://www.app.tdmax.com/player?id=689b81b08f08c8be77f8eb43&type=channel
@@ -925,6 +952,7 @@ export default function EmisorM3U8Panel() {
 
   async function startEmitToRTMP(processIndex: number) {
     const process = processesRef.current[processIndex];
+    const selectedProfile = getOutputProfile(processIndex);
     
     // Proceso Subida (file upload)
     if (processIndex === FILE_UPLOAD_INDEX) {
@@ -953,6 +981,7 @@ export default function EmisorM3U8Panel() {
         });
         formData.append('target_rtmp', process.rtmp);
         formData.append('process_id', processIndex.toString());
+        formData.append('output_profile', selectedProfile);
         
         const resp = await new Promise<FileUploadResponse>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -1103,6 +1132,7 @@ export default function EmisorM3U8Panel() {
           source_m3u8: process.m3u8,
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString(),
+          output_profile: selectedProfile,
           ...(isM3uFileProcess && m3uPayload ? {
             // passthrough_mode: 'transcode' → usa el perfil estándar 720p CBR 2000k
             // (mismo que Disney 7 ID 0). Resuelve el "video crudo no va bien" en Xui/IPTV.
@@ -1292,6 +1322,7 @@ export default function EmisorM3U8Panel() {
           process_id: processIndex.toString(),
           source_m3u8: proc.m3u8 || undefined,
           target_rtmp: proc.rtmp || undefined,
+          output_profile: getOutputProfile(processIndex),
         }),
       });
       const data = await resp.json().catch(() => ({}));
@@ -1400,6 +1431,7 @@ export default function EmisorM3U8Panel() {
     const liveElapsed = process.isEmitiendo && process.startTime > 0
       ? Math.max(0, Math.floor((clockNow - process.startTime) / 1000))
       : process.elapsed;
+    const outputProfile = getOutputProfile(processIndex);
 
     return (
       <div className="space-y-6">
@@ -1516,16 +1548,16 @@ export default function EmisorM3U8Panel() {
                         )}
                       </div>
                     )}
-                    {/* Modo de salida: único — video crudo + audio AAC compatible Xui/Smarters */}
+                    {/* Modo de salida: transcode compatible Xui/Smarters */}
                     <div className="mt-3 p-3 rounded-xl bg-card/50 border border-violet-400/20">
                       <p className="text-xs text-violet-300 font-medium mb-1">
-                        🎬 Modo: <span className="text-violet-100">TRANSCODE 720p CBR 2000k (perfil Disney 7)</span>
+                        🎬 Modo: <span className="text-violet-100">TRANSCODE según formato de salida</span>
                       </p>
                       <p className="text-[11px] text-muted-foreground leading-relaxed">
                         Mismo perfil que Disney 7 (ID 0): input HLS resiliente VLC-like
                         (<code className="text-violet-400">max_reload=1000</code>, <code className="text-violet-400">-re</code>) +
-                        re-encode a <strong className="text-violet-200">libx264 720p @ 29.97fps CBR 2000k</strong> (preset veryfast,
-                        GOP 2s) + AAC 128k. Garantiza compatibilidad y estabilidad en Xui / IPTV Smarters Pro.
+                        re-encode a <strong className="text-violet-200">{OUTPUT_PROFILE_LABELS[outputProfile]}</strong> (preset veryfast,
+                        GOP 2s). Garantiza compatibilidad y estabilidad en Xui / IPTV Smarters Pro.
                       </p>
                     </div>
                   </div>
@@ -1607,6 +1639,25 @@ export default function EmisorM3U8Panel() {
                 {/* Backup URL field removed - Canal 6 now uses single URL */}
               </>
             )}
+
+            <div className="mb-4 p-3 rounded-xl bg-card/50 border border-border">
+              <label className="block text-sm mb-2 text-muted-foreground">Formato de salida</label>
+              <select
+                value={outputProfile}
+                onChange={(e) => setOutputProfile(processIndex, e.target.value as OutputProfile)}
+                disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
+                <option value="optimized">{OUTPUT_PROFILE_LABELS.optimized}</option>
+              </select>
+              <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                {outputProfile === 'optimized'
+                  ? 'Para eventos con mucha audiencia: reduce ancho de banda saliente y presión sobre LB sin cambiar la URL HLS.'
+                  : 'Perfil actual de producción: más calidad, más consumo por usuario.'}
+              </p>
+            </div>
+
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
               const hlsSlugs: Record<number, string> = {
                 [0]: 'Disney7',

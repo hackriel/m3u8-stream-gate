@@ -480,6 +480,29 @@ const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '
 // Disney 7 (ID 0) — M3U file passthrough con perfil VLC-like — también emite al slug 'Disney7'.
 const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6' };
 
+const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
+const OUTPUT_PROFILES = {
+  normal: { key: 'normal', label: 'Normal', width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k' },
+  optimized: { key: 'optimized', label: 'Optimizada', width: '480', videoBitrate: '1200k', bufsize: '2400k', audioBitrate: '96k' },
+};
+let outputProfileState = {};
+try {
+  if (fs.existsSync(OUTPUT_PROFILE_STATE_FILE)) {
+    outputProfileState = JSON.parse(fs.readFileSync(OUTPUT_PROFILE_STATE_FILE, 'utf8')) || {};
+  }
+} catch (err) {
+  console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
+}
+const normalizeOutputProfile = (profile) => (profile === 'optimized' ? 'optimized' : 'normal');
+const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
+const getStoredOutputProfile = (processId) => normalizeOutputProfile(outputProfileState[String(processId)] || 'normal');
+const saveOutputProfileForProcess = (processId, profile) => {
+  const normalized = normalizeOutputProfile(profile);
+  outputProfileState[String(processId)] = normalized;
+  try { fs.writeFileSync(OUTPUT_PROFILE_STATE_FILE, JSON.stringify(outputProfileState, null, 2)); } catch (_) {}
+  return normalized;
+};
+
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
 // El proxy enruta tanto el scraping (login/token TDMax) como el consumo
@@ -1675,7 +1698,8 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       return;
     }
 
-    rememberStreamState(process_id, { source_m3u8: newUrl, target_rtmp: targetRtmp });
+    const recoveryOutputProfile = rememberedState?.output_profile || getStoredOutputProfile(process_id);
+    rememberStreamState(process_id, { source_m3u8: newUrl, target_rtmp: targetRtmp, output_profile: recoveryOutputProfile });
     
     if (supabase) {
       await supabase
@@ -1694,6 +1718,7 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
         source_m3u8: newUrl,
         target_rtmp: targetRtmp || 'hls-local',
         process_id: process_id,
+        output_profile: recoveryOutputProfile,
         is_recovery: true
       })
     });
@@ -2101,6 +2126,7 @@ app.post('/api/emit', async (req, res) => {
       extra_headers = null,
       referer: customReferer = null,
       user_agent: customUserAgent = null,
+      output_profile = null,
     } = req.body;
     // Normalizar el modo. Compat: si llega `passthrough: true` sin `passthrough_mode`,
     // asumimos 'copy' (comportamiento histórico). Si llega 'transcode', desactivamos
@@ -2118,6 +2144,8 @@ app.post('/api/emit', async (req, res) => {
     const isPassthroughBlock = normalizedMode === 'copy' || normalizedMode === 'smart' || normalizedMode === 'rawvideo';
     const process_id = String(rawProcessId);
     const numericId = parseInt(process_id, 10);
+    const outputProfileKey = saveOutputProfileForProcess(process_id, output_profile || getStoredOutputProfile(process_id));
+    const outputProfile = getOutputProfileConfig(outputProfileKey);
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
@@ -2154,7 +2182,7 @@ app.post('/api/emit', async (req, res) => {
       resetCircuitBreaker(process_id);
     }
     
-    sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
+    sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp, output_profile: outputProfileKey });
 
     // Validaciones
     if ((!isTigoHdmiProcess && !isSrtIngest && !effectiveSourceM3u8) || (!target_rtmp && !isHlsOutput)) {
@@ -2199,7 +2227,7 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
-    rememberStreamState(process_id, { source_m3u8: effectiveSourceM3u8, target_rtmp });
+    rememberStreamState(process_id, { source_m3u8: effectiveSourceM3u8, target_rtmp, output_profile: outputProfileKey });
 
     // (Tigo processes removed — dead code cleaned up)
 
@@ -2830,7 +2858,7 @@ app.post('/api/emit', async (req, res) => {
     // Nombre del proceso para logs
     const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-    sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
+    sendLog(process_id, 'info', `🎬 ${procName}: Perfil ${outputProfile.label} → ${outputProfile.width}p CBR ${outputProfile.videoBitrate} AAC${outputProfile.audioBitrate} GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
     // Procesos CFR: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
     // Esto evita micro-jitter por forzar 30fps en una fuente 29.97fps (frame duplicado cada ~33s)
@@ -2869,17 +2897,17 @@ app.post('/api/emit', async (req, res) => {
       '-preset', 'veryfast',
       '-profile:v', 'main',
       '-threads', '4',
-      '-b:v', '2000k',
-      '-maxrate', '2000k',
-      '-bufsize', '4000k',
-      '-vf', isCanal6UrlProcess ? 'scale=-2:720,fps=30' : 'scale=-2:720',
+      '-b:v', outputProfile.videoBitrate,
+      '-maxrate', outputProfile.videoBitrate,
+      '-bufsize', outputProfile.bufsize,
+      '-vf', isCanal6UrlProcess ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
       '-r', outputFps,
       ...(isCfrOutput || isCanal6UrlProcess ? ['-vsync', 'cfr'] : []),
       '-g', gopSize,
       '-keyint_min', gopSize,
       '-sc_threshold', '0',
       '-c:a', 'aac',
-      '-b:a', '128k',
+      '-b:a', outputProfile.audioBitrate,
       '-ar', '44100',
       '-max_muxing_queue_size', '1024',
       '-reset_timestamps', '1',
@@ -3382,8 +3410,11 @@ app.post('/api/emit', async (req, res) => {
           // CBR 2000k 720p30 AAC128k veryfast — mismo perfil que FUTV ALTERNO.
           // 2000k es suficiente para verse "super bien" en SRT confiable y reduce
           // carga de upload sin pérdida visible vs 3500k.
-          const vBitrate = '2000k';
-          const vBufsize = '4000k';
+          const stageProfile = getOutputProfileConfig(getStoredOutputProfile(process_id));
+          const vBitrate = stageProfile.videoBitrate;
+          const vBufsize = stageProfile.bufsize;
+          const vHeight = stageProfile.width;
+          const aBitrate = stageProfile.audioBitrate;
           const vPreset  = 'veryfast';
           const stage2Args = [
             '-re',
@@ -3400,14 +3431,14 @@ app.post('/api/emit', async (req, res) => {
             '-b:v', vBitrate,
             '-maxrate', vBitrate,
             '-bufsize', vBufsize,
-            '-vf', 'scale=-2:720',
+            '-vf', `scale=-2:${vHeight}`,
             '-r', '30',
             '-vsync', 'cfr',
             '-g', '60',
             '-keyint_min', '60',
             '-sc_threshold', '0',
             '-c:a', 'aac',
-            '-b:a', '128k',
+            '-b:a', aBitrate,
             '-ar', '48000',
             '-max_muxing_queue_size', '1024',
             '-reset_timestamps', '1',
@@ -3423,7 +3454,7 @@ app.post('/api/emit', async (req, res) => {
           ];
           const stage2 = spawn('ffmpeg', stage2Args);
           tigoOutputProcesses.set(String(process_id), stage2);
-          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode 720p CBR ${vBitrate} @ 30fps, preset ${vPreset})`);
+          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (perfil ${stageProfile.label}: ${vHeight}p CBR ${vBitrate} @ 30fps, preset ${vPreset})`);
 
           stage2.stderr.on('data', (data) => {
             const out = data.toString();
@@ -4010,7 +4041,8 @@ app.post('/api/emit', async (req, res) => {
                     }
                   }
                 }
-                rememberStreamState(process_id, { source_m3u8: retrySourceUrl, target_rtmp: retryTargetRtmp });
+                const retryOutputProfile = rememberedState?.output_profile || getStoredOutputProfile(process_id);
+                rememberStreamState(process_id, { source_m3u8: retrySourceUrl, target_rtmp: retryTargetRtmp, output_profile: retryOutputProfile });
                 // Reiniciar con misma URL (o fresca si es proxy)
                 const emitUrl = `http://localhost:${PORT}/api/emit`;
                 const emitResp = await fetch(emitUrl, {
@@ -4020,6 +4052,7 @@ app.post('/api/emit', async (req, res) => {
                     source_m3u8: retrySourceUrl,
                     target_rtmp: retryTargetRtmp,
                     process_id: process_id,
+                    output_profile: retryOutputProfile,
                     is_recovery: true
                   })
                 });
@@ -4313,12 +4346,15 @@ app.post('/api/emit', async (req, res) => {
 // Endpoint para emitir archivos locales
 app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
   try {
-    const { target_rtmp, process_id = '3' } = req.body;
+    const { target_rtmp, process_id = '3', output_profile = null } = req.body;
     const files = req.files;
+    const outputProfileKey = saveOutputProfileForProcess(process_id, output_profile || getStoredOutputProfile(process_id));
+    const outputProfile = getOutputProfileConfig(outputProfileKey);
 
     sendLog(process_id, 'info', `Nueva solicitud de emisión con archivos`, { 
       fileCount: files?.length || 0, 
-      target_rtmp 
+      target_rtmp,
+      output_profile: outputProfileKey,
     });
 
     // Validaciones
@@ -4443,16 +4479,16 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       videoParams = ['-c:v', 'copy'];
       audioParams = ['-c:a', 'copy'];
     } else {
-      // >5000kbps o no detectado: re-encodear con perfil unificado CBR 2000k
-      sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode CBR 2000k 720p30 (perfil unificado)`);
+      // >5000kbps o no detectado: re-encodear con perfil seleccionado
+      sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode ${outputProfile.label} CBR ${outputProfile.videoBitrate} ${outputProfile.width}p30`);
       videoParams = [
         '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'main',
         '-threads', '4',
-        '-b:v', '2000k', '-maxrate', '2000k', '-bufsize', '4000k',
-        '-vf', 'scale=-2:720',
+        '-b:v', outputProfile.videoBitrate, '-maxrate', outputProfile.videoBitrate, '-bufsize', outputProfile.bufsize,
+        '-vf', `scale=-2:${outputProfile.width}`,
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
-      audioParams = ['-c:a', 'aac', '-b:a', '128k', '-ar', '44100'];
+      audioParams = ['-c:a', 'aac', '-b:a', outputProfile.audioBitrate, '-ar', '44100'];
     }
     
     let ffmpegArgs;
@@ -4826,13 +4862,14 @@ app.post('/api/emit/stop', async (req, res) => {
 // ESTE FLUJO ES INDEPENDIENTE DEL "Encendido siempre": no toca always_on.
 app.post('/api/emit/restart', async (req, res) => {
   try {
-    const { process_id: rawProcessId = '0', source_m3u8, target_rtmp } = req.body;
+    const { process_id: rawProcessId = '0', source_m3u8, target_rtmp, output_profile = null } = req.body;
     const process_id = String(rawProcessId);
     const numericProcessId = parseInt(process_id, 10);
 
-    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 18) {
+    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 20) {
       return res.status(400).json({ error: `ID inválido: ${rawProcessId}` });
     }
+    const outputProfileKey = saveOutputProfileForProcess(process_id, output_profile || getStoredOutputProfile(process_id));
 
     sendLog(process_id, 'info', `🔄 Reinicio manual solicitado — preparando sesión fresca`);
 
@@ -4900,6 +4937,7 @@ app.post('/api/emit/restart', async (req, res) => {
         source_m3u8: effectiveSource,
         target_rtmp: effectiveTarget,
         process_id,
+        output_profile: outputProfileKey,
         is_recovery: false, // arranque limpio, NO recovery (forza refresh de token)
       }),
     });
