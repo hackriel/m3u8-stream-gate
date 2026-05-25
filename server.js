@@ -4607,9 +4607,10 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       // >5000kbps o no detectado: re-encodear con perfil seleccionado
       sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode ${outputProfile.label} CBR ${outputProfile.videoBitrate} ${outputProfile.width}p30`);
       videoParams = [
-        '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'main',
+        '-c:v', 'libx264', '-preset', outputProfile.preset || 'veryfast', '-profile:v', 'main',
         '-threads', '4',
         '-b:v', outputProfile.videoBitrate, '-maxrate', outputProfile.videoBitrate, '-bufsize', outputProfile.bufsize,
+        ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
         '-vf', `scale=-2:${outputProfile.width}`,
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
