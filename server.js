@@ -2945,7 +2945,7 @@ app.post('/api/emit', async (req, res) => {
     // Nombre del proceso para logs
     const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-    sendLog(process_id, 'info', `🎬 ${procName}: Perfil ${outputProfile.label} → ${outputProfile.width}p CBR ${outputProfile.videoBitrate} AAC${outputProfile.audioBitrate} GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
+    sendLog(process_id, 'info', `🎬 ${procName}: Perfil ${outputProfile.label} → ${outputProfile.width}p CBR ${outputProfile.videoBitrate} AAC${outputProfile.audioBitrate} GOP2s (preset ${outputProfile.preset || 'veryfast'}${outputProfile.x264Params ? ' +x264params' : ''})${isRecovery ? ' [recovery]' : ''}`);
 
     // Procesos CFR: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
     // Esto evita micro-jitter por forzar 30fps en una fuente 29.97fps (frame duplicado cada ~33s)
