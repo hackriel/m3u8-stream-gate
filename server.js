@@ -2124,6 +2124,7 @@ app.post('/api/emit', async (req, res) => {
       extra_headers = null,
       referer: customReferer = null,
       user_agent: customUserAgent = null,
+      output_profile = null,
     } = req.body;
     // Normalizar el modo. Compat: si llega `passthrough: true` sin `passthrough_mode`,
     // asumimos 'copy' (comportamiento histórico). Si llega 'transcode', desactivamos
@@ -2141,6 +2142,8 @@ app.post('/api/emit', async (req, res) => {
     const isPassthroughBlock = normalizedMode === 'copy' || normalizedMode === 'smart' || normalizedMode === 'rawvideo';
     const process_id = String(rawProcessId);
     const numericId = parseInt(process_id, 10);
+    const outputProfileKey = saveOutputProfileForProcess(process_id, output_profile || getStoredOutputProfile(process_id));
+    const outputProfile = getOutputProfileConfig(outputProfileKey);
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
@@ -2177,7 +2180,7 @@ app.post('/api/emit', async (req, res) => {
       resetCircuitBreaker(process_id);
     }
     
-    sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp });
+    sendLog(process_id, 'info', `Nueva solicitud de emisión recibida`, { source_m3u8, target_rtmp, output_profile: outputProfileKey });
 
     // Validaciones
     if ((!isTigoHdmiProcess && !isSrtIngest && !effectiveSourceM3u8) || (!target_rtmp && !isHlsOutput)) {
@@ -2222,7 +2225,7 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
-    rememberStreamState(process_id, { source_m3u8: effectiveSourceM3u8, target_rtmp });
+    rememberStreamState(process_id, { source_m3u8: effectiveSourceM3u8, target_rtmp, output_profile: outputProfileKey });
 
     // (Tigo processes removed — dead code cleaned up)
 
