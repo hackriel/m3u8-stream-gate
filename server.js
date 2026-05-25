@@ -480,6 +480,29 @@ const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '
 // Disney 7 (ID 0) — M3U file passthrough con perfil VLC-like — también emite al slug 'Disney7'.
 const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6' };
 
+const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
+const OUTPUT_PROFILES = {
+  normal: { key: 'normal', label: 'Normal', width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k' },
+  optimized: { key: 'optimized', label: 'Optimizada', width: '480', videoBitrate: '1200k', bufsize: '2400k', audioBitrate: '96k' },
+};
+let outputProfileState = {};
+try {
+  if (fs.existsSync(OUTPUT_PROFILE_STATE_FILE)) {
+    outputProfileState = JSON.parse(fs.readFileSync(OUTPUT_PROFILE_STATE_FILE, 'utf8')) || {};
+  }
+} catch (err) {
+  console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
+}
+const normalizeOutputProfile = (profile) => (profile === 'optimized' ? 'optimized' : 'normal');
+const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
+const getStoredOutputProfile = (processId) => normalizeOutputProfile(outputProfileState[String(processId)] || 'normal');
+const saveOutputProfileForProcess = (processId, profile) => {
+  const normalized = normalizeOutputProfile(profile);
+  outputProfileState[String(processId)] = normalized;
+  try { fs.writeFileSync(OUTPUT_PROFILE_STATE_FILE, JSON.stringify(outputProfileState, null, 2)); } catch (_) {}
+  return normalized;
+};
+
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
 // El proxy enruta tanto el scraping (login/token TDMax) como el consumo
