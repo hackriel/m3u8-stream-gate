@@ -3408,8 +3408,11 @@ app.post('/api/emit', async (req, res) => {
           // CBR 2000k 720p30 AAC128k veryfast — mismo perfil que FUTV ALTERNO.
           // 2000k es suficiente para verse "super bien" en SRT confiable y reduce
           // carga de upload sin pérdida visible vs 3500k.
-          const vBitrate = '2000k';
-          const vBufsize = '4000k';
+          const stageProfile = getOutputProfileConfig(getStoredOutputProfile(process_id));
+          const vBitrate = stageProfile.videoBitrate;
+          const vBufsize = stageProfile.bufsize;
+          const vHeight = stageProfile.width;
+          const aBitrate = stageProfile.audioBitrate;
           const vPreset  = 'veryfast';
           const stage2Args = [
             '-re',
@@ -3426,14 +3429,14 @@ app.post('/api/emit', async (req, res) => {
             '-b:v', vBitrate,
             '-maxrate', vBitrate,
             '-bufsize', vBufsize,
-            '-vf', 'scale=-2:720',
+            '-vf', `scale=-2:${vHeight}`,
             '-r', '30',
             '-vsync', 'cfr',
             '-g', '60',
             '-keyint_min', '60',
             '-sc_threshold', '0',
             '-c:a', 'aac',
-            '-b:a', '128k',
+            '-b:a', aBitrate,
             '-ar', '48000',
             '-max_muxing_queue_size', '1024',
             '-reset_timestamps', '1',
@@ -3449,7 +3452,7 @@ app.post('/api/emit', async (req, res) => {
           ];
           const stage2 = spawn('ffmpeg', stage2Args);
           tigoOutputProcesses.set(String(process_id), stage2);
-          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (transcode 720p CBR ${vBitrate} @ 30fps, preset ${vPreset})`);
+          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (perfil ${stageProfile.label}: ${vHeight}p CBR ${vBitrate} @ 30fps, preset ${vPreset})`);
 
           stage2.stderr.on('data', (data) => {
             const out = data.toString();
