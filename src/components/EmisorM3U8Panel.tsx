@@ -1557,7 +1557,7 @@ export default function EmisorM3U8Panel() {
                         Mismo perfil que Disney 7 (ID 0): input HLS resiliente VLC-like
                         (<code className="text-violet-400">max_reload=1000</code>, <code className="text-violet-400">-re</code>) +
                         re-encode a <strong className="text-violet-200">{OUTPUT_PROFILE_LABELS[outputProfile]}</strong> (preset veryfast,
-                        GOP 2s) + AAC 128k. Garantiza compatibilidad y estabilidad en Xui / IPTV Smarters Pro.
+                        GOP 2s). Garantiza compatibilidad y estabilidad en Xui / IPTV Smarters Pro.
                       </p>
                     </div>
                   </div>
