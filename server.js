@@ -2049,6 +2049,85 @@ const detectSourceCodecs = async (source, httpHeaders = '', userAgent = '', refe
   });
 };
 
+// Detecta el framerate REAL de la fuente vía ffprobe y lo mapea al estándar
+// más cercano para evitar drift / frames duplicados. Devuelve null si falla
+// (el caller debe usar su fallback). Acepta headers HTTP igual que detectSourceCodecs.
+//
+// Mapeo a fps "limpios":
+//   23.5–24.5  → si decimal ~0.976 → 23.976, si entero → 24
+//   24.5–25.5  → 25
+//   29–30.5    → si ~0.97 → 29.97, si entero → 30
+//   49–50.5    → 50
+//   58–60.5    → si ~0.94 → 59.94, si entero → 60
+const detectSourceFps = async (source, httpHeaders = '', userAgent = '', referer = '') => {
+  return new Promise((resolve) => {
+    const args = ['-v', 'error'];
+    if (userAgent) args.push('-user_agent', userAgent);
+    if (referer) args.push('-referer', referer);
+    if (httpHeaders) args.push('-headers', httpHeaders);
+    args.push(
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=r_frame_rate,avg_frame_rate',
+      '-of', 'json',
+      '-analyzeduration', '3000000',
+      '-probesize', '2000000',
+      source
+    );
+    const probe = spawn('ffprobe', args);
+    let output = '';
+    let done = false;
+    const finish = (result) => { if (done) return; done = true; resolve(result); };
+    probe.stdout.on('data', d => { output += d.toString(); });
+    probe.on('close', () => {
+      try {
+        const data = JSON.parse(output);
+        const s = (data.streams || [])[0] || {};
+        const parseFrac = (str) => {
+          if (!str || typeof str !== 'string' || str === '0/0') return 0;
+          const [n, d] = str.split('/').map(Number);
+          if (!n || !d) return 0;
+          return n / d;
+        };
+        const r = parseFrac(s.r_frame_rate);
+        const avg = parseFrac(s.avg_frame_rate);
+        // Preferimos avg_frame_rate (real), pero si es 0 o muy raro caemos a r_frame_rate.
+        let raw = avg > 0 ? avg : r;
+        if (!raw || !isFinite(raw) || raw <= 0 || raw > 120) {
+          return finish({ rawFps: 0, fps: null, gop: null });
+        }
+        // Mapear a estándar más cercano.
+        let fps = null;
+        if (raw >= 23 && raw <= 24.4) {
+          fps = raw < 23.95 ? 23.976 : 24;
+        } else if (raw > 24.4 && raw <= 25.5) {
+          fps = 25;
+        } else if (raw > 25.5 && raw <= 28.9) {
+          // valores raros (ej. 27fps) — redondeo simple
+          fps = Math.round(raw);
+        } else if (raw > 28.9 && raw <= 30.5) {
+          fps = raw < 29.99 ? 29.97 : 30;
+        } else if (raw > 30.5 && raw <= 49.5) {
+          fps = Math.round(raw);
+        } else if (raw > 49.5 && raw <= 50.5) {
+          fps = 50;
+        } else if (raw > 50.5 && raw <= 60.5) {
+          fps = raw < 59.99 ? 59.94 : 60;
+        } else {
+          fps = Math.round(raw);
+        }
+        // GOP = 2 segundos al fps elegido.
+        const gop = +(fps * 2).toFixed(3);
+        finish({ rawFps: +raw.toFixed(3), fps, gop });
+      } catch (_) {
+        finish({ rawFps: 0, fps: null, gop: null });
+      }
+    });
+    probe.on('error', () => finish({ rawFps: 0, fps: null, gop: null }));
+    // Timeout duro: 7s. Fuentes HTTP normales responden en <2s; si cuelga, seguimos con fallback.
+    setTimeout(() => { try { probe.kill('SIGKILL'); } catch {} finish({ rawFps: 0, fps: null, gop: null }); }, 7000);
+  });
+};
+
 // Endpoint para scraping LOCAL desde el VPS (para que el token se genere con la IP del VPS)
 // Esto es CRÍTICO para canales como Tigo cuyo CDN valida IP del token vs IP del consumidor
 // Rate-limit cap: máx 10 scrapes por canal en ventana de 5 min (evita "loco" como pasó hoy)
