@@ -64,8 +64,6 @@ SRT_LATENCY_US=2000000
 TDMAX_EMAIL=arlopfa@gmail.com
 TDMAX_PASSWORD=vM5SdnKpPjlypvJW
 
-# Cada cuántos minutos re-loguear (token IP-locked ~10 min)
-REFRESH_MIN=8
 LOG_VERBOSE=0
 EOF
   chmod 600 "$ENV_FILE"
