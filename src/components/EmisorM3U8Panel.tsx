@@ -217,7 +217,14 @@ export default function EmisorM3U8Panel() {
   
   const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem("emisor-active-tab") || "0");
   // Estado independiente del tab Canal 6 TS (passthrough MPEG-TS)
-  const [canal6TsStatus, setCanal6TsStatus] = useState<{ enabled: boolean; sourceUrl: string }>({ enabled: false, sourceUrl: '' });
+  const [canal6TsStatus, setCanal6TsStatus] = useState<{
+    enabled: boolean;
+    sourceUrl: string;
+    profile: 'normal' | 'mejorado720';
+    sharedEncoderRunning?: boolean;
+    sharedEncoderClients?: number;
+    sharedEncoderUptimeSec?: number;
+  }>({ enabled: false, sourceUrl: '', profile: 'normal' });
   const [canal6TsInput, setCanal6TsInput] = useState<string>('');
   const [canal6TsBusy, setCanal6TsBusy] = useState(false);
 
@@ -230,7 +237,14 @@ export default function EmisorM3U8Panel() {
         if (!r.ok) return;
         const j = await r.json();
         if (cancelled) return;
-        setCanal6TsStatus({ enabled: !!j.enabled, sourceUrl: j.sourceUrl || '' });
+        setCanal6TsStatus({
+          enabled: !!j.enabled,
+          sourceUrl: j.sourceUrl || '',
+          profile: j.profile === 'mejorado720' ? 'mejorado720' : 'normal',
+          sharedEncoderRunning: !!j.sharedEncoderRunning,
+          sharedEncoderClients: j.sharedEncoderClients || 0,
+          sharedEncoderUptimeSec: j.sharedEncoderUptimeSec || 0,
+        });
         setCanal6TsInput((prev) => (prev ? prev : (j.sourceUrl || '')));
       } catch (_) { /* offline */ }
     };
@@ -246,11 +260,11 @@ export default function EmisorM3U8Panel() {
     try {
       const r = await fetch(`${PUBLIC_HLS_BASE_URL}/canal6-ts/start`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, profile: canal6TsStatus.profile }),
       });
       const j = await r.json();
       if (!r.ok || !j.ok) throw new Error(j.error || 'Error');
-      setCanal6TsStatus({ enabled: true, sourceUrl: url });
+      setCanal6TsStatus((s) => ({ ...s, enabled: true, sourceUrl: url }));
       toast.success('Canal 6 TS emitiendo');
     } catch (e: any) {
       toast.error(`No se pudo iniciar: ${e.message}`);
@@ -265,6 +279,27 @@ export default function EmisorM3U8Panel() {
       toast.success('Canal 6 TS detenido');
     } catch (e: any) {
       toast.error(`No se pudo detener: ${e.message}`);
+    } finally { setCanal6TsBusy(false); }
+  };
+  const canal6TsSwitchProfile = async (profile: 'normal' | 'mejorado720') => {
+    if (canal6TsStatus.profile === profile) return;
+    const label = profile === 'mejorado720' ? 'Mejorado 720' : 'Normal';
+    const warn = canal6TsStatus.enabled
+      ? `¿Cambiar perfil a "${label}"? Los clientes IPTV conectados verán ~5-10s de buffering al reconectar.`
+      : `¿Cambiar perfil a "${label}"?`;
+    if (!window.confirm(warn)) return;
+    setCanal6TsBusy(true);
+    try {
+      const r = await fetch(`${PUBLIC_HLS_BASE_URL}/canal6-ts/profile`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || 'Error');
+      setCanal6TsStatus((s) => ({ ...s, profile }));
+      toast.success(`Perfil ${label} aplicado`);
+    } catch (e: any) {
+      toast.error(`No se pudo cambiar perfil: ${e.message}`);
     } finally { setCanal6TsBusy(false); }
   };
   const [isLoading, setIsLoading] = useState(true);
