@@ -3528,7 +3528,7 @@ app.post('/api/emit', async (req, res) => {
           const vBufsize = stageProfile.bufsize;
           const vHeight = stageProfile.width;
           const aBitrate = stageProfile.audioBitrate;
-          const vPreset  = 'veryfast';
+          const vPreset  = stageProfile.preset || 'veryfast';
           // 🎯 Auto-detección de FPS del buffer SRT (lo que OBS está enviando).
           let srtFps = '30';
           let srtGop = '60';
@@ -3555,6 +3555,7 @@ app.post('/api/emit', async (req, res) => {
             '-b:v', vBitrate,
             '-maxrate', vBitrate,
             '-bufsize', vBufsize,
+            ...(stageProfile.x264Params ? ['-x264-params', stageProfile.x264Params] : []),
             '-vf', `scale=-2:${vHeight}`,
             '-r', srtFps,
             '-vsync', 'cfr',
