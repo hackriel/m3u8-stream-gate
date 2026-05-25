@@ -4041,7 +4041,8 @@ app.post('/api/emit', async (req, res) => {
                     }
                   }
                 }
-                rememberStreamState(process_id, { source_m3u8: retrySourceUrl, target_rtmp: retryTargetRtmp });
+                const retryOutputProfile = rememberedState?.output_profile || getStoredOutputProfile(process_id);
+                rememberStreamState(process_id, { source_m3u8: retrySourceUrl, target_rtmp: retryTargetRtmp, output_profile: retryOutputProfile });
                 // Reiniciar con misma URL (o fresca si es proxy)
                 const emitUrl = `http://localhost:${PORT}/api/emit`;
                 const emitResp = await fetch(emitUrl, {
@@ -4051,6 +4052,7 @@ app.post('/api/emit', async (req, res) => {
                     source_m3u8: retrySourceUrl,
                     target_rtmp: retryTargetRtmp,
                     process_id: process_id,
+                    output_profile: retryOutputProfile,
                     is_recovery: true
                   })
                 });
