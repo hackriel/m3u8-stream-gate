@@ -1750,6 +1750,7 @@ export default function EmisorM3U8Panel() {
                 [FUTV_SRT_INDEX]: 'futv',
                 [RANDOM_DISNEY7_INDEX]: 'Disney7',
                 [CANAL6_SRT_INDEX]: 'Canal6',
+                [TELETICA_SRT_INDEX]: 'Teletica',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
@@ -1762,7 +1763,9 @@ export default function EmisorM3U8Panel() {
                     ? FUTV_SRT_OBS_INGEST_URL
                     : processIndex === CANAL6_SRT_INDEX
                       ? CANAL6_SRT_OBS_INGEST_URL
-                      : '';
+                      : processIndex === TELETICA_SRT_INDEX
+                        ? TELETICA_SRT_OBS_INGEST_URL
+                        : '';
               return (
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
