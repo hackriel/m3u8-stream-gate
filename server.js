@@ -2442,10 +2442,10 @@ app.post('/api/emit', async (req, res) => {
       effectiveSourceM3u8 = `srt://obs:${cfg.port}`;
     }
 
-    // Validación de ID: debe ser un número entre 0 y 19
-    if (isNaN(numericId) || numericId < 0 || numericId > 20) {
-      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-20)`);
-      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 20` });
+    // Validación de ID: debe ser un número entre 0 y 30 (21 = Teletica SRT)
+    if (isNaN(numericId) || numericId < 0 || numericId > 30) {
+      sendLog(process_id, 'error', `❌ ID de proceso inválido: "${rawProcessId}" (debe ser 0-30)`);
+      return res.status(400).json({ error: `ID de proceso inválido: debe ser un número entre 0 y 30` });
     }
 
     // Resetear contador y limpiar flags de parada manual SOLO cuando es inicio manual
@@ -5180,7 +5180,7 @@ app.post('/api/emit/restart', async (req, res) => {
     const process_id = String(rawProcessId);
     const numericProcessId = parseInt(process_id, 10);
 
-    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 20) {
+    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 30) {
       return res.status(400).json({ error: `ID inválido: ${rawProcessId}` });
     }
     const outputProfileKey = saveOutputProfileForProcess(process_id, output_profile || getStoredOutputProfile(process_id));
