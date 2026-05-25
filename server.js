@@ -3520,6 +3520,17 @@ app.post('/api/emit', async (req, res) => {
           const vHeight = stageProfile.width;
           const aBitrate = stageProfile.audioBitrate;
           const vPreset  = 'veryfast';
+          // 🎯 Auto-detección de FPS del buffer SRT (lo que OBS está enviando).
+          let srtFps = '30';
+          let srtGop = '60';
+          try {
+            const probeRes = await detectSourceFps(cfg.bufferPlaylist);
+            if (probeRes && probeRes.fps) {
+              srtFps = String(probeRes.fps);
+              srtGop = String(probeRes.gop);
+              sendLog(process_id, 'info', `🎯 ${cfg.label} FPS auto-detectado: OBS ${probeRes.rawFps} → salida ${srtFps}fps`);
+            }
+          } catch (_) {}
           const stage2Args = [
             '-re',
             '-fflags', '+genpts+discardcorrupt',
@@ -3536,10 +3547,10 @@ app.post('/api/emit', async (req, res) => {
             '-maxrate', vBitrate,
             '-bufsize', vBufsize,
             '-vf', `scale=-2:${vHeight}`,
-            '-r', '30',
+            '-r', srtFps,
             '-vsync', 'cfr',
-            '-g', '60',
-            '-keyint_min', '60',
+            '-g', srtGop,
+            '-keyint_min', srtGop,
             '-sc_threshold', '0',
             '-c:a', 'aac',
             '-b:a', aBitrate,
@@ -3558,7 +3569,7 @@ app.post('/api/emit', async (req, res) => {
           ];
           const stage2 = spawn('ffmpeg', stage2Args);
           tigoOutputProcesses.set(String(process_id), stage2);
-          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (perfil ${stageProfile.label}: ${vHeight}p CBR ${vBitrate} @ 30fps, preset ${vPreset})`);
+          sendLog(process_id, 'success', `🎬 ${cfg.label} BUFFER ETAPA 2 → /live/${slug}/playlist.m3u8 (perfil ${stageProfile.label}: ${vHeight}p CBR ${vBitrate} @ ${srtFps}fps, preset ${vPreset})`);
 
           stage2.stderr.on('data', (data) => {
             const out = data.toString();
