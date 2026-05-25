@@ -37,6 +37,13 @@ const FUTV_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9002?streamid=futv&latency=
 const CANAL6_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9003?streamid=canal6&latency=2000000";
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
+type OutputProfile = "normal" | "optimized";
+const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
+const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
+  normal: "Normal · 720p CBR 2000k + AAC 128k",
+  optimized: "Optimizada · 480p CBR 1200k + AAC 96k",
+};
+
 // Procesos ocultos legacy
 // 2, 8, 9: Tigo legacy (descartados)
 // 1, 3, 4, 5, 6, 7: tabs antiguos (FUTV, TDmas 1, Teletica, Canal 6, Multimedios, Subida)
@@ -448,6 +455,16 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
+  const [outputProfiles, setOutputProfiles] = useState<Record<number, OutputProfile>>(() => {
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem("emisor-output-profiles") || "{}");
+      return Object.fromEntries(
+        Object.entries(parsed).filter(([, value]) => value === "normal" || value === "optimized"),
+      ) as Record<number, OutputProfile>;
+    } catch {
+      return {};
+    }
+  });
   // URL pegada por el usuario para canales tipo FUTV ALTERNO (eventuales)
   const [pasteUrls, setPasteUrls] = useState<Record<number, string>>({});
   // Payload parseado de archivos M3U subidos (RANDOM Disney 7 y similares)
@@ -467,6 +484,16 @@ export default function EmisorM3U8Panel() {
   // (-c:v copy) + audio re-encodeado a AAC 128k/48kHz estéreo. Esto preserva
   // calidad de origen y garantiza audio en Xui / IPTV Smarters Pro.
   const { metricsHistory, latestMetrics } = useServerMetrics();
+
+  useEffect(() => {
+    sessionStorage.setItem("emisor-output-profiles", JSON.stringify(outputProfiles));
+  }, [outputProfiles]);
+
+  const getOutputProfile = (processIndex: number): OutputProfile => outputProfiles[processIndex] || DEFAULT_OUTPUT_PROFILE;
+
+  const setOutputProfile = (processIndex: number, profile: OutputProfile) => {
+    setOutputProfiles((prev) => ({ ...prev, [processIndex]: profile }));
+  };
 
   // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
   // https://www.app.tdmax.com/player?id=689b81b08f08c8be77f8eb43&type=channel
