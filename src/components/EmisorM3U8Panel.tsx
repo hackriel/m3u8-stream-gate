@@ -1650,12 +1650,15 @@ export default function EmisorM3U8Panel() {
                 className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
+                <option value="balanced">{OUTPUT_PROFILE_LABELS.balanced}</option>
                 <option value="optimized">{OUTPUT_PROFILE_LABELS.optimized}</option>
               </select>
               <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                 {outputProfile === 'optimized'
-                  ? 'Para eventos con mucha audiencia: reduce ancho de banda saliente y presión sobre LB sin cambiar la URL HLS.'
-                  : 'Perfil actual de producción: más calidad, más consumo por usuario.'}
+                  ? 'Máximo ahorro de ancho de banda (480p · 1200k). Ideal para eventos masivos donde el LB suele caer. Calidad buena en celular/tablet.'
+                  : outputProfile === 'balanced'
+                  ? 'Sweet spot calidad/ancho de banda (540p · 1500k · preset faster). Recomendado para eventos grandes sin sacrificar nitidez visible.'
+                  : 'Perfil estándar de producción (720p · 2000k). Mejor calidad, mayor consumo por usuario.'}
               </p>
             </div>
 
