@@ -3499,7 +3499,7 @@ app.post('/api/emit', async (req, res) => {
 
         let stage2RetryCount = 0;
         const STAGE2_MAX_RETRIES = 10;
-        const spawnSrtOutputStage = () => {
+        const spawnSrtOutputStage = async () => {
           if (manualStopProcesses.has(process_id) || manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
             return;
           }
