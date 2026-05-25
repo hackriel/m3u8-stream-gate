@@ -5180,7 +5180,7 @@ app.post('/api/emit/restart', async (req, res) => {
     const process_id = String(rawProcessId);
     const numericProcessId = parseInt(process_id, 10);
 
-    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 20) {
+    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 30) {
       return res.status(400).json({ error: `ID inválido: ${rawProcessId}` });
     }
     const outputProfileKey = saveOutputProfileForProcess(process_id, output_profile || getStoredOutputProfile(process_id));
