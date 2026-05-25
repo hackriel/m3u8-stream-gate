@@ -1492,6 +1492,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-fuchsia-500", text: "text-fuchsia-500", stroke: "#d946ef", name: "FUTV SRT" },
       { bg: "bg-violet-500", text: "text-violet-500", stroke: "#8b5cf6", name: "RANDOM Disney 7" },
       { bg: "bg-orange-600", text: "text-orange-500", stroke: "#ea580c", name: "Canal 6 SRT" },
+      { bg: "bg-cyan-600", text: "text-cyan-400", stroke: "#0891b2", name: "Teletica SRT" },
     ];
     return colors[processIndex];
   };
