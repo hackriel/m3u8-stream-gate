@@ -37,11 +37,12 @@ const FUTV_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9002?streamid=futv&latency=
 const CANAL6_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9003?streamid=canal6&latency=2000000";
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
-type OutputProfile = "normal" | "optimized";
+type OutputProfile = "normal" | "balanced" | "optimized";
 const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
 const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   normal: "Normal · 720p CBR 2000k + AAC 128k",
-  optimized: "Optimizada · 480p CBR 1200k + AAC 96k",
+  balanced: "Balanceada · 540p CBR 1500k + AAC 128k (faster)",
+  optimized: "Optimizada · 480p CBR 1200k + AAC 128k (faster)",
 };
 
 // Procesos ocultos legacy
