@@ -2856,7 +2856,7 @@ app.post('/api/emit', async (req, res) => {
     // Nombre del proceso para logs
     const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-    sendLog(process_id, 'info', `🎬 ${procName}: CBR 2000k 720p30 AAC128k GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
+    sendLog(process_id, 'info', `🎬 ${procName}: Perfil ${outputProfile.label} → ${outputProfile.width}p CBR ${outputProfile.videoBitrate} AAC${outputProfile.audioBitrate} GOP2s (preset veryfast)${isRecovery ? ' [recovery]' : ''}`);
 
     // Procesos CFR: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
     // Esto evita micro-jitter por forzar 30fps en una fuente 29.97fps (frame duplicado cada ~33s)
@@ -2895,17 +2895,17 @@ app.post('/api/emit', async (req, res) => {
       '-preset', 'veryfast',
       '-profile:v', 'main',
       '-threads', '4',
-      '-b:v', '2000k',
-      '-maxrate', '2000k',
-      '-bufsize', '4000k',
-      '-vf', isCanal6UrlProcess ? 'scale=-2:720,fps=30' : 'scale=-2:720',
+      '-b:v', outputProfile.videoBitrate,
+      '-maxrate', outputProfile.videoBitrate,
+      '-bufsize', outputProfile.bufsize,
+      '-vf', isCanal6UrlProcess ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
       '-r', outputFps,
       ...(isCfrOutput || isCanal6UrlProcess ? ['-vsync', 'cfr'] : []),
       '-g', gopSize,
       '-keyint_min', gopSize,
       '-sc_threshold', '0',
       '-c:a', 'aac',
-      '-b:a', '128k',
+      '-b:a', outputProfile.audioBitrate,
       '-ar', '44100',
       '-max_muxing_queue_size', '1024',
       '-reset_timestamps', '1',
