@@ -41,16 +41,26 @@ const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 // 2, 8, 9: Tigo legacy (descartados)
 // 1, 3, 4, 5, 6, 7: tabs antiguos (FUTV, TDmas 1, Teletica, Canal 6, Multimedios, Subida)
 //   reemplazados por la nueva tecnología (FUTV URL, TDMAS 1 URL, TELETICA URL, CANAL 6 URL, FUTV ALTERNO).
+// 15 (CANAL 6 URL): descartado por petición del usuario.
+// 19 (RANDOM Disney 7): funcionalidad migrada al tab Disney 7 (ID 0).
 //   La lógica permanece en el código por si se necesita revertir; solo se ocultan los tabs.
-const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 19]);
 // Procesos que emiten HLS local (sin RTMP)
-const HLS_OUTPUT_PROCESSES = new Set([FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX, CANAL6_SRT_INDEX]);
+// ID 0 (Disney 7) ahora emite HLS al slug 'Disney7' (igual que RANDOM Disney 7).
+// Disney 8 (ID 10) NO está aquí: usa RTMP destino manual pegado por el usuario.
+const HLS_OUTPUT_PROCESSES = new Set([0, FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX, CANAL6_SRT_INDEX]);
 // Procesos que reciben SRT desde OBS (entrada manual interna)
 const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX, FUTV_SRT_INDEX, CANAL6_SRT_INDEX]);
 // Procesos eventuales que aceptan URL pegada del usuario y necesitan scraping dinámico
 const PASTE_URL_PROCESSES = new Set<number>([FUTV_ALTERNO_INDEX]);
 // Procesos que reciben un archivo M3U con headers + URL (passthrough -c copy)
-const M3U_FILE_PROCESSES = new Set<number>([RANDOM_DISNEY7_INDEX]);
+// Disney 7 (0) → emite a HLS slug 'Disney7'.
+// Disney 8 (10) → emite a RTMP destino manual pegado por el usuario.
+// RANDOM Disney 7 (19) → legacy, oculto pero conservado por compatibilidad.
+const M3U_FILE_PROCESSES = new Set<number>([0, DISNEY8_INDEX, RANDOM_DISNEY7_INDEX]);
+// Procesos que comparten la salida HLS /live/Disney7/playlist.m3u8
+// → mutuamente excluyentes (solo uno activo a la vez).
+const DISNEY7_SHARED_OUTPUT = [0, DISNEY7_URL_INDEX, RANDOM_DISNEY7_INDEX];
 // Índices visibles para renderizar tabs
 const VISIBLE_PROCESSES = Array.from({ length: NUM_PROCESSES }, (_, i) => i).filter(i => !HIDDEN_PROCESSES.has(i));
 
@@ -1029,20 +1039,22 @@ export default function EmisorM3U8Panel() {
       return;
     }
 
-    // Mutex con DISNEY 7 SRT (16): comparten /live/Disney7/playlist.m3u8.
-    // Si el otro está activo, lo paramos antes de iniciar el nuestro.
-    if (processIndex === RANDOM_DISNEY7_INDEX || processIndex === DISNEY7_URL_INDEX) {
-      const otherIdx = processIndex === RANDOM_DISNEY7_INDEX ? DISNEY7_URL_INDEX : RANDOM_DISNEY7_INDEX;
-      if (processes[otherIdx]?.isEmitiendo) {
-        toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Disney7)...`);
-        try {
-          await fetch("/api/emit/stop", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ process_id: otherIdx.toString() })
-          });
-        } catch (e) {
-          console.warn(`No se pudo detener proceso ${otherIdx}:`, e);
+    // Mutex entre todos los procesos que comparten /live/Disney7/playlist.m3u8
+    // (Disney 7 ID 0, DISNEY 7 SRT ID 16, RANDOM Disney 7 ID 19).
+    if (DISNEY7_SHARED_OUTPUT.includes(processIndex)) {
+      for (const otherIdx of DISNEY7_SHARED_OUTPUT) {
+        if (otherIdx === processIndex) continue;
+        if (processes[otherIdx]?.isEmitiendo) {
+          toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Disney7)...`);
+          try {
+            await fetch("/api/emit/stop", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ process_id: otherIdx.toString() })
+            });
+          } catch (e) {
+            console.warn(`No se pudo detener proceso ${otherIdx}:`, e);
+          }
         }
       }
     }
@@ -1597,6 +1609,7 @@ export default function EmisorM3U8Panel() {
             )}
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
               const hlsSlugs: Record<number, string> = {
+                [0]: 'Disney7',
                 [FUTV_URL_INDEX]: 'futv',
                 [TIGO_URL_INDEX]: 'Tigo',
                 [TELETICA_URL_INDEX]: 'Teletica',
