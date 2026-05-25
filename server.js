@@ -467,7 +467,7 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16', '17', '18', '19', '20']);
+const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 // FUTV (11), FUTV ALTERNO (17) y FUTV SRT (18) comparten slug 'futv' a propósito:
 // los 3 emiten al MISMO destino HLS local (/live/futv/playlist.m3u8) por métodos distintos
@@ -477,7 +477,8 @@ const HLS_OUTPUT_PROCESSES = new Set(['11', '12', '13', '14', '15', '16', '17', 
 // misma razón: los 2 emiten al mismo destino /live/Disney7/playlist.m3u8 por métodos
 // distintos (SRT desde OBS vs M3U passthrough). Mutuamente excluyentes.
 // CANAL 6 URL (15) y CANAL 6 SRT (20) comparten slug 'Canal6' (URL CDN vs ingest SRT desde OBS).
-const HLS_SLUG_MAP = { '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6' };
+// Disney 7 (ID 0) — M3U file passthrough con perfil VLC-like — también emite al slug 'Disney7'.
+const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6' };
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
