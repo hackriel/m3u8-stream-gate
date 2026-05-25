@@ -1609,6 +1609,7 @@ export default function EmisorM3U8Panel() {
             )}
             {HLS_OUTPUT_PROCESSES.has(processIndex) ? (() => {
               const hlsSlugs: Record<number, string> = {
+                [0]: 'Disney7',
                 [FUTV_URL_INDEX]: 'futv',
                 [TIGO_URL_INDEX]: 'Tigo',
                 [TELETICA_URL_INDEX]: 'Teletica',
