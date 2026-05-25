@@ -1039,20 +1039,22 @@ export default function EmisorM3U8Panel() {
       return;
     }
 
-    // Mutex con DISNEY 7 SRT (16): comparten /live/Disney7/playlist.m3u8.
-    // Si el otro está activo, lo paramos antes de iniciar el nuestro.
-    if (processIndex === RANDOM_DISNEY7_INDEX || processIndex === DISNEY7_URL_INDEX) {
-      const otherIdx = processIndex === RANDOM_DISNEY7_INDEX ? DISNEY7_URL_INDEX : RANDOM_DISNEY7_INDEX;
-      if (processes[otherIdx]?.isEmitiendo) {
-        toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Disney7)...`);
-        try {
-          await fetch("/api/emit/stop", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ process_id: otherIdx.toString() })
-          });
-        } catch (e) {
-          console.warn(`No se pudo detener proceso ${otherIdx}:`, e);
+    // Mutex entre todos los procesos que comparten /live/Disney7/playlist.m3u8
+    // (Disney 7 ID 0, DISNEY 7 SRT ID 16, RANDOM Disney 7 ID 19).
+    if (DISNEY7_SHARED_OUTPUT.includes(processIndex)) {
+      for (const otherIdx of DISNEY7_SHARED_OUTPUT) {
+        if (otherIdx === processIndex) continue;
+        if (processes[otherIdx]?.isEmitiendo) {
+          toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Disney7)...`);
+          try {
+            await fetch("/api/emit/stop", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ process_id: otherIdx.toString() })
+            });
+          } catch (e) {
+            console.warn(`No se pudo detener proceso ${otherIdx}:`, e);
+          }
         }
       }
     }
