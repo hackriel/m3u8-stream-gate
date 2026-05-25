@@ -4858,13 +4858,14 @@ app.post('/api/emit/stop', async (req, res) => {
 // ESTE FLUJO ES INDEPENDIENTE DEL "Encendido siempre": no toca always_on.
 app.post('/api/emit/restart', async (req, res) => {
   try {
-    const { process_id: rawProcessId = '0', source_m3u8, target_rtmp } = req.body;
+    const { process_id: rawProcessId = '0', source_m3u8, target_rtmp, output_profile = null } = req.body;
     const process_id = String(rawProcessId);
     const numericProcessId = parseInt(process_id, 10);
 
-    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 18) {
+    if (isNaN(numericProcessId) || numericProcessId < 0 || numericProcessId > 20) {
       return res.status(400).json({ error: `ID inválido: ${rawProcessId}` });
     }
+    const outputProfileKey = saveOutputProfileForProcess(process_id, output_profile || getStoredOutputProfile(process_id));
 
     sendLog(process_id, 'info', `🔄 Reinicio manual solicitado — preparando sesión fresca`);
 
@@ -4932,6 +4933,7 @@ app.post('/api/emit/restart', async (req, res) => {
         source_m3u8: effectiveSource,
         target_rtmp: effectiveTarget,
         process_id,
+        output_profile: outputProfileKey,
         is_recovery: false, // arranque limpio, NO recovery (forza refresh de token)
       }),
     });
