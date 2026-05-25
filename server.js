@@ -227,11 +227,14 @@ app.use('/live', (req, res, next) => {
 // re-segmentar, sin manifest). Independiente de CANAL 6 URL.
 // ───────────────────────────────────────────────────────────────────
 const CANAL6_TS_STATE_FILE = path.join(__dirname, 'canal6-ts-state.json');
-let canal6TsState = { sourceUrl: '', enabled: false };
+// profile: 'normal' (passthrough -c copy per cliente, como siempre)
+//          'mejorado720' (encode ÚNICO always-on 720p/2000k, fan-out a clientes)
+let canal6TsState = { sourceUrl: '', enabled: false, profile: 'normal' };
 try {
   if (fs.existsSync(CANAL6_TS_STATE_FILE)) {
     canal6TsState = { ...canal6TsState, ...JSON.parse(fs.readFileSync(CANAL6_TS_STATE_FILE, 'utf8')) };
-    console.log(`[canal6.ts] estado restaurado: enabled=${canal6TsState.enabled} url=${canal6TsState.sourceUrl ? 'set' : 'empty'}`);
+    if (canal6TsState.profile !== 'mejorado720') canal6TsState.profile = 'normal';
+    console.log(`[canal6.ts] estado restaurado: enabled=${canal6TsState.enabled} profile=${canal6TsState.profile} url=${canal6TsState.sourceUrl ? 'set' : 'empty'}`);
   }
 } catch (e) {
   console.warn('[canal6.ts] no se pudo leer estado:', e.message);
@@ -240,25 +243,181 @@ const saveCanal6TsState = () => {
   try { fs.writeFileSync(CANAL6_TS_STATE_FILE, JSON.stringify(canal6TsState, null, 2)); } catch (e) { console.warn('[canal6.ts] save state:', e.message); }
 };
 
+// ───────────── SHARED ENCODER (perfil 'mejorado720') ─────────────
+// Un solo ffmpeg always-on que re-encodea a 720p/2000k MPEG-TS.
+// Todos los clientes HTTP enganchan al mismo stdout (fan-out).
+// Watchdog: si muere, respawn en 2s. Si cambia URL o profile, kill + respawn.
+const sharedEncoder = {
+  ff: null,
+  clients: new Set(),   // Set<res>
+  respawnTimer: null,
+  startedAt: 0,
+  generation: 0,        // se incrementa en cada (re)spawn
+};
+
+const stopSharedEncoder = (reason) => {
+  if (sharedEncoder.respawnTimer) { clearTimeout(sharedEncoder.respawnTimer); sharedEncoder.respawnTimer = null; }
+  if (sharedEncoder.ff) {
+    console.log(`[canal6.ts shared] stop ffmpeg (${reason})`);
+    try { sharedEncoder.ff.kill('SIGKILL'); } catch (_) {}
+    sharedEncoder.ff = null;
+  }
+};
+
+const spawnSharedEncoder = () => {
+  if (!canal6TsState.enabled || canal6TsState.profile !== 'mejorado720' || !canal6TsState.sourceUrl) return;
+  if (sharedEncoder.ff) return; // ya corriendo
+  const src = canal6TsState.sourceUrl;
+  const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+  const args = [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-user_agent', ua,
+    '-headers', 'Referer: https://www.canal6.com.ni/\r\nOrigin: https://www.canal6.com.ni\r\n',
+    '-reconnect', '1',
+    '-reconnect_streamed', '1',
+    '-reconnect_on_network_error', '1',
+    '-reconnect_on_http_error', '404,500,502,503,504',
+    '-reconnect_delay_max', '5',
+    '-rw_timeout', '15000000',
+    '-fflags', '+genpts+igndts+discardcorrupt',
+    '-re',
+    '-i', src,
+    '-map', '0:v:0',
+    '-map', '0:a:0?',
+    // Video: 720p CBR 2000k veryfast (mismo perfil "Normal" del resto)
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-profile:v', 'main',
+    '-level', '4.0',
+    '-pix_fmt', 'yuv420p',
+    '-vf', 'scale=-2:720:flags=lanczos,fps=29.97',
+    '-b:v', '2000k', '-maxrate', '2000k', '-minrate', '2000k', '-bufsize', '4000k',
+    '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
+    '-x264-params', 'nal-hrd=cbr:force-cfr=1:rc-lookahead=20:ref=3:bframes=2',
+    // Audio
+    '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
+    // Mux
+    '-muxdelay', '0', '-muxpreload', '0',
+    '-f', 'mpegts',
+    '-mpegts_flags', '+resend_headers+initial_discontinuity',
+    'pipe:1'
+  ];
+  const gen = ++sharedEncoder.generation;
+  console.log(`[canal6.ts shared] spawn ffmpeg gen=${gen} src=${src}`);
+  const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  sharedEncoder.ff = ff;
+  sharedEncoder.startedAt = Date.now();
+
+  ff.stdout.on('data', (chunk) => {
+    // Fan-out: escribir el chunk a cada cliente conectado.
+    // Si un cliente está saturado, lo dropeamos (no bloqueamos a los demás).
+    for (const res of sharedEncoder.clients) {
+      try {
+        const ok = res.write(chunk);
+        if (!ok) {
+          // backpressure: marcar y dropear si persiste
+          res._c6tsSlowSince = res._c6tsSlowSince || Date.now();
+          if (Date.now() - res._c6tsSlowSince > 5000) {
+            try { res.end(); } catch (_) {}
+            sharedEncoder.clients.delete(res);
+          }
+        } else {
+          res._c6tsSlowSince = 0;
+        }
+      } catch (_) {
+        sharedEncoder.clients.delete(res);
+      }
+    }
+  });
+
+  ff.stderr.on('data', (chunk) => {
+    const msg = chunk.toString().trim();
+    if (msg) console.error(`[canal6.ts shared stderr] ${msg.slice(0, 300)}`);
+  });
+
+  ff.on('exit', (code, signal) => {
+    console.log(`[canal6.ts shared] ffmpeg exit code=${code} signal=${signal} gen=${gen}`);
+    if (sharedEncoder.ff === ff) sharedEncoder.ff = null;
+    // Respawn si seguimos en modo mejorado y enabled
+    if (canal6TsState.enabled && canal6TsState.profile === 'mejorado720' && canal6TsState.sourceUrl) {
+      sharedEncoder.respawnTimer = setTimeout(() => {
+        sharedEncoder.respawnTimer = null;
+        spawnSharedEncoder();
+      }, 2000);
+    }
+  });
+};
+
+const reconcileSharedEncoder = () => {
+  // Llamar tras cualquier cambio de state. Garantiza que el ffmpeg corre
+  // solo si estamos en mejorado720 + enabled + sourceUrl.
+  if (canal6TsState.enabled && canal6TsState.profile === 'mejorado720' && canal6TsState.sourceUrl) {
+    if (!sharedEncoder.ff) spawnSharedEncoder();
+  } else {
+    stopSharedEncoder('reconcile: no longer needed');
+    // Cerrar clientes para que reconecten al nuevo modo
+    for (const res of sharedEncoder.clients) {
+      try { res.end(); } catch (_) {}
+    }
+    sharedEncoder.clients.clear();
+  }
+};
+
 app.get('/canal6-ts/status', (req, res) => {
-  res.json({ ...canal6TsState });
+  res.json({
+    ...canal6TsState,
+    sharedEncoderRunning: !!sharedEncoder.ff,
+    sharedEncoderClients: sharedEncoder.clients.size,
+    sharedEncoderUptimeSec: sharedEncoder.ff && sharedEncoder.startedAt ? Math.round((Date.now() - sharedEncoder.startedAt) / 1000) : 0,
+  });
 });
 app.post('/canal6-ts/start', (req, res) => {
   const url = (req.body?.url || '').trim();
+  const reqProfile = (req.body?.profile || canal6TsState.profile || 'normal');
+  const profile = reqProfile === 'mejorado720' ? 'mejorado720' : 'normal';
   if (!url || !/^https?:\/\//i.test(url)) {
     return res.status(400).json({ ok: false, error: 'URL inválida. Debe ser http(s)://...' });
   }
-  canal6TsState = { sourceUrl: url, enabled: true };
+  const urlChanged = url !== canal6TsState.sourceUrl;
+  const profileChanged = profile !== canal6TsState.profile;
+  canal6TsState = { sourceUrl: url, enabled: true, profile };
   saveCanal6TsState();
-  console.log(`[canal6.ts] START url=${url}`);
+  console.log(`[canal6.ts] START url=${url} profile=${profile} (urlChanged=${urlChanged} profileChanged=${profileChanged})`);
+  // Si estamos en modo mejorado y la URL/profile cambió, respawn el shared encoder.
+  if (profile === 'mejorado720' && (urlChanged || profileChanged || !sharedEncoder.ff)) {
+    stopSharedEncoder('start: url/profile change');
+  }
+  reconcileSharedEncoder();
   res.json({ ok: true, ...canal6TsState });
 });
 app.post('/canal6-ts/stop', (req, res) => {
   canal6TsState.enabled = false;
   saveCanal6TsState();
   console.log('[canal6.ts] STOP');
+  reconcileSharedEncoder();
   res.json({ ok: true, ...canal6TsState });
 });
+app.post('/canal6-ts/profile', (req, res) => {
+  const reqProfile = (req.body?.profile || '').trim();
+  if (reqProfile !== 'normal' && reqProfile !== 'mejorado720') {
+    return res.status(400).json({ ok: false, error: "profile debe ser 'normal' o 'mejorado720'" });
+  }
+  const prev = canal6TsState.profile;
+  if (prev === reqProfile) {
+    return res.json({ ok: true, ...canal6TsState, unchanged: true });
+  }
+  canal6TsState.profile = reqProfile;
+  saveCanal6TsState();
+  console.log(`[canal6.ts] PROFILE switch ${prev} -> ${reqProfile}`);
+  // Al cambiar profile, cortamos clientes actuales para que reconecten al nuevo flujo.
+  stopSharedEncoder('profile switch');
+  reconcileSharedEncoder();
+  res.json({ ok: true, ...canal6TsState });
+});
+
+// Si al arrancar el server ya está enabled en modo mejorado, arrancar shared encoder.
+setTimeout(() => { try { reconcileSharedEncoder(); } catch (e) { console.warn('[canal6.ts] reconcile boot:', e.message); } }, 1000);
 
 app.get('/canal6.ts', (req, res) => {
   if (!canal6TsState.enabled || !canal6TsState.sourceUrl) {
@@ -275,6 +434,28 @@ app.get('/canal6.ts', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
+  const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
+
+  // ────── PERFIL MEJORADO 720: fan-out del shared encoder ──────
+  if (canal6TsState.profile === 'mejorado720') {
+    // Asegurar que el shared encoder esté corriendo
+    if (!sharedEncoder.ff) spawnSharedEncoder();
+    sharedEncoder.clients.add(res);
+    console.log(`[canal6.ts shared] cliente ${clientIp} attach (total=${sharedEncoder.clients.size})`);
+    const detach = (reason) => {
+      if (sharedEncoder.clients.delete(res)) {
+        console.log(`[canal6.ts shared] cliente ${clientIp} detach (${reason}) (total=${sharedEncoder.clients.size})`);
+      }
+      try { res.end(); } catch (_) {}
+    };
+    req.on('close', () => detach('req close'));
+    req.on('aborted', () => detach('req aborted'));
+    res.on('close', () => detach('res close'));
+    res.on('error', () => detach('res error'));
+    return;
+  }
+
+  // ────── PERFIL NORMAL: passthrough per-cliente (comportamiento original) ──────
   const src = canal6TsState.sourceUrl;
   const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
   const ffArgs = [
@@ -302,7 +483,6 @@ app.get('/canal6.ts', (req, res) => {
     'pipe:1'
   ];
 
-  const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
   console.log(`[canal6.ts] cliente ${clientIp} → spawn ffmpeg src=${src}`);
 
   const ff = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
