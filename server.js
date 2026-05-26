@@ -1080,6 +1080,8 @@ const stopTigoOutputStage = (process_id) => {
 // principal en `ffmpegProcesses`. Así toda la lógica de cierre/recovery existente
 // (manejada en ffmpegProcess.on('close')) sigue funcionando idéntica.
 const startTigoHdmiIngest = (process_id) => {
+  // Preflight: liberar puerto si quedó un FFmpeg huérfano del SRT listener anterior.
+  ensureSrtPortFree(TIGO_SRT_PORT, process_id, 'TIGO HDMI');
   cleanTigoBufferDir();
   resetTigoSrtMetric(process_id);
 
