@@ -6019,7 +6019,10 @@ server.listen(PORT, () => {
         const now = Date.now();
         for (const row of rows) {
           const pid = String(row.id);
-          if (pid === '12' || pid === '16' || pid === '18') continue; // SRT/OBS locales excluidos. FUTV ALTERNO (17) sí refresca si tiene player_url.
+          // SRT/OBS locales excluidos del refresh horario:
+          //   12/16/18 = OBS local;  21/22/23 = SRT-ingest desde Pi5 (el Pi5 refresca su propio token TDMax).
+          // FUTV ALTERNO (17) sí refresca si tiene player_url.
+          if (pid === '12' || pid === '16' || pid === '18' || pid === '21' || pid === '22' || pid === '23') continue;
 
           // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
