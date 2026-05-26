@@ -946,6 +946,37 @@ const cleanSrtBufferDir = (cfg) => {
   }
 };
 
+// ── Preflight de puerto SRT (UDP) ─────────────────────────────────
+// Detecta procesos huérfanos (ffmpeg/srt-live-transmit) que retengan el
+// bind del puerto y los mata con SIGKILL para que el listener nuevo pueda
+// hacer bind. Sin esto, FFmpeg muere a los 2s con "Input/output error".
+const ensureSrtPortFree = (port, process_id, label) => {
+  if (!port) return;
+  const log = (lvl, msg) => {
+    try { if (typeof sendLog === 'function' && process_id != null) sendLog(process_id, lvl, msg); } catch (_) {}
+    try { console.log(`[srt-preflight:${label || port}] ${msg}`); } catch (_) {}
+  };
+  let pids = [];
+  try {
+    const out = execSync(`lsof -tiUDP:${port} 2>/dev/null || true`, { encoding: 'utf8' });
+    pids = out.split(/\s+/).map(s => s.trim()).filter(Boolean);
+  } catch (_) { pids = []; }
+  if (pids.length === 0) return;
+  for (const pid of pids) {
+    let cmd = '';
+    try { cmd = execSync(`ps -p ${pid} -o args= 2>/dev/null || true`, { encoding: 'utf8' }).trim(); } catch (_) {}
+    const isOurs = /ffmpeg|srt-live-transmit/i.test(cmd);
+    if (isOurs) {
+      log('warn', `🧹 Puerto UDP ${port} ocupado por PID ${pid} (huérfano: ${cmd.slice(0,80)}). Matando con SIGKILL.`);
+      try { execSync(`kill -9 ${pid}`, { stdio: 'ignore' }); } catch (_) {}
+    } else {
+      log('error', `⛔ Puerto UDP ${port} ocupado por PID ${pid} ajeno (${cmd.slice(0,80) || 'desconocido'}). Liberá manualmente.`);
+    }
+  }
+  // Pausa breve para que el kernel libere el bind.
+  try { execSync('sleep 0.5', { stdio: 'ignore' }); } catch (_) {}
+};
+
 const waitForSrtBufferReady = async (cfg, timeoutMs) => {
   const limit = timeoutMs || cfg.waitTimeoutMs;
   const start = Date.now();
