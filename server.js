@@ -647,7 +647,7 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21']);
+const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 // FUTV (11), FUTV ALTERNO (17) y FUTV SRT (18) comparten slug 'futv' a propósito:
 // los 3 emiten al MISMO destino HLS local (/live/futv/playlist.m3u8) por métodos distintos
@@ -658,7 +658,7 @@ const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '
 // distintos (SRT desde OBS vs M3U passthrough). Mutuamente excluyentes.
 // CANAL 6 URL (15) y CANAL 6 SRT (20) comparten slug 'Canal6' (URL CDN vs ingest SRT desde OBS).
 // Disney 7 (ID 0) — M3U file passthrough con perfil VLC-like — también emite al slug 'Disney7'.
-const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica' };
+const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox' };
 
 const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 // Perfiles de salida (CBR x264).
@@ -851,6 +851,22 @@ const SRT_INGEST_CONFIGS = {
     latencyMs: parseInt(process.env.TELETICA_SRT_LATENCY_MS || '2000', 10),
     passphrase: process.env.TELETICA_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/teletica-srt-buffer-21',
+  },
+  '22': {
+    label: 'FOX+ SRT',
+    slug: 'foxmas',
+    port: parseInt(process.env.FOXMAS_SRT_PORT || '9005', 10),
+    latencyMs: parseInt(process.env.FOXMAS_SRT_LATENCY_MS || '2000', 10),
+    passphrase: process.env.FOXMAS_SRT_PASSPHRASE || '',
+    bufferDir: '/tmp/foxmas-srt-buffer-22',
+  },
+  '23': {
+    label: 'FOX SRT',
+    slug: 'fox',
+    port: parseInt(process.env.FOX_SRT_PORT || '9006', 10),
+    latencyMs: parseInt(process.env.FOX_SRT_LATENCY_MS || '2000', 10),
+    passphrase: process.env.FOX_SRT_PASSPHRASE || '',
+    bufferDir: '/tmp/fox-srt-buffer-23',
   },
 };
 for (const cfg of Object.values(SRT_INGEST_CONFIGS)) {
