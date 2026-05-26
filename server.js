@@ -6086,72 +6086,100 @@ server.listen(PORT, () => {
     }, 60 * 1000); // chequea cada 1 min (ventana de actuación de 5 min al inicio de la hora objetivo)
   }
 
-  // ====== WATCHDOG ALWAYS-ON (Canal 6 URL / ID 15) ======
+  // ====== WATCHDOG ALWAYS-ON (IDs 15, 21, 22, 23) ======
   // Si el switch "Encendido siempre" está activo y el proceso está caído (no emitiendo)
-  // SIN parada manual ni descanso nocturno, lo relanzamos automáticamente con la URL
-  // guardada. Cubre el caso donde el recovery se rinde (cdn_unavailable / circuit_breaker)
-  // y el proceso queda muerto hasta que alguien lo levanta a mano.
-  setInterval(async () => {
-    try {
-      if (!supabase) return;
-      const PID = '15';
-      const PID_NUM = 15;
+  // SIN parada manual ni descanso nocturno, lo relanzamos automáticamente.
+  // Cubre el caso donde el recovery se rinde (cdn_unavailable / circuit_breaker) o el
+  // listener SRT muere por un glitch y el proceso queda muerto hasta que alguien lo
+  // levanta a mano.
+  //
+  //   • ID 15 (CANAL 6 URL): relanza con source_url + rtmp guardados en BD.
+  //   • IDs 21/22/23 (TELETICA / FOX+ / FOX SRT desde Pi5): relanza listener SRT
+  //     con payload fijo srt://obs + hls-local. Mientras always_on=true, el VPS
+  //     siempre estará receptivo a la señal que el Pi5 envía 24/7.
+  const ALWAYS_ON_WATCHDOG_IDS = ['15', '21', '22', '23'];
 
-      // Respetar parada manual y descanso nocturno (1-5 AM)
-      if (manualStopProcesses.has(PID) || manualStopProcesses.has(PID_NUM)) return;
-      if (nightRestStoppedProcesses.has(PID)) return;
-      const { hour: crHour } = getCostaRicaHour();
-      if (crHour >= 1 && crHour < 5) return;
+  const tryRelaunchAlwaysOnChannel = async (PID) => {
+    if (!supabase) return;
+    const PID_NUM = Number(PID);
 
-      // Si ya hay un FFmpeg vivo o un recovery en curso, no tocar
-      const procData = ffmpegProcesses.get(PID) || ffmpegProcesses.get(PID_NUM);
-      if (procData?.process && !procData.process.killed) return;
-      if (autoRecoveryInProgress.get(PID)) return;
+    // Respetar parada manual y descanso nocturno (1-5 AM)
+    if (manualStopProcesses.has(PID) || manualStopProcesses.has(PID_NUM)) return;
+    if (nightRestStoppedProcesses.has(PID)) return;
+    const { hour: crHour } = getCostaRicaHour();
+    if (crHour >= 1 && crHour < 5) return;
 
-      const { data: row } = await supabase
-        .from('emission_processes')
-        .select('id, source_url, m3u8, rtmp, always_on, is_emitting, emit_status')
-        .eq('id', PID_NUM)
-        .single();
+    // Si ya hay un FFmpeg vivo o un recovery en curso, no tocar
+    const procData = ffmpegProcesses.get(PID) || ffmpegProcesses.get(PID_NUM);
+    if (procData?.process && !procData.process.killed) return;
+    if (autoRecoveryInProgress.get(PID)) return;
 
-      if (!row || !row.always_on) return;
-      if (row.is_emitting) return; // ya está emitiendo (o intentándolo)
+    const { data: row } = await supabase
+      .from('emission_processes')
+      .select('id, source_url, m3u8, rtmp, always_on, is_emitting, emit_status')
+      .eq('id', PID_NUM)
+      .single();
 
+    if (!row || !row.always_on) return;
+    if (row.is_emitting) return; // ya está emitiendo (o intentándolo)
+
+    // Determinar payload según tipo de canal
+    let payload;
+    let label;
+    if (isSrtIngestProcess(PID)) {
+      const cfg = getSrtConfig(PID);
+      label = cfg?.label || `SRT ${PID}`;
+      payload = {
+        source_m3u8: 'srt://obs',
+        target_rtmp: 'hls-local',
+        process_id: PID,
+        is_recovery: true,
+      };
+    } else {
+      // ID 15 (CANAL 6 URL) y similares: requieren URL guardada
       const sourceUrl = row.source_url || row.m3u8;
       const targetRtmp = row.rtmp;
-      if (!sourceUrl || !targetRtmp) {
-        return; // sin URL guardada, no podemos relanzar solos
-      }
+      if (!sourceUrl || !targetRtmp) return;
+      label = `CANAL ${PID}`;
+      payload = {
+        source_m3u8: sourceUrl,
+        target_rtmp: targetRtmp,
+        process_id: PID,
+        is_recovery: true,
+      };
+    }
 
-      sendLog(PID, 'warn', `🔁 Watchdog always-on: CANAL 6 URL caído con switch activo. Relanzando automáticamente...`);
+    sendLog(PID, 'warn', `🔁 Watchdog always-on: ${label} caído con switch activo. Relanzando automáticamente...`);
 
-      // Limpiar fallos previos para que un circuit breaker viejo no nos bloquee
-      try { failureTimestamps.delete(PID); } catch (_) {}
+    // Limpiar fallos previos para que un circuit breaker viejo no nos bloquee
+    try { failureTimestamps.delete(PID); } catch (_) {}
 
-      await supabase.from('emission_processes').update({
-        emit_status: 'starting',
-        is_emitting: true,
-        is_active: true,
-        failure_reason: null,
-        failure_details: null,
-      }).eq('id', PID_NUM);
+    await supabase.from('emission_processes').update({
+      emit_status: 'starting',
+      is_emitting: true,
+      is_active: true,
+      failure_reason: null,
+      failure_details: null,
+    }).eq('id', PID_NUM);
 
+    try {
+      await fetch(`http://localhost:${PORT}/api/emit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      sendLog(PID, 'error', `❌ Watchdog always-on: error al relanzar: ${e.message}`);
+    }
+  };
+
+  setInterval(async () => {
+    for (const pid of ALWAYS_ON_WATCHDOG_IDS) {
       try {
-        await fetch(`http://localhost:${PORT}/api/emit`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            source_m3u8: sourceUrl,
-            target_rtmp: targetRtmp,
-            process_id: PID,
-            is_recovery: true,
-          }),
-        });
-      } catch (e) {
-        sendLog(PID, 'error', `❌ Watchdog always-on: error al relanzar: ${e.message}`);
+        await tryRelaunchAlwaysOnChannel(pid);
+      } catch (err) {
+        console.error(`Watchdog always-on (ID ${pid}) error:`, err);
       }
-    } catch (err) {
-      console.error('Watchdog always-on (ID 15) error:', err);
     }
   }, 2 * 60 * 1000); // cada 2 min
 
