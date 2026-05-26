@@ -208,7 +208,6 @@ function spawnFfmpeg(hlsUrl) {
 let currentProc = null;
 let stopRequested = false;
 let backoffMs = 3000;
-let lastScheduledRefreshKey = '';
 
 function killCurrent(signal = 'SIGTERM') {
   if (currentProc && !currentProc.killed) {
@@ -217,37 +216,53 @@ function killCurrent(signal = 'SIGTERM') {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Refresh programado diario (00:00 y 05:00 hora Costa Rica)
-// Mismo criterio que el VPS para los canales scrapeados:
-// mata ffmpeg → exit handler re-loguea TDMax → reconecta SRT.
+// Refresh programado diario (00:00 y 05:00 hora Costa Rica, UTC-6 sin DST)
+// Se calcula el próximo disparo exacto y se programa UN setTimeout.
+// Tras ejecutarse (o al iniciar el servicio), se reprograma el siguiente.
+// Nada de polling cada minuto.
 // ─────────────────────────────────────────────────────────────
 const REFRESH_HOURS_CR = [0, 5];
+const CR_OFFSET_MS = 6 * 60 * 60 * 1000; // Costa Rica = UTC-6
 
-function checkScheduledRefresh() {
-  // Costa Rica = UTC-6 todo el año (sin DST).
-  const nowUtc = new Date();
-  const crMs = nowUtc.getTime() - 6 * 60 * 60 * 1000;
-  const cr = new Date(crMs);
-  const hh = cr.getUTCHours();
-  const mm = cr.getUTCMinutes();
-
-  if (!REFRESH_HOURS_CR.includes(hh) || mm >= 5) return;
-
-  // Guard: una sola ejecución por ventana (clave YYYY-MM-DD-HH)
-  const key = `${cr.getUTCFullYear()}-${cr.getUTCMonth()+1}-${cr.getUTCDate()}-${hh}`;
-  if (key === lastScheduledRefreshKey) return;
-  lastScheduledRefreshKey = key;
-
-  if (!currentProc) {
-    log(`⏰ Refresh programado ${hh}:00 CR — ffmpeg no estaba activo, se omite`);
-    return;
+function msUntilNextRefresh() {
+  const nowUtcMs = Date.now();
+  const crNow = new Date(nowUtcMs - CR_OFFSET_MS); // "reloj" CR en UTC fields
+  let best = Infinity;
+  let bestHh = -1;
+  for (const hh of REFRESH_HOURS_CR) {
+    // Próxima ocurrencia hoy en CR
+    const candCr = new Date(Date.UTC(
+      crNow.getUTCFullYear(), crNow.getUTCMonth(), crNow.getUTCDate(),
+      hh, 0, 0, 0,
+    ));
+    let candUtcMs = candCr.getTime() + CR_OFFSET_MS;
+    if (candUtcMs <= nowUtcMs) candUtcMs += 24 * 60 * 60 * 1000; // mañana
+    const delta = candUtcMs - nowUtcMs;
+    if (delta < best) { best = delta; bestHh = hh; }
   }
-  log(`⏰ Refresh programado ${hh}:00 CR — reciclando ffmpeg + token TDMax`);
-  backoffMs = 3000; // forzar reintento inmediato
-  killCurrent('SIGTERM');
+  return { ms: best, hh: bestHh };
 }
 
-setInterval(checkScheduledRefresh, 60 * 1000);
+let refreshTimer = null;
+function scheduleNextRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  const { ms, hh } = msUntilNextRefresh();
+  const mins = Math.round(ms / 60000);
+  log(`⏰ Próximo refresh programado: ${hh.toString().padStart(2,'0')}:00 CR (en ~${mins} min)`);
+  refreshTimer = setTimeout(() => {
+    if (stopRequested) return;
+    if (!currentProc) {
+      log(`⏰ Refresh ${hh}:00 CR — ffmpeg no activo, se omite reciclaje`);
+    } else {
+      log(`⏰ Refresh ${hh}:00 CR — reciclando ffmpeg + token TDMax`);
+      backoffMs = 3000;
+      killCurrent('SIGTERM');
+    }
+    scheduleNextRefresh();
+  }, ms);
+  if (refreshTimer.unref) refreshTimer.unref();
+}
+scheduleNextRefresh();
 
 async function runOnce() {
   let hlsUrl;
