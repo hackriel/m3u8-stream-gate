@@ -229,7 +229,7 @@ export default function EmisorM3U8Panel() {
   const [canal6TsStatus, setCanal6TsStatus] = useState<{
     enabled: boolean;
     sourceUrl: string;
-    profile: 'normal' | 'mejorado720';
+    profile: 'normal' | 'mejorado720' | 'optimizado480';
     sharedEncoderRunning?: boolean;
     sharedEncoderClients?: number;
     sharedEncoderUptimeSec?: number;
@@ -249,7 +249,7 @@ export default function EmisorM3U8Panel() {
         setCanal6TsStatus({
           enabled: !!j.enabled,
           sourceUrl: j.sourceUrl || '',
-          profile: j.profile === 'mejorado720' ? 'mejorado720' : 'normal',
+          profile: (j.profile === 'mejorado720' || j.profile === 'optimizado480') ? j.profile : 'normal',
           sharedEncoderRunning: !!j.sharedEncoderRunning,
           sharedEncoderClients: j.sharedEncoderClients || 0,
           sharedEncoderUptimeSec: j.sharedEncoderUptimeSec || 0,
@@ -290,9 +290,11 @@ export default function EmisorM3U8Panel() {
       toast.error(`No se pudo detener: ${e.message}`);
     } finally { setCanal6TsBusy(false); }
   };
-  const canal6TsSwitchProfile = async (profile: 'normal' | 'mejorado720') => {
+  const canal6TsSwitchProfile = async (profile: 'normal' | 'mejorado720' | 'optimizado480') => {
     if (canal6TsStatus.profile === profile) return;
-    const label = profile === 'mejorado720' ? 'Mejorado 720' : 'Normal';
+    const label = profile === 'mejorado720' ? 'Mejorado 720'
+                : profile === 'optimizado480' ? 'Optimizado 480'
+                : 'Normal';
     const warn = canal6TsStatus.enabled
       ? `¿Cambiar perfil a "${label}"? Los clientes IPTV conectados verán ~5-10s de buffering al reconectar.`
       : `¿Cambiar perfil a "${label}"?`;
