@@ -1845,6 +1845,39 @@ export default function EmisorM3U8Panel() {
                           </div>
                         </>
                       )}
+                      {(() => {
+                        const pi5Target: 'teletica' | 'foxmas' | 'fox' | null =
+                          processIndex === TELETICA_SRT_INDEX ? 'teletica'
+                          : processIndex === FOXMAS_SRT_INDEX ? 'foxmas'
+                          : processIndex === FOX_SRT_INDEX ? 'fox'
+                          : null;
+                        if (!pi5Target) return null;
+                        const sendPi5Refresh = async () => {
+                          try {
+                            const { error } = await supabase
+                              .from('pi5_commands')
+                              .insert({ target: pi5Target, command: 'refresh' });
+                            if (error) throw error;
+                            toast.success(`🔄 Refresh enviado al Pi5 (${pi5Target}). Se aplica en ≤15s.`);
+                          } catch (e: any) {
+                            toast.error(`Error enviando refresh: ${e?.message || e}`);
+                          }
+                        };
+                        return (
+                          <div className="flex items-center gap-2 pt-2 border-t border-border/50">
+                            <p className="text-xs text-muted-foreground flex-1">
+                              Forzar relogin TDMax + nuevo token en el Pi5 (~15s):
+                            </p>
+                            <button
+                              onClick={sendPi5Refresh}
+                              className="px-3 py-2 rounded-lg bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 text-xs font-semibold transition-all"
+                              title="Manda un comando al Raspberry Pi para reciclar ffmpeg y obtener URL fresca de TDMax"
+                            >
+                              🔄 Refresh Pi5
+                            </button>
+                          </div>
+                        );
+                      })()}
                       <p className="text-xs text-muted-foreground">Tu URL estable para XUI:</p>
                       <div className="flex items-center gap-2">
                         <code className="flex-1 bg-background border border-primary/30 rounded-lg px-3 py-2 text-sm font-mono text-primary break-all">
