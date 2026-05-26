@@ -743,6 +743,8 @@ export default function EmisorM3U8Panel() {
     const futvSrtPreset = CHANNEL_CONFIGS[FUTV_SRT_INDEX]?.presetUrl;
     const canal6SrtPreset = CHANNEL_CONFIGS[CANAL6_SRT_INDEX]?.presetUrl;
     const teleticaSrtPreset = CHANNEL_CONFIGS[TELETICA_SRT_INDEX]?.presetUrl;
+    const foxmasSrtPreset = CHANNEL_CONFIGS[FOXMAS_SRT_INDEX]?.presetUrl;
+    const foxSrtPreset = CHANNEL_CONFIGS[FOX_SRT_INDEX]?.presetUrl;
     const tigoRtmp = 'hls-local';
     setProcesses(prev => {
       let changed = false;
@@ -770,6 +772,16 @@ export default function EmisorM3U8Panel() {
 
       if (teleticaSrtPreset && (next[TELETICA_SRT_INDEX]?.m3u8 !== teleticaSrtPreset || next[TELETICA_SRT_INDEX]?.rtmp !== tigoRtmp)) {
         next[TELETICA_SRT_INDEX] = { ...next[TELETICA_SRT_INDEX], m3u8: teleticaSrtPreset, rtmp: tigoRtmp };
+        changed = true;
+      }
+
+      if (foxmasSrtPreset && (next[FOXMAS_SRT_INDEX]?.m3u8 !== foxmasSrtPreset || next[FOXMAS_SRT_INDEX]?.rtmp !== tigoRtmp)) {
+        next[FOXMAS_SRT_INDEX] = { ...next[FOXMAS_SRT_INDEX], m3u8: foxmasSrtPreset, rtmp: tigoRtmp };
+        changed = true;
+      }
+
+      if (foxSrtPreset && (next[FOX_SRT_INDEX]?.m3u8 !== foxSrtPreset || next[FOX_SRT_INDEX]?.rtmp !== tigoRtmp)) {
+        next[FOX_SRT_INDEX] = { ...next[FOX_SRT_INDEX], m3u8: foxSrtPreset, rtmp: tigoRtmp };
         changed = true;
       }
 
@@ -828,6 +840,26 @@ export default function EmisorM3U8Panel() {
         .eq('id', TELETICA_SRT_INDEX)
         .then(({ error }) => {
           if (error) console.error('Error guardando preset de TELETICA SRT:', error);
+        });
+    }
+
+    if (foxmasSrtPreset) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: foxmasSrtPreset, rtmp: tigoRtmp })
+        .eq('id', FOXMAS_SRT_INDEX)
+        .then(({ error }) => {
+          if (error) console.error('Error guardando preset de FOX+ SRT:', error);
+        });
+    }
+
+    if (foxSrtPreset) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: foxSrtPreset, rtmp: tigoRtmp })
+        .eq('id', FOX_SRT_INDEX)
+        .then(({ error }) => {
+          if (error) console.error('Error guardando preset de FOX SRT:', error);
         });
     }
 
@@ -1685,7 +1717,11 @@ export default function EmisorM3U8Panel() {
                               ? CANAL6_SRT_OBS_INGEST_URL
                               : processIndex === TELETICA_SRT_INDEX
                                 ? TELETICA_SRT_OBS_INGEST_URL
-                                : PASTE_URL_PROCESSES.has(processIndex)
+                                : processIndex === FOXMAS_SRT_INDEX
+                                  ? FOXMAS_SRT_OBS_INGEST_URL
+                                  : processIndex === FOX_SRT_INDEX
+                                    ? FOX_SRT_OBS_INGEST_URL
+                                    : PASTE_URL_PROCESSES.has(processIndex)
                             ? 'M3U8 extraído (auto-completado)'
                             : 'https://servidor/origen/playlist.m3u8'
                     }
@@ -1759,6 +1795,8 @@ export default function EmisorM3U8Panel() {
                 [RANDOM_DISNEY7_INDEX]: 'Disney7',
                 [CANAL6_SRT_INDEX]: 'Canal6',
                 [TELETICA_SRT_INDEX]: 'Teletica',
+                [FOXMAS_SRT_INDEX]: 'foxmas',
+                [FOX_SRT_INDEX]: 'fox',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
@@ -1773,7 +1811,11 @@ export default function EmisorM3U8Panel() {
                       ? CANAL6_SRT_OBS_INGEST_URL
                       : processIndex === TELETICA_SRT_INDEX
                         ? TELETICA_SRT_OBS_INGEST_URL
-                        : '';
+                          : processIndex === FOXMAS_SRT_INDEX
+                            ? FOXMAS_SRT_OBS_INGEST_URL
+                            : processIndex === FOX_SRT_INDEX
+                              ? FOX_SRT_OBS_INGEST_URL
+                              : '';
               return (
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
