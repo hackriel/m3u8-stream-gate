@@ -998,31 +998,117 @@ const waitForSrtBufferReady = async (cfg, timeoutMs) => {
   return { ready: false, segments: 0, waitedMs: Date.now() - start };
 };
 
-// ETAPA 1 SRT genérico: FFmpeg SRT listener que recibe de OBS y escribe HLS buffer local.
+// ─────────────────────────────────────────────────────────────────────
+// SRT INGEST ARCHITECTURE (IDs 12/16/18/20/21/22/23)
+//
+// El listener SRT (srt-live-transmit) corre PERMANENTE como proceso
+// independiente del FFmpeg ETAPA 2. Reenvía el SRT a UDP local
+// (127.0.0.1:<udpPort>). Cuando el Raspberry/OBS se reconecta (p.ej.
+// rotación de token cada 60s), srt-live-transmit absorbe la
+// reconexión sin matar al FFmpeg que lee UDP — así el HLS buffer y
+// toda la cadena downstream no se reinician.
+//
+// Pi/OBS (SRT caller) → srt-live-transmit (listener persistente)
+//                     → udp://127.0.0.1:<udpPort>
+//                     → ffmpeg ETAPA 2 (lee UDP, escribe HLS buffer)
+// ─────────────────────────────────────────────────────────────────────
+
+// Map<process_id, ChildProcess> para los listeners srt-live-transmit
+// persistentes. Sobreviven a los reinicios del ffmpeg ETAPA 2.
+const srtListenerProcesses = new Map();
+
+const buildSrtListenerUrl = (cfg) => {
+  let url = `srt://:${cfg.port}?mode=listener&latency=${cfg.latencyMs}&pkt_size=1316`;
+  if (cfg.passphrase && cfg.passphrase.length >= 10) {
+    url += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
+  }
+  return url;
+};
+
+// Levanta (o reutiliza) el srt-live-transmit listener para un process_id.
+// Idempotente: si ya hay uno vivo, no hace nada.
+const ensureSrtListener = (process_id) => {
+  const key = String(process_id);
+  const existing = srtListenerProcesses.get(key);
+  if (existing && !existing.killed && existing.exitCode === null) return existing;
+
+  const cfg = getSrtConfig(process_id);
+  if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
+
+  // Preflight: liberar el puerto SRT si hay procesos huérfanos.
+  ensureSrtPortFree(cfg.port, process_id, cfg.label || `SRT ${process_id}`);
+
+  const srtUrl = buildSrtListenerUrl(cfg);
+  const udpUrl = `udp://127.0.0.1:${cfg.udpPort}?pkt_size=1316`;
+
+  const args = [srtUrl, udpUrl, '-loglevel:info', '-stats-report-frequency:5000'];
+  const proc = spawn('srt-live-transmit', args);
+  srtListenerProcesses.set(key, proc);
+
+  proc.stderr?.on('data', (buf) => {
+    const txt = buf.toString();
+    // Solo logueamos handshakes/errores reales para no saturar.
+    if (/(error|fail|reject|disconnect|accept|connect)/i.test(txt)) {
+      const line = txt.split('\n').find(l => l.trim()) || txt.trim();
+      sendLog(process_id, /error|fail|reject/i.test(line) ? 'warn' : 'info',
+        `🛰️ slt: ${line.substring(0, 200)}`);
+    }
+  });
+
+  proc.on('exit', (code, signal) => {
+    srtListenerProcesses.delete(key);
+    if (manualStopProcesses.has(key) || manualStopProcesses.has(Number(key))) {
+      sendLog(process_id, 'info', `🛰️ srt-live-transmit detenido por parada manual`);
+      return;
+    }
+    sendLog(process_id, 'warn',
+      `🛰️ srt-live-transmit cayó (code=${code ?? '-'}${signal ? `, signal=${signal}` : ''}). Reabriendo listener en 2s...`);
+    setTimeout(() => {
+      if (manualStopProcesses.has(key) || manualStopProcesses.has(Number(key))) return;
+      try { ensureSrtListener(process_id); }
+      catch (e) { sendLog(process_id, 'error', `❌ No se pudo reabrir srt-live-transmit: ${e.message}`); }
+    }, 2000);
+  });
+
+  sendLog(process_id, 'success',
+    `🛰️ Listener persistente UP: srt://:${cfg.port} → udp://127.0.0.1:${cfg.udpPort} (latency=${cfg.latencyMs}ms)`);
+  return proc;
+};
+
+const stopSrtListener = (process_id) => {
+  const key = String(process_id);
+  const proc = srtListenerProcesses.get(key);
+  srtListenerProcesses.delete(key);
+  if (proc && !proc.killed) {
+    try { proc.kill('SIGKILL'); } catch (_) {}
+  }
+};
+
+// ETAPA 2: FFmpeg lee del UDP local (alimentado por srt-live-transmit) y
+// escribe el buffer HLS. Este proceso NO ve las desconexiones del caller SRT:
+// UDP es sin conexión y srt-live-transmit absorbe los reconnects.
 const startSrtIngest = (process_id) => {
   const cfg = getSrtConfig(process_id);
   if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
-  // Preflight: liberar el puerto SRT si hay procesos huérfanos atados a él.
-  // (Soluciona "Input/output error" en :PORT cuando un ffmpeg/srt-live-transmit
-  //  anterior no soltó el bind tras un kill abrupto o restart del servicio.)
-  ensureSrtPortFree(cfg.port, process_id, cfg.label || `SRT ${process_id}`);
-  // Blindaje: matar cualquier ffmpeg residual (huérfano) que esté usando este buffer
-  // o esta carpeta de salida HLS, para evitar arrancar "encima" de un proceso zombi
-  // que bloquearía el spawn de ETAPA 2 (caso real visto en Disney 7).
+
+  // Asegurar que el listener persistente esté arriba ANTES del ffmpeg.
+  ensureSrtListener(process_id);
+
+  // Blindaje: matar ffmpeg residual sobre este buffer u output HLS.
   try {
     const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
-    const patterns = [cfg.bufferDir, `live/${slug}/`, `:${cfg.port}?mode=listener`];
+    const patterns = [cfg.bufferDir, `live/${slug}/`, `udp://127.0.0.1:${cfg.udpPort}`];
     for (const pat of patterns) {
       try { execSync(`pkill -9 -f ${JSON.stringify(pat)}`, { stdio: 'ignore' }); } catch (_) {}
     }
   } catch (_) {}
   cleanSrtBufferDir(cfg);
-  resetTigoSrtMetric(process_id); // mapa de métricas SRT (genérico por process_id)
+  resetTigoSrtMetric(process_id);
 
-  let srtUrl = `srt://0.0.0.0:${cfg.port}?mode=listener&latency=${cfg.latencyUs}&pkt_size=1316`;
-  if (cfg.passphrase && cfg.passphrase.length >= 10) {
-    srtUrl += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
-  }
+  // fifo_size grande + overrun_nonfatal para tolerar bursts.
+  // timeout=0 ⇒ lectura UDP indefinida (no cerramos por inactividad; el
+  // watchdog de stalls del flujo principal se encarga de eso).
+  const udpInput = `udp://127.0.0.1:${cfg.udpPort}?fifo_size=1000000&overrun_nonfatal=1&timeout=0`;
 
   const args = [
     '-hide_banner',
@@ -1031,7 +1117,7 @@ const startSrtIngest = (process_id) => {
     '-fflags', '+genpts+discardcorrupt+nobuffer',
     '-analyzeduration', '10000000',
     '-probesize', '5000000',
-    '-i', srtUrl,
+    '-i', udpInput,
     '-map', '0:v:0',
     '-map', '0:a:0',
     '-c', 'copy',
