@@ -104,6 +104,33 @@ export type Database = {
         }
         Relationships: []
       }
+      pi5_commands: {
+        Row: {
+          command: string
+          consumed_at: string | null
+          consumed_by: string | null
+          created_at: string
+          id: string
+          target: string
+        }
+        Insert: {
+          command: string
+          consumed_at?: string | null
+          consumed_by?: string | null
+          created_at?: string
+          id?: string
+          target: string
+        }
+        Update: {
+          command?: string
+          consumed_at?: string | null
+          consumed_by?: string | null
+          created_at?: string
+          id?: string
+          target?: string
+        }
+        Relationships: []
+      }
       process_log_snapshots: {
         Row: {
           created_at: string
