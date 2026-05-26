@@ -4290,6 +4290,59 @@ app.post('/api/emit', async (req, res) => {
             sendLog(process_id, 'error', `❌ Failover ALTERNO→FUTV URL falló: ${e.message}`);
           }
         }, 1000);
+      } else if (PI_SRT_INGEST_PROCESSES.has(String(process_id)) && (code !== null || signal)) {
+        const cfg = getSrtConfig(process_id);
+        recordFailure(process_id);
+
+        if (isCircuitBroken(process_id)) {
+          sendLog(process_id, 'error', `🔴 ${cfg?.label || 'SRT Pi5'}: demasiados cortes seguidos. Recovery detenido para evitar loop; revisar Pi/red/firewall.`);
+          if (supabase) {
+            await supabase.from('emission_processes').update({
+              is_active: false,
+              is_emitting: false,
+              emit_status: 'error',
+              failure_reason: 'circuit_breaker',
+              failure_details: 'Demasiados cortes SRT consecutivos desde Raspberry Pi. Revisar servicio del Pi, red y puerto UDP.',
+            }).eq('id', parseInt(process_id));
+          }
+          autoRecoveryInProgress.set(String(process_id), false);
+        } else {
+          const delayMs = code === 0 ? 1000 : 2500;
+          sendLog(process_id, 'warn', `🔁 ${cfg?.label || 'SRT Pi5'}: ETAPA 1 cerró (code=${code ?? '-'}${signal ? `, signal=${signal}` : ''}). Reabriendo listener en ${delayMs / 1000}s...`);
+          enqueueRecovery(process_id, async () => {
+            await sleep(delayMs);
+            if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+              sendLog(process_id, 'info', `🛑 Recovery SRT Pi5 cancelado: parada manual detectada`);
+              manualStopProcesses.delete(String(process_id));
+              manualStopProcesses.delete(Number(process_id));
+              return;
+            }
+            const emitResp = await fetch(`http://localhost:${PORT}/api/emit`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                source_m3u8: 'srt://obs',
+                target_rtmp: 'hls-local',
+                process_id: String(process_id),
+                output_profile: getStoredOutputProfile(process_id),
+                is_recovery: true,
+              }),
+            });
+            if (!emitResp.ok) {
+              const errText = await emitResp.text().catch(() => '');
+              sendLog(process_id, 'error', `❌ Recovery SRT Pi5 falló (${emitResp.status}${errText ? `: ${errText.substring(0, 120)}` : ''})`);
+              return;
+            }
+            if (supabase) {
+              const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: parseInt(process_id) });
+              if (rpcErr) {
+                const { data: row } = await supabase.from('emission_processes').select('recovery_count').eq('id', parseInt(process_id)).single();
+                await supabase.from('emission_processes').update({ recovery_count: (row?.recovery_count || 0) + 1 }).eq('id', parseInt(process_id));
+              }
+            }
+            sendLog(process_id, 'success', `✅ ${cfg?.label || 'SRT Pi5'}: listener reabierto inmediatamente para reconectar Raspberry`);
+          });
+        }
       } else if (code !== null || signal) {
         // Auto-recovery para CUALQUIER cierre no manual (código de salida o señal como SIGKILL del watchdog)
         const isCleanExit = code === 0;
