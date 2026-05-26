@@ -39,6 +39,18 @@ const TDMAX_EMAIL    = process.env.TDMAX_EMAIL    || '';
 const TDMAX_PASSWORD = process.env.TDMAX_PASSWORD || '';
 const LOG_VERBOSE    = process.env.LOG_VERBOSE === '1';
 
+// Supabase (para comando manual "refresh" desde el dashboard)
+const SUPABASE_URL      = process.env.SUPABASE_URL      || '';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+const PI_TARGET = 'teletica';
+
+// Estado del watchdog HLS + detección de cambio de host
+let lastBaseHost   = '';
+let currentHlsUrl  = '';
+let watchdogTimer  = null;
+let lastMediaSeq   = -1;
+let sameSeqCount   = 0;
+
 // Mismos valores que la edge function scrape-channel
 const RESELLER_ID  = '61316705e4b0295f87dae396';
 const BASE_URL     = 'https://cf.streann.tech';
@@ -270,15 +282,25 @@ async function runOnce() {
     hlsUrl = await getTeleticaUrl();
     log('🔑 URL Teletica obtenida. ffmpeg corre indefinido; solo se re-scrapea si muere.');
     backoffMs = 3000; // reset backoff tras login OK
+    try {
+      const newHost = new URL(hlsUrl).host;
+      if (lastBaseHost && newHost !== lastBaseHost) {
+        log(`🔄 TDMax rotó CDN: ${lastBaseHost} → ${newHost}`);
+      }
+      lastBaseHost = newHost;
+    } catch {}
   } catch (e) {
     err(`Scrape TDMax falló: ${e.message}`);
     return scheduleRetry();
   }
 
   currentProc = spawnFfmpeg(hlsUrl);
+  currentHlsUrl = hlsUrl;
+  startWatchdog();
 
   currentProc.on('exit', (code, signal) => {
     currentProc = null;
+    stopWatchdog();
     if (stopRequested) return;
     warn(`ffmpeg exit code=${code} signal=${signal} — reintentando en ${Math.round(backoffMs/1000)}s`);
     setTimeout(runOnce, backoffMs);
@@ -306,3 +328,124 @@ process.on('unhandledRejection', (e) => { err('unhandledRejection:', e?.stack ||
 
 log(`🚀 Teletica SRT pusher iniciado → ${VPS_HOST}:${VPS_PORT} (streamid=${SRT_STREAMID}, modo reactivo)`);
 runOnce();
+
+// ─────────────────────────────────────────────────────────────
+// Watchdog HLS: detecta URL "viva pero congelada" (CDN rotó por debajo).
+// Cada 60s relee el .m3u8 activo y compara #EXT-X-MEDIA-SEQUENCE.
+// Si no avanza durante 2 ciclos consecutivos (~120s) → recicla ffmpeg.
+// ─────────────────────────────────────────────────────────────
+function startWatchdog() {
+  stopWatchdog();
+  lastMediaSeq = -1;
+  sameSeqCount = 0;
+  watchdogTimer = setInterval(checkHlsFreshness, 60_000);
+  if (watchdogTimer.unref) watchdogTimer.unref();
+}
+function stopWatchdog() {
+  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
+}
+async function checkHlsFreshness() {
+  if (!currentProc || !currentHlsUrl) return;
+  try {
+    const res = await httpHead(currentHlsUrl, BROWSER_HEADERS);
+    if (res.status !== 200 || !res.body) {
+      warn(`Watchdog: playlist HTTP ${res.status} — reciclando ffmpeg`);
+      backoffMs = 3000;
+      killCurrent('SIGTERM');
+      return;
+    }
+    const m = res.body.match(/#EXT-X-MEDIA-SEQUENCE:(\d+)/);
+    if (!m) return; // sin sequence no podemos juzgar; lo dejamos pasar
+    const seq = parseInt(m[1], 10);
+    if (seq === lastMediaSeq) {
+      sameSeqCount++;
+      if (sameSeqCount >= 2) {
+        warn(`Watchdog: MEDIA-SEQUENCE congelada en ${seq} por ${sameSeqCount} ciclos — reciclando`);
+        backoffMs = 3000;
+        sameSeqCount = 0;
+        killCurrent('SIGTERM');
+      }
+    } else {
+      lastMediaSeq = seq;
+      sameSeqCount = 0;
+    }
+  } catch (e) {
+    warn(`Watchdog error leyendo playlist: ${e.message}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Polling de comandos manuales desde el dashboard (Supabase).
+// Cada 15s busca un comando 'refresh' sin consumir y lo aplica.
+// ─────────────────────────────────────────────────────────────
+function supaRequest(method, path, body) {
+  return new Promise((resolve, reject) => {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return reject(new Error('Supabase no configurado'));
+    const u = new URL(SUPABASE_URL + path);
+    const data = body ? JSON.stringify(body) : null;
+    const req = https.request({
+      method,
+      hostname: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + u.search,
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation',
+        ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
+      },
+      timeout: 10_000,
+    }, (res) => {
+      let buf = '';
+      res.on('data', (c) => { buf += c; });
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, body: buf ? JSON.parse(buf) : null }); }
+        catch { resolve({ status: res.statusCode, body: buf }); }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
+async function pollCommands() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return;
+  try {
+    const res = await supaRequest(
+      'GET',
+      `/rest/v1/pi5_commands?target=eq.${PI_TARGET}&consumed_at=is.null&order=created_at.asc&limit=1`,
+    );
+    if (res.status !== 200 || !Array.isArray(res.body) || res.body.length === 0) return;
+    const cmd = res.body[0];
+    log(`📥 Comando manual recibido: ${cmd.command} (id=${cmd.id})`);
+    // Marcar consumido ANTES de matar, así no se reprocesa
+    await supaRequest(
+      'PATCH',
+      `/rest/v1/pi5_commands?id=eq.${cmd.id}`,
+      { consumed_at: new Date().toISOString(), consumed_by: PI_TARGET },
+    );
+    if (cmd.command === 'refresh') {
+      if (currentProc) {
+        log('🔄 Refresh manual — reciclando ffmpeg + token TDMax');
+        backoffMs = 3000;
+        killCurrent('SIGTERM');
+      } else {
+        log('🔄 Refresh manual — ffmpeg no activo, reintento inmediato');
+        backoffMs = 1000;
+      }
+    }
+  } catch (e) {
+    // silencio: cada 15s, evitar log spam si la red parpadea
+    if (LOG_VERBOSE) warn(`pollCommands: ${e.message}`);
+  }
+}
+if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+  const cmdTimer = setInterval(pollCommands, 15_000);
+  if (cmdTimer.unref) cmdTimer.unref();
+  log(`📡 Polling de comandos manuales activo (target=${PI_TARGET})`);
+} else {
+  warn('SUPABASE_URL / SUPABASE_ANON_KEY no definidos — el botón de Refresh manual no funcionará');
+}
