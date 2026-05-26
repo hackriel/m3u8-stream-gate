@@ -884,6 +884,7 @@ for (const cfg of Object.values(SRT_INGEST_CONFIGS)) {
 }
 const isSrtIngestProcess = (process_id) => Object.prototype.hasOwnProperty.call(SRT_INGEST_CONFIGS, String(process_id));
 const getSrtConfig = (process_id) => SRT_INGEST_CONFIGS[String(process_id)];
+const PI_SRT_INGEST_PROCESSES = new Set(['21', '22', '23']);
 
 // ── Métricas SRT en vivo (para dashboard) ──
 // Mapa<process_id, { connected, bitrateKbps, pktsLost, lastFrameAt, since }>
