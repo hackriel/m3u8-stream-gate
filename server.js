@@ -4292,9 +4292,14 @@ app.post('/api/emit', async (req, res) => {
         }, 1000);
       } else if (PI_SRT_INGEST_PROCESSES.has(String(process_id)) && (code !== null || signal)) {
         const cfg = getSrtConfig(process_id);
-        recordFailure(process_id);
+        const cleanPiReconnect = code === 0 && runtime >= 15000;
+        if (cleanPiReconnect) {
+          resetCircuitBreaker(process_id);
+        } else {
+          recordFailure(process_id);
+        }
 
-        if (isCircuitBroken(process_id)) {
+        if (!cleanPiReconnect && isCircuitBroken(process_id)) {
           sendLog(process_id, 'error', `🔴 ${cfg?.label || 'SRT Pi5'}: demasiados cortes seguidos. Recovery detenido para evitar loop; revisar Pi/red/firewall.`);
           if (supabase) {
             await supabase.from('emission_processes').update({
