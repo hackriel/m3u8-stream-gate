@@ -881,6 +881,9 @@ for (const cfg of Object.values(SRT_INGEST_CONFIGS)) {
   cfg.bufferPlaylist = path.join(cfg.bufferDir, 'buf.m3u8');
   cfg.minSegments = 3;
   cfg.waitTimeoutMs = 60000;
+  // Puerto UDP local (loopback) donde srt-live-transmit reenvía el SRT.
+  // Convención: puerto SRT + 1000 (9000→10000, 9005→10005, etc.).
+  cfg.udpPort = cfg.port + 1000;
 }
 const isSrtIngestProcess = (process_id) => Object.prototype.hasOwnProperty.call(SRT_INGEST_CONFIGS, String(process_id));
 const getSrtConfig = (process_id) => SRT_INGEST_CONFIGS[String(process_id)];
