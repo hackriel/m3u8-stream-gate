@@ -2250,9 +2250,15 @@ export default function EmisorM3U8Panel() {
                       <span className={`text-xs font-normal px-2 py-1 rounded-md border ${
                         canal6TsStatus.profile === 'mejorado720'
                           ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          : canal6TsStatus.profile === 'optimizado480'
+                          ? 'bg-sky-500/15 text-sky-400 border-sky-500/30'
                           : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
                       }`}>
-                        {canal6TsStatus.profile === 'mejorado720' ? 'Mejorado 720 · 2000k' : 'Normal · passthrough'}
+                        {canal6TsStatus.profile === 'mejorado720'
+                          ? 'Mejorado 720 · 2000k'
+                          : canal6TsStatus.profile === 'optimizado480'
+                          ? 'Optimizado 480 · 1200k'
+                          : 'Normal · passthrough'}
                       </span>
                     </h2>
                     <p className="text-sm text-muted-foreground mt-2">
@@ -2267,7 +2273,7 @@ export default function EmisorM3U8Panel() {
                   <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
                     <div className="flex items-center justify-between mb-3">
                       <label className="text-xs text-muted-foreground">Perfil de salida:</label>
-                      {canal6TsStatus.profile === 'mejorado720' && (
+                      {(canal6TsStatus.profile === 'mejorado720' || canal6TsStatus.profile === 'optimizado480') && (
                         <span className="text-[11px] text-muted-foreground">
                           Encoder: {canal6TsStatus.sharedEncoderRunning ? '🟢 corriendo' : '🔴 parado'}
                           {canal6TsStatus.sharedEncoderRunning && (
@@ -2276,7 +2282,7 @@ export default function EmisorM3U8Panel() {
                         </span>
                       )}
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <button
                         onClick={() => canal6TsSwitchProfile('normal')}
                         disabled={canal6TsBusy}
@@ -2307,9 +2313,24 @@ export default function EmisorM3U8Panel() {
                           Ahorra ~60% de egress. Watchdog auto-respawn.
                         </div>
                       </button>
+                      <button
+                        onClick={() => canal6TsSwitchProfile('optimizado480')}
+                        disabled={canal6TsBusy}
+                        className={`px-4 py-3 rounded-lg text-sm font-medium border transition-all text-left ${
+                          canal6TsStatus.profile === 'optimizado480'
+                            ? 'bg-sky-500/20 border-sky-500/50 text-sky-200 ring-2 ring-sky-500/40'
+                            : 'bg-background border-border text-muted-foreground hover:border-sky-500/40 hover:text-foreground'
+                        }`}
+                      >
+                        <div className="font-semibold">Optimizado 480</div>
+                        <div className="text-[11px] opacity-80 mt-1">
+                          Encode <b>único</b> always-on 480p/1200k preset <code>faster</code>. Fan-out.
+                          Ahorra ~75% de egress y CPU. Ideal conexiones lentas.
+                        </div>
+                      </button>
                     </div>
                     <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
-                      💡 Si "Mejorado 720" da problemas en XUI, podés volver a "Normal" en cualquier momento.
+                      💡 Podés cambiar entre los 3 perfiles en cualquier momento.
                       El cambio corta a los clientes ~5-10s mientras reconectan.
                     </p>
                   </div>
