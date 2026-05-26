@@ -743,6 +743,8 @@ export default function EmisorM3U8Panel() {
     const futvSrtPreset = CHANNEL_CONFIGS[FUTV_SRT_INDEX]?.presetUrl;
     const canal6SrtPreset = CHANNEL_CONFIGS[CANAL6_SRT_INDEX]?.presetUrl;
     const teleticaSrtPreset = CHANNEL_CONFIGS[TELETICA_SRT_INDEX]?.presetUrl;
+    const foxmasSrtPreset = CHANNEL_CONFIGS[FOXMAS_SRT_INDEX]?.presetUrl;
+    const foxSrtPreset = CHANNEL_CONFIGS[FOX_SRT_INDEX]?.presetUrl;
     const tigoRtmp = 'hls-local';
     setProcesses(prev => {
       let changed = false;
@@ -770,6 +772,16 @@ export default function EmisorM3U8Panel() {
 
       if (teleticaSrtPreset && (next[TELETICA_SRT_INDEX]?.m3u8 !== teleticaSrtPreset || next[TELETICA_SRT_INDEX]?.rtmp !== tigoRtmp)) {
         next[TELETICA_SRT_INDEX] = { ...next[TELETICA_SRT_INDEX], m3u8: teleticaSrtPreset, rtmp: tigoRtmp };
+        changed = true;
+      }
+
+      if (foxmasSrtPreset && (next[FOXMAS_SRT_INDEX]?.m3u8 !== foxmasSrtPreset || next[FOXMAS_SRT_INDEX]?.rtmp !== tigoRtmp)) {
+        next[FOXMAS_SRT_INDEX] = { ...next[FOXMAS_SRT_INDEX], m3u8: foxmasSrtPreset, rtmp: tigoRtmp };
+        changed = true;
+      }
+
+      if (foxSrtPreset && (next[FOX_SRT_INDEX]?.m3u8 !== foxSrtPreset || next[FOX_SRT_INDEX]?.rtmp !== tigoRtmp)) {
+        next[FOX_SRT_INDEX] = { ...next[FOX_SRT_INDEX], m3u8: foxSrtPreset, rtmp: tigoRtmp };
         changed = true;
       }
 
@@ -828,6 +840,26 @@ export default function EmisorM3U8Panel() {
         .eq('id', TELETICA_SRT_INDEX)
         .then(({ error }) => {
           if (error) console.error('Error guardando preset de TELETICA SRT:', error);
+        });
+    }
+
+    if (foxmasSrtPreset) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: foxmasSrtPreset, rtmp: tigoRtmp })
+        .eq('id', FOXMAS_SRT_INDEX)
+        .then(({ error }) => {
+          if (error) console.error('Error guardando preset de FOX+ SRT:', error);
+        });
+    }
+
+    if (foxSrtPreset) {
+      supabase
+        .from('emission_processes')
+        .update({ m3u8: foxSrtPreset, rtmp: tigoRtmp })
+        .eq('id', FOX_SRT_INDEX)
+        .then(({ error }) => {
+          if (error) console.error('Error guardando preset de FOX SRT:', error);
         });
     }
 
