@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 🛰️  FOX+ SRT Pusher (Raspberry Pi 5 → VPS:9004)
+ * 🛰️  FOX+ SRT Pusher (Raspberry Pi 5 → VPS:9005)
  *
  *  Hace login en TDMax, obtiene la URL HLS LIVE de Teletica con el
  *  IP del Pi5 (necesario para que el CDN no bloquee los segments)
@@ -16,8 +16,8 @@
  *
  *  Variables de entorno (definidas en /etc/foxmas-srt-pusher.env):
  *    VPS_HOST           IP/host público del VPS              (default 167.17.69.116)
- *    VPS_PORT           Puerto SRT en el VPS                 (default 9004)
- *    SRT_STREAMID       streamid SRT                         (default teletica)
+ *    VPS_PORT           Puerto SRT en el VPS                 (default 9005)
+ *    SRT_STREAMID       streamid SRT                         (default foxmas)
  *    SRT_LATENCY_US     Latencia SRT en microsegundos        (default 2000000)
  *    SRT_PASSPHRASE     Passphrase (opcional, debe coincidir con TELETICA_SRT_PASSPHRASE del VPS)
  *    TDMAX_EMAIL        Correo de la cuenta TDMax            (REQUERIDO)
@@ -304,5 +304,5 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 process.on('uncaughtException', (e) => { err('uncaughtException:', e?.stack || e?.message || e); });
 process.on('unhandledRejection', (e) => { err('unhandledRejection:', e?.stack || e?.message || e); });
 
-log(`🚀 Teletica SRT pusher iniciado → ${VPS_HOST}:${VPS_PORT} (streamid=${SRT_STREAMID}, modo reactivo)`);
+log(`🚀 FOX+ SRT pusher iniciado → ${VPS_HOST}:${VPS_PORT} (streamid=${SRT_STREAMID}, modo reactivo)`);
 runOnce();
