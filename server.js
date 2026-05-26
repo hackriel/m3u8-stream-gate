@@ -5244,6 +5244,8 @@ app.post('/api/emit/stop', async (req, res) => {
       ffmpegProcesses.delete(process_id);
       // Cerrar mini-proxy de Tigo si existe (Fase 2)
       await stopTigoProxy(process_id);
+      // Cerrar listener srt-live-transmit persistente (solo en parada manual)
+      if (isSrtIngestProcess(process_id)) stopSrtListener(process_id);
 
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
