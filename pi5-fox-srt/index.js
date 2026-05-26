@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 🛰️  FOX+ SRT Pusher (Raspberry Pi 5 → VPS:9004)
+ * 🛰️  FOX SRT Pusher (Raspberry Pi 5 → VPS:9004)
  *
  *  Hace login en TDMax, obtiene la URL HLS LIVE de Teletica con el
  *  IP del Pi5 (necesario para que el CDN no bloquee los segments)
@@ -14,7 +14,7 @@
  *  - El dashboard manda; si el switch está OFF no habrá listener y
  *    el push queda en espera sin gastar ancho de banda del CDN.
  *
- *  Variables de entorno (definidas en /etc/foxmas-srt-pusher.env):
+ *  Variables de entorno (definidas en /etc/fox-srt-pusher.env):
  *    VPS_HOST           IP/host público del VPS              (default 167.17.69.116)
  *    VPS_PORT           Puerto SRT en el VPS                 (default 9004)
  *    SRT_STREAMID       streamid SRT                         (default teletica)
@@ -31,8 +31,8 @@ const { spawn } = require('child_process');
 const https = require('https');
 
 const VPS_HOST       = process.env.VPS_HOST       || '167.17.69.116';
-const VPS_PORT       = process.env.VPS_PORT       || '9005';
-const SRT_STREAMID   = process.env.SRT_STREAMID   || 'foxmas';
+const VPS_PORT       = process.env.VPS_PORT       || '9006';
+const SRT_STREAMID   = process.env.SRT_STREAMID   || 'fox';
 const SRT_LATENCY_US = process.env.SRT_LATENCY_US || '2000000';
 const SRT_PASSPHRASE = process.env.SRT_PASSPHRASE || '';
 const TDMAX_EMAIL    = process.env.TDMAX_EMAIL    || '';
@@ -42,7 +42,7 @@ const LOG_VERBOSE    = process.env.LOG_VERBOSE === '1';
 // Mismos valores que la edge function scrape-channel
 const RESELLER_ID  = '61316705e4b0295f87dae396';
 const BASE_URL     = 'https://cf.streann.tech';
-const TELETICA_ID  = '6a10a6a2350cb5151ab6ca8c';
+const TELETICA_ID  = '664237788f085ac1f2a15f81';
 const DEVICE_ID    = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
 const BROWSER_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
@@ -268,7 +268,7 @@ async function runOnce() {
   let hlsUrl;
   try {
     hlsUrl = await getStreamHlsUrl();
-    log('🔑 URL FOX+ obtenida. ffmpeg corre indefinido; solo se re-scrapea si muere.');
+    log('🔑 URL FOX obtenida. ffmpeg corre indefinido; solo se re-scrapea si muere.');
     backoffMs = 3000; // reset backoff tras login OK
   } catch (e) {
     err(`Scrape TDMax falló: ${e.message}`);
