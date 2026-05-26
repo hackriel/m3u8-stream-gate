@@ -382,7 +382,7 @@ app.get('/canal6-ts/status', (req, res) => {
 app.post('/canal6-ts/start', (req, res) => {
   const url = (req.body?.url || '').trim();
   const reqProfile = (req.body?.profile || canal6TsState.profile || 'normal');
-  const profile = reqProfile === 'mejorado720' ? 'mejorado720' : 'normal';
+  const profile = (reqProfile === 'mejorado720' || reqProfile === 'optimizado480') ? reqProfile : 'normal';
   if (!url || !/^https?:\/\//i.test(url)) {
     return res.status(400).json({ ok: false, error: 'URL inválida. Debe ser http(s)://...' });
   }
@@ -391,8 +391,8 @@ app.post('/canal6-ts/start', (req, res) => {
   canal6TsState = { sourceUrl: url, enabled: true, profile };
   saveCanal6TsState();
   console.log(`[canal6.ts] START url=${url} profile=${profile} (urlChanged=${urlChanged} profileChanged=${profileChanged})`);
-  // Si estamos en modo mejorado y la URL/profile cambió, respawn el shared encoder.
-  if (profile === 'mejorado720' && (urlChanged || profileChanged || !sharedEncoder.ff)) {
+  // Si estamos en modo shared-encoder y la URL/profile cambió, respawn el shared encoder.
+  if (isSharedEncoderProfile(profile) && (urlChanged || profileChanged || !sharedEncoder.ff)) {
     stopSharedEncoder('start: url/profile change');
   }
   reconcileSharedEncoder();
@@ -407,8 +407,8 @@ app.post('/canal6-ts/stop', (req, res) => {
 });
 app.post('/canal6-ts/profile', (req, res) => {
   const reqProfile = (req.body?.profile || '').trim();
-  if (reqProfile !== 'normal' && reqProfile !== 'mejorado720') {
-    return res.status(400).json({ ok: false, error: "profile debe ser 'normal' o 'mejorado720'" });
+  if (reqProfile !== 'normal' && reqProfile !== 'mejorado720' && reqProfile !== 'optimizado480') {
+    return res.status(400).json({ ok: false, error: "profile debe ser 'normal', 'mejorado720' u 'optimizado480'" });
   }
   const prev = canal6TsState.profile;
   if (prev === reqProfile) {
