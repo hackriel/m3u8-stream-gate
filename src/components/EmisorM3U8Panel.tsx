@@ -197,6 +197,8 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "RANDOM Disney 7", scrapeFn: null, channelId: null, fetchLabel: "" },
   { name: "Canal 6 SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "Teletica SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
+  { name: "FOX+ SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
+  { name: "FOX SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -1497,6 +1499,8 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-violet-500", text: "text-violet-500", stroke: "#8b5cf6", name: "RANDOM Disney 7" },
       { bg: "bg-orange-600", text: "text-orange-500", stroke: "#ea580c", name: "Canal 6 SRT" },
       { bg: "bg-cyan-600", text: "text-cyan-400", stroke: "#0891b2", name: "Teletica SRT" },
+      { bg: "bg-red-500", text: "text-red-400", stroke: "#ef4444", name: "FOX+ SRT" },
+      { bg: "bg-red-700", text: "text-red-500", stroke: "#b91c1c", name: "FOX SRT" },
     ];
     return colors[processIndex];
   };
