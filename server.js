@@ -5923,8 +5923,9 @@ server.listen(PORT, () => {
 
         for (const row of alwaysOnRows) {
           const pid = String(row.id);
-          // TIGO SRT (12), DISNEY 7 SRT (16) y FUTV SRT (18) se autoarrancan por su propio path.
+          // TIGO SRT (12), DISNEY 7 SRT (16) y FUTV SRT (18) se autoarrancan por su propio path (OBS local).
           // FUTV ALTERNO (17) sí se relanza si tiene player_url guardada (re-scrape fresco).
+          // TELETICA SRT (21), FOX+ SRT (22) y FOX SRT (23) son SRT-ingest desde Pi5: se relanzan abajo.
           if (pid === '12' || pid === '16' || pid === '18') continue;
 
           // Limpiar manualStop por si quedó marcado
@@ -5932,7 +5933,21 @@ server.listen(PORT, () => {
           manualStopProcesses.delete(Number(pid));
 
           try {
-            if (CHANNEL_MAP[pid]) {
+            if (pid === '21' || pid === '22' || pid === '23') {
+              // SRT-ingest desde Raspberry Pi5: abrir listener SRT + ETAPA 2.
+              const cfg = SRT_INGEST_CONFIGS[pid];
+              sendLog(pid, 'info', `🔁 Always-on: relanzando ${cfg?.label || `SRT ${pid}`} (listener desde Pi5)...`);
+              await fetch(`http://localhost:${PORT}/api/emit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  source_m3u8: 'srt://obs',
+                  target_rtmp: 'hls-local',
+                  process_id: pid,
+                  is_recovery: true,
+                }),
+              });
+            } else if (CHANNEL_MAP[pid]) {
               // Canales scrapeados: obtener URL fresca
               const { channelId, channelName } = CHANNEL_MAP[pid];
               sendLog(pid, 'info', `🔁 Always-on: relanzando ${channelName} con scraping fresco...`);
