@@ -229,11 +229,12 @@ app.use('/live', (req, res, next) => {
 const CANAL6_TS_STATE_FILE = path.join(__dirname, 'canal6-ts-state.json');
 // profile: 'normal' (passthrough -c copy per cliente, como siempre)
 //          'mejorado720' (encode ÚNICO always-on 720p/2000k, fan-out a clientes)
+//          'optimizado480' (encode ÚNICO always-on 480p/1200k faster, fan-out a clientes)
 let canal6TsState = { sourceUrl: '', enabled: false, profile: 'normal' };
 try {
   if (fs.existsSync(CANAL6_TS_STATE_FILE)) {
     canal6TsState = { ...canal6TsState, ...JSON.parse(fs.readFileSync(CANAL6_TS_STATE_FILE, 'utf8')) };
-    if (canal6TsState.profile !== 'mejorado720') canal6TsState.profile = 'normal';
+    if (canal6TsState.profile !== 'mejorado720' && canal6TsState.profile !== 'optimizado480') canal6TsState.profile = 'normal';
     console.log(`[canal6.ts] estado restaurado: enabled=${canal6TsState.enabled} profile=${canal6TsState.profile} url=${canal6TsState.sourceUrl ? 'set' : 'empty'}`);
   }
 } catch (e) {
@@ -243,10 +244,15 @@ const saveCanal6TsState = () => {
   try { fs.writeFileSync(CANAL6_TS_STATE_FILE, JSON.stringify(canal6TsState, null, 2)); } catch (e) { console.warn('[canal6.ts] save state:', e.message); }
 };
 
-// ───────────── SHARED ENCODER (perfil 'mejorado720') ─────────────
-// Un solo ffmpeg always-on que re-encodea a 720p/2000k MPEG-TS.
+// ───────────── SHARED ENCODER (perfiles 'mejorado720' / 'optimizado480') ─────────────
+// Un solo ffmpeg always-on que re-encodea a MPEG-TS según el perfil activo.
 // Todos los clientes HTTP enganchan al mismo stdout (fan-out).
 // Watchdog: si muere, respawn en 2s. Si cambia URL o profile, kill + respawn.
+const CANAL6_TS_ENCODER_PROFILES = {
+  mejorado720:   { height: 720, vBitrate: '2000k', bufsize: '4000k', preset: 'veryfast', fps: 29.97, gop: 60 },
+  optimizado480: { height: 480, vBitrate: '1200k', bufsize: '2400k', preset: 'faster',   fps: 29.97, gop: 60 },
+};
+const isSharedEncoderProfile = (p) => p === 'mejorado720' || p === 'optimizado480';
 const sharedEncoder = {
   ff: null,
   clients: new Set(),   // Set<res>
@@ -265,9 +271,10 @@ const stopSharedEncoder = (reason) => {
 };
 
 const spawnSharedEncoder = () => {
-  if (!canal6TsState.enabled || canal6TsState.profile !== 'mejorado720' || !canal6TsState.sourceUrl) return;
+  if (!canal6TsState.enabled || !isSharedEncoderProfile(canal6TsState.profile) || !canal6TsState.sourceUrl) return;
   if (sharedEncoder.ff) return; // ya corriendo
   const src = canal6TsState.sourceUrl;
+  const prof = CANAL6_TS_ENCODER_PROFILES[canal6TsState.profile];
   const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
   const args = [
     '-hide_banner',
@@ -285,15 +292,15 @@ const spawnSharedEncoder = () => {
     '-i', src,
     '-map', '0:v:0',
     '-map', '0:a:0?',
-    // Video: 720p CBR 2000k veryfast (mismo perfil "Normal" del resto)
+    // Video: según perfil activo (mejorado720 ó optimizado480)
     '-c:v', 'libx264',
-    '-preset', 'veryfast',
+    '-preset', prof.preset,
     '-profile:v', 'main',
     '-level', '4.0',
     '-pix_fmt', 'yuv420p',
-    '-vf', 'scale=-2:720:flags=lanczos,fps=29.97',
-    '-b:v', '2000k', '-maxrate', '2000k', '-minrate', '2000k', '-bufsize', '4000k',
-    '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
+    '-vf', `scale=-2:${prof.height}:flags=lanczos,fps=${prof.fps}`,
+    '-b:v', prof.vBitrate, '-maxrate', prof.vBitrate, '-minrate', prof.vBitrate, '-bufsize', prof.bufsize,
+    '-g', String(prof.gop), '-keyint_min', String(prof.gop), '-sc_threshold', '0',
     '-x264-params', 'nal-hrd=cbr:force-cfr=1:rc-lookahead=20:ref=3:bframes=2',
     // Audio
     '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
@@ -304,7 +311,7 @@ const spawnSharedEncoder = () => {
     'pipe:1'
   ];
   const gen = ++sharedEncoder.generation;
-  console.log(`[canal6.ts shared] spawn ffmpeg gen=${gen} src=${src}`);
+  console.log(`[canal6.ts shared] spawn ffmpeg gen=${gen} profile=${canal6TsState.profile} ${prof.height}p ${prof.vBitrate} src=${src}`);
   const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
   sharedEncoder.ff = ff;
   sharedEncoder.startedAt = Date.now();
@@ -339,8 +346,8 @@ const spawnSharedEncoder = () => {
   ff.on('exit', (code, signal) => {
     console.log(`[canal6.ts shared] ffmpeg exit code=${code} signal=${signal} gen=${gen}`);
     if (sharedEncoder.ff === ff) sharedEncoder.ff = null;
-    // Respawn si seguimos en modo mejorado y enabled
-    if (canal6TsState.enabled && canal6TsState.profile === 'mejorado720' && canal6TsState.sourceUrl) {
+    // Respawn si seguimos en un perfil de shared encoder y enabled
+    if (canal6TsState.enabled && isSharedEncoderProfile(canal6TsState.profile) && canal6TsState.sourceUrl) {
       sharedEncoder.respawnTimer = setTimeout(() => {
         sharedEncoder.respawnTimer = null;
         spawnSharedEncoder();
@@ -351,8 +358,8 @@ const spawnSharedEncoder = () => {
 
 const reconcileSharedEncoder = () => {
   // Llamar tras cualquier cambio de state. Garantiza que el ffmpeg corre
-  // solo si estamos en mejorado720 + enabled + sourceUrl.
-  if (canal6TsState.enabled && canal6TsState.profile === 'mejorado720' && canal6TsState.sourceUrl) {
+  // solo si estamos en un perfil de encoder + enabled + sourceUrl.
+  if (canal6TsState.enabled && isSharedEncoderProfile(canal6TsState.profile) && canal6TsState.sourceUrl) {
     if (!sharedEncoder.ff) spawnSharedEncoder();
   } else {
     stopSharedEncoder('reconcile: no longer needed');
