@@ -2,9 +2,9 @@
 /**
  * 🛰️  FOX SRT Pusher (Raspberry Pi 5 → VPS:9006)
  *
- *  Hace login en TDMax, obtiene la URL HLS LIVE de Teletica con el
+ *  Hace login en TDMax, obtiene la URL HLS LIVE de FOX con el
  *  IP del Pi5 (necesario para que el CDN no bloquee los segments)
- *  y la reenvía vía SRT en modo CALLER al puerto 9004 del VPS.
+ *  y la reenvía vía SRT en modo CALLER al puerto 9006 del VPS.
  *
  *  - Re-scrapea TDMax ÚNICAMENTE cuando ffmpeg muere (mismo enfoque que el VPS).
  *    No se tocan procesos sanos: si está emitiendo, sigue emitiendo.
@@ -19,7 +19,7 @@
  *    VPS_PORT           Puerto SRT en el VPS                 (default 9006)
  *    SRT_STREAMID       streamid SRT                         (default fox)
  *    SRT_LATENCY_US     Latencia SRT en microsegundos        (default 2000000)
- *    SRT_PASSPHRASE     Passphrase (opcional, debe coincidir con TELETICA_SRT_PASSPHRASE del VPS)
+ *    SRT_PASSPHRASE     Passphrase (opcional, debe coincidir con FOX_SRT_PASSPHRASE del VPS)
  *    TDMAX_EMAIL        Correo de la cuenta TDMax            (REQUERIDO)
  *    TDMAX_PASSWORD     Password de la cuenta TDMax          (REQUERIDO)
  *    LOG_VERBOSE        '1' para ver stderr crudo de ffmpeg  (default 0)
@@ -42,7 +42,7 @@ const LOG_VERBOSE    = process.env.LOG_VERBOSE === '1';
 // Mismos valores que la edge function scrape-channel
 const RESELLER_ID  = '61316705e4b0295f87dae396';
 const BASE_URL     = 'https://cf.streann.tech';
-const TELETICA_ID  = '664237788f085ac1f2a15f81';
+const FOX_ID       = '664237788f085ac1f2a15f81';
 const DEVICE_ID    = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
 const BROWSER_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
@@ -136,7 +136,7 @@ async function getStreamHlsUrl() {
   });
   const lbRes = await httpJson(
     'GET',
-    `${BASE_URL}/loadbalancer/services/v1/channels-secure/${TELETICA_ID}/playlist.m3u8?${qs}`,
+    `${BASE_URL}/loadbalancer/services/v1/channels-secure/${FOX_ID}/playlist.m3u8?${qs}`,
     { ...BROWSER_HEADERS, Authorization: `Bearer ${token}` },
   );
   const streamUrl = lbRes.body?.url;
