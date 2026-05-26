@@ -443,8 +443,8 @@ app.get('/canal6.ts', (req, res) => {
 
   const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
 
-  // ────── PERFIL MEJORADO 720: fan-out del shared encoder ──────
-  if (canal6TsState.profile === 'mejorado720') {
+  // ────── PERFILES SHARED-ENCODER (mejorado720 / optimizado480): fan-out ──────
+  if (isSharedEncoderProfile(canal6TsState.profile)) {
     // Asegurar que el shared encoder esté corriendo
     if (!sharedEncoder.ff) spawnSharedEncoder();
     sharedEncoder.clients.add(res);
