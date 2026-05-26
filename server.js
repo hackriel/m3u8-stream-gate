@@ -6024,7 +6024,7 @@ server.listen(PORT, () => {
           manualStopProcesses.delete(Number(pid));
 
           try {
-            if (pid === '21' || pid === '22' || pid === '23') {
+            if (PI_SRT_INGEST_PROCESSES.has(pid)) {
               // SRT-ingest desde Raspberry Pi5: abrir listener SRT + ETAPA 2.
               const cfg = SRT_INGEST_CONFIGS[pid];
               sendLog(pid, 'info', `🔁 Always-on: relanzando ${cfg?.label || `SRT ${pid}`} (listener desde Pi5)...`);
@@ -6113,7 +6113,7 @@ server.listen(PORT, () => {
           // SRT/OBS locales excluidos del refresh horario:
           //   12/16/18 = OBS local;  21/22/23 = SRT-ingest desde Pi5 (el Pi5 refresca su propio token TDMax).
           // FUTV ALTERNO (17) sí refresca si tiene player_url.
-          if (pid === '12' || pid === '16' || pid === '18' || pid === '21' || pid === '22' || pid === '23') continue;
+          if (pid === '12' || pid === '16' || pid === '18' || PI_SRT_INGEST_PROCESSES.has(pid)) continue;
 
           // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
