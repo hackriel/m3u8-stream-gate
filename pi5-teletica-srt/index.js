@@ -208,12 +208,46 @@ function spawnFfmpeg(hlsUrl) {
 let currentProc = null;
 let stopRequested = false;
 let backoffMs = 3000;
+let lastScheduledRefreshKey = '';
 
 function killCurrent(signal = 'SIGTERM') {
   if (currentProc && !currentProc.killed) {
     try { currentProc.kill(signal); } catch {}
   }
 }
+
+// ─────────────────────────────────────────────────────────────
+// Refresh programado diario (00:00 y 05:00 hora Costa Rica)
+// Mismo criterio que el VPS para los canales scrapeados:
+// mata ffmpeg → exit handler re-loguea TDMax → reconecta SRT.
+// ─────────────────────────────────────────────────────────────
+const REFRESH_HOURS_CR = [0, 5];
+
+function checkScheduledRefresh() {
+  // Costa Rica = UTC-6 todo el año (sin DST).
+  const nowUtc = new Date();
+  const crMs = nowUtc.getTime() - 6 * 60 * 60 * 1000;
+  const cr = new Date(crMs);
+  const hh = cr.getUTCHours();
+  const mm = cr.getUTCMinutes();
+
+  if (!REFRESH_HOURS_CR.includes(hh) || mm >= 5) return;
+
+  // Guard: una sola ejecución por ventana (clave YYYY-MM-DD-HH)
+  const key = `${cr.getUTCFullYear()}-${cr.getUTCMonth()+1}-${cr.getUTCDate()}-${hh}`;
+  if (key === lastScheduledRefreshKey) return;
+  lastScheduledRefreshKey = key;
+
+  if (!currentProc) {
+    log(`⏰ Refresh programado ${hh}:00 CR — ffmpeg no estaba activo, se omite`);
+    return;
+  }
+  log(`⏰ Refresh programado ${hh}:00 CR — reciclando ffmpeg + token TDMax`);
+  backoffMs = 3000; // forzar reintento inmediato
+  killCurrent('SIGTERM');
+}
+
+setInterval(checkScheduledRefresh, 60 * 1000);
 
 async function runOnce() {
   let hlsUrl;
