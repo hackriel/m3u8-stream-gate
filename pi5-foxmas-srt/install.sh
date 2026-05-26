@@ -1,6 +1,6 @@
 #!/bin/bash
 # ════════════════════════════════════════════════════════════
-#  🚀 Install Teletica SRT Pusher en Raspberry Pi 5
+#  🚀 Install FOX+ SRT Pusher en Raspberry Pi 5
 #  Uso:  sudo bash install.sh
 # ════════════════════════════════════════════════════════════
 set -e
@@ -12,29 +12,26 @@ fail(){ echo -e "${RED}❌ $1${NC}"; exit 1; }
 
 [ "$EUID" -eq 0 ] || fail "Ejecutá como root: sudo bash install.sh"
 
-INSTALL_DIR="/opt/teletica-srt-pusher"
-SERVICE_NAME="teletica-srt-pusher"
+INSTALL_DIR="/opt/foxmas-srt-pusher"
+SERVICE_NAME="foxmas-srt-pusher"
 ENV_FILE="/etc/${SERVICE_NAME}.env"
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 echo ""
 echo "════════════════════════════════════════════"
-echo "  🛰️  Teletica SRT Pusher (Pi5 → VPS:9004)"
+echo "  🛰️  FOX+ SRT Pusher (Pi5 → VPS:9005)"
 echo "════════════════════════════════════════════"
 echo ""
 
-# 1) Dependencias del SO ──────────────────────────────────────
+# 1) Dependencias del SO
 echo "📦 [1/5] Instalando dependencias del sistema (ffmpeg + node)…"
 apt-get update -qq
 apt-get install -y -qq ffmpeg curl ca-certificates
-
-# FFmpeg de Debian/Raspbian ya trae SRT; verificar:
 if ! ffmpeg -hide_banner -protocols 2>/dev/null | grep -q '^ *srt$'; then
   warn "Este ffmpeg no tiene soporte SRT. Instalando build alternativo…"
   apt-get install -y -qq libsrt-openssl-dev || true
 fi
-
 if ! command -v node &>/dev/null || [ "$(node -v | cut -dv -f2 | cut -d. -f1)" -lt 18 ]; then
   echo "  ↳ Instalando Node.js 20…"
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -42,21 +39,21 @@ if ! command -v node &>/dev/null || [ "$(node -v | cut -dv -f2 | cut -d. -f1)" -
 fi
 ok "ffmpeg $(ffmpeg -version | head -1 | awk '{print $3}') / node $(node -v)"
 
-# 2) Copiar archivos ──────────────────────────────────────────
+# 2) Copiar archivos
 echo "📂 [2/5] Copiando archivos a ${INSTALL_DIR}…"
 mkdir -p "$INSTALL_DIR"
 cp "$SCRIPT_DIR/index.js" "$INSTALL_DIR/index.js"
 chmod +x "$INSTALL_DIR/index.js"
 ok "Archivos copiados"
 
-# 3) Variables de entorno ─────────────────────────────────────
+# 3) Variables de entorno
 echo "🔐 [3/5] Configurando ${ENV_FILE}…"
 if [ ! -f "$ENV_FILE" ]; then
-  cat > "$ENV_FILE" <<'EOF'
-# === Teletica SRT pusher — configuración ===
+  cat > "$ENV_FILE" <<'ENV_EOF'
+# === FOX+ SRT pusher — configuración ===
 VPS_HOST=167.17.69.116
-VPS_PORT=9004
-SRT_STREAMID=teletica
+VPS_PORT=9005
+SRT_STREAMID=foxmas
 SRT_LATENCY_US=2000000
 # SRT_PASSPHRASE=
 
@@ -65,18 +62,18 @@ TDMAX_EMAIL=info@media.cr
 TDMAX_PASSWORD=Boanerges12*
 
 LOG_VERBOSE=0
-EOF
+ENV_EOF
   chmod 600 "$ENV_FILE"
-  ok "Archivo .env creado (editalo si necesitás otras credenciales)"
+  ok "Archivo .env creado"
 else
   warn "Ya existe $ENV_FILE — lo dejo como está"
 fi
 
-# 4) Servicio systemd ─────────────────────────────────────────
+# 4) Servicio systemd
 echo "⚙️  [4/5] Creando systemd service…"
-cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
+cat > /etc/systemd/system/${SERVICE_NAME}.service <<UNIT_EOF
 [Unit]
-Description=Teletica SRT Pusher (Pi5 → VPS)
+Description=FOX+ SRT Pusher (Pi5 → VPS)
 After=network-online.target
 Wants=network-online.target
 
@@ -94,10 +91,9 @@ NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
-EOF
+UNIT_EOF
 
-# Rotación de logs
-cat > /etc/logrotate.d/${SERVICE_NAME} <<EOF
+cat > /etc/logrotate.d/${SERVICE_NAME} <<LOGROT_EOF
 /var/log/${SERVICE_NAME}.log {
   daily
   rotate 7
@@ -106,14 +102,14 @@ cat > /etc/logrotate.d/${SERVICE_NAME} <<EOF
   notifempty
   copytruncate
 }
-EOF
+LOGROT_EOF
 
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 systemctl restart ${SERVICE_NAME}
 sleep 2
 
-# 5) Resultado ────────────────────────────────────────────────
+# 5) Resultado
 echo "🩺 [5/5] Verificando…"
 if systemctl is-active --quiet ${SERVICE_NAME}; then
   ok "${SERVICE_NAME} ACTIVO"
@@ -121,11 +117,10 @@ if systemctl is-active --quiet ${SERVICE_NAME}; then
   echo "Comandos útiles:"
   echo "  Estado:   systemctl status ${SERVICE_NAME}"
   echo "  Logs:     journalctl -u ${SERVICE_NAME} -f"
-  echo "  Tail:     tail -f /var/log/${SERVICE_NAME}.log"
   echo "  Editar:   sudo nano ${ENV_FILE} && sudo systemctl restart ${SERVICE_NAME}"
   echo ""
   echo "✅ El Pi5 está empujando SRT 24/7. El VPS lo recibirá solo cuando"
-  echo "   actives el switch del tab 'Teletica SRT' desde el dashboard."
+  echo "   actives el switch del tab 'FOX+ SRT' desde el dashboard."
 else
   fail "El servicio no arrancó. Mirá: journalctl -u ${SERVICE_NAME} -n 80"
 fi
