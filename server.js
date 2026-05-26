@@ -946,6 +946,37 @@ const cleanSrtBufferDir = (cfg) => {
   }
 };
 
+// ── Preflight de puerto SRT (UDP) ─────────────────────────────────
+// Detecta procesos huérfanos (ffmpeg/srt-live-transmit) que retengan el
+// bind del puerto y los mata con SIGKILL para que el listener nuevo pueda
+// hacer bind. Sin esto, FFmpeg muere a los 2s con "Input/output error".
+const ensureSrtPortFree = (port, process_id, label) => {
+  if (!port) return;
+  const log = (lvl, msg) => {
+    try { if (typeof sendLog === 'function' && process_id != null) sendLog(process_id, lvl, msg); } catch (_) {}
+    try { console.log(`[srt-preflight:${label || port}] ${msg}`); } catch (_) {}
+  };
+  let pids = [];
+  try {
+    const out = execSync(`lsof -tiUDP:${port} 2>/dev/null || true`, { encoding: 'utf8' });
+    pids = out.split(/\s+/).map(s => s.trim()).filter(Boolean);
+  } catch (_) { pids = []; }
+  if (pids.length === 0) return;
+  for (const pid of pids) {
+    let cmd = '';
+    try { cmd = execSync(`ps -p ${pid} -o args= 2>/dev/null || true`, { encoding: 'utf8' }).trim(); } catch (_) {}
+    const isOurs = /ffmpeg|srt-live-transmit/i.test(cmd);
+    if (isOurs) {
+      log('warn', `🧹 Puerto UDP ${port} ocupado por PID ${pid} (huérfano: ${cmd.slice(0,80)}). Matando con SIGKILL.`);
+      try { execSync(`kill -9 ${pid}`, { stdio: 'ignore' }); } catch (_) {}
+    } else {
+      log('error', `⛔ Puerto UDP ${port} ocupado por PID ${pid} ajeno (${cmd.slice(0,80) || 'desconocido'}). Liberá manualmente.`);
+    }
+  }
+  // Pausa breve para que el kernel libere el bind.
+  try { execSync('sleep 0.5', { stdio: 'ignore' }); } catch (_) {}
+};
+
 const waitForSrtBufferReady = async (cfg, timeoutMs) => {
   const limit = timeoutMs || cfg.waitTimeoutMs;
   const start = Date.now();
@@ -967,6 +998,10 @@ const waitForSrtBufferReady = async (cfg, timeoutMs) => {
 const startSrtIngest = (process_id) => {
   const cfg = getSrtConfig(process_id);
   if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
+  // Preflight: liberar el puerto SRT si hay procesos huérfanos atados a él.
+  // (Soluciona "Input/output error" en :PORT cuando un ffmpeg/srt-live-transmit
+  //  anterior no soltó el bind tras un kill abrupto o restart del servicio.)
+  ensureSrtPortFree(cfg.port, process_id, cfg.label || `SRT ${process_id}`);
   // Blindaje: matar cualquier ffmpeg residual (huérfano) que esté usando este buffer
   // o esta carpeta de salida HLS, para evitar arrancar "encima" de un proceso zombi
   // que bloquearía el spawn de ETAPA 2 (caso real visto en Disney 7).
@@ -1045,6 +1080,8 @@ const stopTigoOutputStage = (process_id) => {
 // principal en `ffmpegProcesses`. Así toda la lógica de cierre/recovery existente
 // (manejada en ffmpegProcess.on('close')) sigue funcionando idéntica.
 const startTigoHdmiIngest = (process_id) => {
+  // Preflight: liberar puerto si quedó un FFmpeg huérfano del SRT listener anterior.
+  ensureSrtPortFree(TIGO_SRT_PORT, process_id, 'TIGO HDMI');
   cleanTigoBufferDir();
   resetTigoSrtMetric(process_id);
 
