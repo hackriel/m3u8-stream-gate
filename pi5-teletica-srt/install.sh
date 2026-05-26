@@ -60,9 +60,9 @@ SRT_STREAMID=teletica
 SRT_LATENCY_US=2000000
 # SRT_PASSPHRASE=
 
-# Credenciales TDMax (REQUERIDAS)
-TDMAX_EMAIL=arlopfa@gmail.com
-TDMAX_PASSWORD=vM5SdnKpPjlypvJW
+# Credenciales TDMax (cuenta dedicada Raspberry — info@media.cr)
+TDMAX_EMAIL=info@media.cr
+TDMAX_PASSWORD=Boanerges12*
 
 LOG_VERBOSE=0
 EOF
