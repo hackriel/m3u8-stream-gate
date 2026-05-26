@@ -1717,7 +1717,11 @@ export default function EmisorM3U8Panel() {
                               ? CANAL6_SRT_OBS_INGEST_URL
                               : processIndex === TELETICA_SRT_INDEX
                                 ? TELETICA_SRT_OBS_INGEST_URL
-                                : PASTE_URL_PROCESSES.has(processIndex)
+                                : processIndex === FOXMAS_SRT_INDEX
+                                  ? FOXMAS_SRT_OBS_INGEST_URL
+                                  : processIndex === FOX_SRT_INDEX
+                                    ? FOX_SRT_OBS_INGEST_URL
+                                    : PASTE_URL_PROCESSES.has(processIndex)
                             ? 'M3U8 extraído (auto-completado)'
                             : 'https://servidor/origen/playlist.m3u8'
                     }
@@ -1791,6 +1795,8 @@ export default function EmisorM3U8Panel() {
                 [RANDOM_DISNEY7_INDEX]: 'Disney7',
                 [CANAL6_SRT_INDEX]: 'Canal6',
                 [TELETICA_SRT_INDEX]: 'Teletica',
+                [FOXMAS_SRT_INDEX]: 'foxmas',
+                [FOX_SRT_INDEX]: 'fox',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
@@ -1805,7 +1811,11 @@ export default function EmisorM3U8Panel() {
                       ? CANAL6_SRT_OBS_INGEST_URL
                       : processIndex === TELETICA_SRT_INDEX
                         ? TELETICA_SRT_OBS_INGEST_URL
-                        : '';
+                          : processIndex === FOXMAS_SRT_INDEX
+                            ? FOXMAS_SRT_OBS_INGEST_URL
+                            : processIndex === FOX_SRT_INDEX
+                              ? FOX_SRT_OBS_INGEST_URL
+                              : '';
               return (
               <>
                 <h2 className="text-lg font-medium mb-3 text-accent">📺 URL HLS Generada</h2>
