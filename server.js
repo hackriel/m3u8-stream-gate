@@ -967,6 +967,10 @@ const waitForSrtBufferReady = async (cfg, timeoutMs) => {
 const startSrtIngest = (process_id) => {
   const cfg = getSrtConfig(process_id);
   if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
+  // Preflight: liberar el puerto SRT si hay procesos huérfanos atados a él.
+  // (Soluciona "Input/output error" en :PORT cuando un ffmpeg/srt-live-transmit
+  //  anterior no soltó el bind tras un kill abrupto o restart del servicio.)
+  ensureSrtPortFree(cfg.port, process_id, cfg.label || `SRT ${process_id}`);
   // Blindaje: matar cualquier ffmpeg residual (huérfano) que esté usando este buffer
   // o esta carpeta de salida HLS, para evitar arrancar "encima" de un proceso zombi
   // que bloquearía el spawn de ETAPA 2 (caso real visto en Disney 7).
