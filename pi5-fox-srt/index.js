@@ -82,12 +82,33 @@ let lastFrame = 0;
 let startingSource = false;
 let manualRefreshRequested = false;
 
-// 🔒 Caché de URL HLS resuelta: reusar la misma sesión Nimble por horas en vez de re-loguear cada restart
-let cachedHlsUrl = '';
-let cachedHlsUrlAt = 0;
-const HLS_URL_TTL_MS = 8 * 60 * 60 * 1000; // 8h: nimblesessionid suele durar más, refrescamos antes por seguridad
+// 🔒 Una sola sesión TDMax/Nimble por canal: se reutiliza hasta que caiga por auth o refresh manual.
+// No hay TTL artificial: el objetivo es comportarse como TDMax 1 en el VPS, no crear sesiones nuevas por cada restart.
+let cachedHlsSession = null;
 let forceRescrape = false;
 let recentAuthError = false;
+
+function normalizeSetCookie(setCookie) {
+  if (!setCookie) return [];
+  return Array.isArray(setCookie) ? setCookie : [setCookie];
+}
+
+function mergeCookies(existingCookieHeader = '', setCookie = []) {
+  const jar = new Map();
+  for (const part of String(existingCookieHeader || '').split(';')) {
+    const trimmed = part.trim();
+    if (!trimmed || !trimmed.includes('=')) continue;
+    const [name, ...valueParts] = trimmed.split('=');
+    jar.set(name.trim(), valueParts.join('=').trim());
+  }
+  for (const raw of normalizeSetCookie(setCookie)) {
+    const first = String(raw).split(';')[0]?.trim();
+    if (!first || !first.includes('=')) continue;
+    const [name, ...valueParts] = first.split('=');
+    jar.set(name.trim(), valueParts.join('=').trim());
+  }
+  return [...jar.entries()].map(([name, value]) => `${name}=${value}`).join('; ');
+}
 
 function httpJson(method, url, headers, body) {
   return new Promise((resolve, reject) => {
@@ -103,8 +124,8 @@ function httpJson(method, url, headers, body) {
       let data = '';
       res.on('data', (c) => { data += c; });
       res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: data ? JSON.parse(data) : null }); }
-        catch { resolve({ status: res.statusCode, body: data }); }
+        try { resolve({ status: res.statusCode, headers: res.headers, body: data ? JSON.parse(data) : null }); }
+        catch { resolve({ status: res.statusCode, headers: res.headers, body: data }); }
       });
     });
     req.on('timeout', () => req.destroy(new Error('timeout')));
@@ -114,10 +135,11 @@ function httpJson(method, url, headers, body) {
   });
 }
 
-function httpHead(url, headers, maxBytes = 65536, redirectsLeft = 3) {
+function httpHead(url, headers, maxBytes = 65536, redirectsLeft = 3, cookieHeader = '') {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     let settled = false;
+    let cookies = cookieHeader || '';
     const finish = (value) => {
       if (settled) return;
       settled = true;
@@ -129,23 +151,24 @@ function httpHead(url, headers, maxBytes = 65536, redirectsLeft = 3) {
       hostname: u.hostname,
       port: u.port || 443,
       path: u.pathname + u.search,
-      headers,
+      headers: { ...headers, ...(cookies ? { Cookie: cookies } : {}) },
       timeout: 15000,
     }, (res) => {
+      cookies = mergeCookies(cookies, res.headers['set-cookie']);
       // Seguir redirects 30x
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectsLeft > 0) {
         settled = true;
         try { req.destroy(); } catch {}
         const next = new URL(res.headers.location, url).toString();
-        return httpHead(next, headers, maxBytes, redirectsLeft - 1).then(resolve, reject);
+        return httpHead(next, headers, maxBytes, redirectsLeft - 1, cookies).then(resolve, reject);
       }
       let data = '';
       res.on('data', (c) => {
         data += c;
-        if (data.length >= maxBytes) finish({ status: res.statusCode, body: data });
+        if (data.length >= maxBytes) finish({ status: res.statusCode, body: data, cookies });
       });
-      res.on('end', () => finish({ status: res.statusCode, body: data }));
-      res.on('close', () => finish({ status: res.statusCode, body: data }));
+      res.on('end', () => finish({ status: res.statusCode, body: data, cookies }));
+      res.on('close', () => finish({ status: res.statusCode, body: data, cookies }));
     });
     req.on('timeout', () => req.destroy(new Error('timeout')));
     req.on('error', (e) => { if (!settled) reject(e); });
