@@ -1048,6 +1048,8 @@ const ensureSrtListener = (process_id) => {
   proc.stderr?.on('data', (buf) => {
     const txt = buf.toString();
     // Solo logueamos handshakes/errores reales para no saturar.
+    // Filtramos métricas periódicas SRT (RcvQ/SndQ/SRT.cn/etc) que sólo ruidean.
+    if (/SRT:RcvQ|SRT:SndQ|SRT\.cn|RTT=|BW=/i.test(txt)) return;
     if (/(error|fail|reject|disconnect|accept|connect)/i.test(txt)) {
       const line = txt.split('\n').find(l => l.trim()) || txt.trim();
       sendLog(process_id, /error|fail|reject/i.test(line) ? 'warn' : 'info',
@@ -1115,8 +1117,11 @@ const startSrtIngest = (process_id) => {
     '-loglevel', 'verbose',
     '-stats',
     '-fflags', '+genpts+discardcorrupt+nobuffer',
-    '-analyzeduration', '10000000',
-    '-probesize', '5000000',
+    // Fase 2: bajamos de 10s/5MB a 3s/2MB. El stream ya viene "limpio"
+    // desde srt-live-transmit (MPEG-TS estable) y no necesita 10s de análisis;
+    // esto recorta ~7s del arranque y acelera el recovery.
+    '-analyzeduration', '3000000',
+    '-probesize', '2000000',
     '-i', udpInput,
     '-map', '0:v:0',
     '-map', '0:a:0',
@@ -1188,16 +1193,23 @@ const startTigoHdmiIngest = (process_id) => {
     '-loglevel', 'verbose',
     '-stats',
     '-fflags', '+genpts+discardcorrupt+nobuffer',
-    // Subido x3: el stream MPEG-TS del Pi5 tarda en exponer SPS/PPS,
-    // hace falta más tiempo de análisis para no perder el video.
-    '-analyzeduration', '10000000',
-    '-probesize', '5000000',
+    // Fase 2: alineado con startSrtIngest (3s/2MB). El stream MPEG-TS
+    // del Pi5 expone SPS/PPS muy rápido; 10s era exceso heredado.
+    '-analyzeduration', '3000000',
+    '-probesize', '2000000',
     '-i', srtUrl,
     // CRÍTICO: mapear EXPLÍCITAMENTE video y audio. Sin esto FFmpeg
     // a veces descarta el video cuando llega como "unspecified size".
     '-map', '0:v:0',
     '-map', '0:a:0',
-    '-c', 'copy',
+    // Re-encodeamos audio (mismo motivo que startSrtIngest): el SRT del
+    // Pi5 puede no exponer sample_rate al inicio y rompe "-c copy" con
+    // "Sample rate not set". Video sigue en copy (cero CPU).
+    '-c:v', 'copy',
+    '-c:a', 'aac',
+    '-ar', '48000',
+    '-ac', '2',
+    '-b:a', '128k',
     // NOTA: NO usar '-bsf:v h264_mp4toannexb' aquí — el stream MPEG-TS del Pi5
     // ya viene en Annex B, y aplicar el filtro causa fallo fatal silencioso.
     '-f', 'hls',
