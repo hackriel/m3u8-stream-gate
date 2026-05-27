@@ -82,6 +82,13 @@ let lastFrame = 0;
 let startingSource = false;
 let manualRefreshRequested = false;
 
+// 🔒 Caché de URL HLS resuelta: reusar la misma sesión Nimble por horas en vez de re-loguear cada restart
+let cachedHlsUrl = '';
+let cachedHlsUrlAt = 0;
+const HLS_URL_TTL_MS = 8 * 60 * 60 * 1000; // 8h: nimblesessionid suele durar más, refrescamos antes por seguridad
+let forceRescrape = false;
+let recentAuthError = false;
+
 function httpJson(method, url, headers, body) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
