@@ -441,8 +441,7 @@ process.on('unhandledRejection', (e) => { err('unhandledRejection:', e?.stack ||
 
 log(`🚀 ${CHANNEL_NAME} robusto iniciado → VPS:${VPS_PORT}, UDP local:${LOCAL_UDP_PORT}, target=${PI_TARGET}`);
 if (SUPABASE_URL && SUPABASE_ANON_KEY) {
-  const cmdTimer = setInterval(pollCommands, 15000);
-  cmdTimer.unref?.();
+  setInterval(pollCommands, 15000);
   log(`📡 Polling de comandos manuales activo (target=${PI_TARGET})`);
 } else {
   warn('SUPABASE_URL / SUPABASE_ANON_KEY no definidos — Refresh manual no funcionará');
@@ -450,7 +449,7 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
 
 if (STARTUP_DELAY_MS > 0) {
   log(`⏳ Arranque escalonado: esperando ${Math.round(STARTUP_DELAY_MS / 1000)}s antes de abrir ${CHANNEL_NAME}`);
-  setTimeout(startBridge, STARTUP_DELAY_MS).unref?.();
+  setTimeout(startBridge, STARTUP_DELAY_MS);
 } else {
   startBridge();
 }
