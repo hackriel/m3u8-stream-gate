@@ -7,10 +7,12 @@ type: feature
 
 - Slugs HLS: `foxmas` y `fox` → `/live/foxmas/playlist.m3u8`, `/live/fox/playlist.m3u8`.
 - Puertos SRT en VPS: 9005 (FOX+) y 9006 (FOX). Env opcionales: `FOXMAS_SRT_PORT`, `FOX_SRT_PORT`.
-- Cuenta TDMax dedicada Pi5 (compartida con Teletica SRT ID 21): `info@media.cr`. TDMax limita a 4 sesiones; mantener esta cuenta sólo para tráfico Raspberry para no saturar la principal.
+- Cuenta TDMax dedicada Pi5: `info@media.cr`. Actualmente enfocarse sólo en FOX+ y FOX desde Raspberry; no mezclar decisiones con Teletica.
 - TDMax channel IDs:
   - FOX+ : `6a10a6a2350cb5151ab6ca8c`
   - FOX  : `664237788f085ac1f2a15f81`
 - Cada pusher Pi5 debe usar un `DEVICE_ID` TDMax distinto por canal; no compartir el mismo device-id entre Teletica/FOX+/FOX porque los logins con la cuenta `info@media.cr` pueden invalidar sesiones entre sí y causar cortes/reconexiones en menos de 1 hora.
 - Código: `pi5-foxmas-srt/` y `pi5-fox-srt/` (clones de `pi5-teletica-srt/`). Mismos refreshes 00:00 y 05:00 CR.
-- Cada Pi5 services es independiente: `foxmas-srt-pusher.service`, `fox-srt-pusher.service`, `teletica-srt-pusher.service`. Pueden correr los 3 en paralelo (~6-12% CPU total, ~9 Mbps subida).
+- Arquitectura robusta 2026 para Pi5: una sola sesión TDMax por canal, FFmpeg Stage A lee TDMax HLS y envía MPEG-TS a UDP local; Stage B `srt-live-transmit` mantiene el caller SRT al VPS. No usar doble sesión/reproductor para “estabilidad”.
+- Puertos: FOX+ SRT 9005 con UDP local 10005; FOX SRT 9006 con UDP local 10006. No confundir con Teletica 9004.
+- Servicios independientes: `foxmas-srt-pusher.service` y `fox-srt-pusher.service`. Arranque escalonado recomendado: FOX+ primero, FOX ~20s después.
