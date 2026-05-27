@@ -372,12 +372,26 @@ async function runSourceOnce() {
   startingSource = true;
   let hlsUrl;
   try {
-    hlsUrl = await getStreamHlsUrl();
+    const cacheAge = Date.now() - cachedHlsUrlAt;
+    const cacheValid = cachedHlsUrl && cacheAge < HLS_URL_TTL_MS && !forceRescrape && !recentAuthError;
+    if (cacheValid) {
+      hlsUrl = cachedHlsUrl;
+      log(`♻️  ${CHANNEL_NAME}: reusando sesión TDMax/Nimble (edad=${Math.round(cacheAge / 60000)}min). Sin nuevo login.`);
+    } else {
+      if (recentAuthError) warn(`${CHANNEL_NAME}: error de auth detectado → re-login TDMax forzado.`);
+      else if (forceRescrape) warn(`${CHANNEL_NAME}: refresh manual → re-login TDMax.`);
+      else if (cachedHlsUrl) log(`⏰ ${CHANNEL_NAME}: caché HLS expiró (${Math.round(cacheAge / 60000)}min) → renovando.`);
+      hlsUrl = await getStreamHlsUrl();
+      cachedHlsUrl = hlsUrl;
+      cachedHlsUrlAt = Date.now();
+      forceRescrape = false;
+      recentAuthError = false;
+      const newHost = new URL(hlsUrl).host;
+      if (lastBaseHost && newHost !== lastBaseHost) log(`🔄 ${CHANNEL_NAME}: TDMax rotó CDN ${lastBaseHost} → ${newHost}`);
+      lastBaseHost = newHost;
+      log(`🔑 ${CHANNEL_NAME}: nueva sesión TDMax/Nimble obtenida; se reusará hasta 8h o hasta error de auth.`);
+    }
     backoffMs = 3000;
-    const newHost = new URL(hlsUrl).host;
-    if (lastBaseHost && newHost !== lastBaseHost) log(`🔄 ${CHANNEL_NAME}: TDMax rotó CDN ${lastBaseHost} → ${newHost}`);
-    lastBaseHost = newHost;
-    log(`🔑 ${CHANNEL_NAME}: URL TDMax OK; una sesión activa, sin duplicar reproductor.`);
   } catch (e) {
     startingSource = false;
     err(`${CHANNEL_NAME}: scrape TDMax falló: ${e.message}`);
