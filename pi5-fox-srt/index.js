@@ -82,12 +82,33 @@ let lastFrame = 0;
 let startingSource = false;
 let manualRefreshRequested = false;
 
-// 🔒 Caché de URL HLS resuelta: reusar la misma sesión Nimble por horas en vez de re-loguear cada restart
-let cachedHlsUrl = '';
-let cachedHlsUrlAt = 0;
-const HLS_URL_TTL_MS = 8 * 60 * 60 * 1000; // 8h: nimblesessionid suele durar más, refrescamos antes por seguridad
+// 🔒 Una sola sesión TDMax/Nimble por canal: se reutiliza hasta que caiga por auth o refresh manual.
+// No hay TTL artificial: el objetivo es comportarse como TDMax 1 en el VPS, no crear sesiones nuevas por cada restart.
+let cachedHlsSession = null;
 let forceRescrape = false;
 let recentAuthError = false;
+
+function normalizeSetCookie(setCookie) {
+  if (!setCookie) return [];
+  return Array.isArray(setCookie) ? setCookie : [setCookie];
+}
+
+function mergeCookies(existingCookieHeader = '', setCookie = []) {
+  const jar = new Map();
+  for (const part of String(existingCookieHeader || '').split(';')) {
+    const trimmed = part.trim();
+    if (!trimmed || !trimmed.includes('=')) continue;
+    const [name, ...valueParts] = trimmed.split('=');
+    jar.set(name.trim(), valueParts.join('=').trim());
+  }
+  for (const raw of normalizeSetCookie(setCookie)) {
+    const first = String(raw).split(';')[0]?.trim();
+    if (!first || !first.includes('=')) continue;
+    const [name, ...valueParts] = first.split('=');
+    jar.set(name.trim(), valueParts.join('=').trim());
+  }
+  return [...jar.entries()].map(([name, value]) => `${name}=${value}`).join('; ');
+}
 
 function httpJson(method, url, headers, body) {
   return new Promise((resolve, reject) => {
@@ -103,8 +124,8 @@ function httpJson(method, url, headers, body) {
       let data = '';
       res.on('data', (c) => { data += c; });
       res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: data ? JSON.parse(data) : null }); }
-        catch { resolve({ status: res.statusCode, body: data }); }
+        try { resolve({ status: res.statusCode, headers: res.headers, body: data ? JSON.parse(data) : null }); }
+        catch { resolve({ status: res.statusCode, headers: res.headers, body: data }); }
       });
     });
     req.on('timeout', () => req.destroy(new Error('timeout')));
@@ -114,10 +135,11 @@ function httpJson(method, url, headers, body) {
   });
 }
 
-function httpHead(url, headers, maxBytes = 65536, redirectsLeft = 3) {
+function httpHead(url, headers, maxBytes = 65536, redirectsLeft = 3, cookieHeader = '') {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     let settled = false;
+    let cookies = cookieHeader || '';
     const finish = (value) => {
       if (settled) return;
       settled = true;
@@ -129,23 +151,24 @@ function httpHead(url, headers, maxBytes = 65536, redirectsLeft = 3) {
       hostname: u.hostname,
       port: u.port || 443,
       path: u.pathname + u.search,
-      headers,
+      headers: { ...headers, ...(cookies ? { Cookie: cookies } : {}) },
       timeout: 15000,
     }, (res) => {
+      cookies = mergeCookies(cookies, res.headers['set-cookie']);
       // Seguir redirects 30x
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectsLeft > 0) {
         settled = true;
         try { req.destroy(); } catch {}
         const next = new URL(res.headers.location, url).toString();
-        return httpHead(next, headers, maxBytes, redirectsLeft - 1).then(resolve, reject);
+        return httpHead(next, headers, maxBytes, redirectsLeft - 1, cookies).then(resolve, reject);
       }
       let data = '';
       res.on('data', (c) => {
         data += c;
-        if (data.length >= maxBytes) finish({ status: res.statusCode, body: data });
+        if (data.length >= maxBytes) finish({ status: res.statusCode, body: data, cookies });
       });
-      res.on('end', () => finish({ status: res.statusCode, body: data }));
-      res.on('close', () => finish({ status: res.statusCode, body: data }));
+      res.on('end', () => finish({ status: res.statusCode, body: data, cookies }));
+      res.on('close', () => finish({ status: res.statusCode, body: data, cookies }));
     });
     req.on('timeout', () => req.destroy(new Error('timeout')));
     req.on('error', (e) => { if (!settled) reject(e); });
@@ -192,10 +215,12 @@ function chooseBestVariant(variants) {
   return scored[0]?.variant || variants[0];
 }
 
-async function resolvePlayableHlsUrl(url) {
+async function resolvePlayableHlsUrl(url, cookies = '') {
   let currentUrl = url;
+  let currentCookies = cookies || '';
   for (let depth = 0; depth < 3; depth += 1) {
-    const res = await httpHead(currentUrl, BROWSER_HEADERS, 131072);
+    const res = await httpHead(currentUrl, BROWSER_HEADERS, 131072, 3, currentCookies);
+    currentCookies = res.cookies || currentCookies;
     const body = String(res.body || '');
     if (res.status !== 200 || !body.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(body)) {
       throw new Error(`Playlist inválida (HTTP ${res.status})`);
@@ -209,7 +234,7 @@ async function resolvePlayableHlsUrl(url) {
       currentUrl = selected.url;
       continue;
     }
-    if (/#EXTINF:/i.test(body) || /#EXT-X-TARGETDURATION/i.test(body)) return currentUrl;
+    if (/#EXTINF:/i.test(body) || /#EXT-X-TARGETDURATION/i.test(body)) return { url: currentUrl, cookies: currentCookies };
     throw new Error('Playlist sin variantes ni segmentos');
   }
   throw new Error('Demasiados masters HLS anidados');
@@ -225,6 +250,7 @@ async function getStreamHlsUrl() {
   );
   const token = loginRes.body?.accessToken || loginRes.body?.access_token;
   if (!token) throw new Error(`Login fallido (status ${loginRes.status}): ${JSON.stringify(loginRes.body).slice(0, 200)}`);
+  let cookieHeader = mergeCookies('', loginRes.headers?.['set-cookie']);
 
   const qs = new URLSearchParams({
     r: RESELLER_ID,
@@ -235,18 +261,17 @@ async function getStreamHlsUrl() {
     'device-name': 'web',
     'device-type': 'web',
   });
-  const lbRes = await httpJson(
-    'GET',
-    `${BASE_URL}/loadbalancer/services/v1/channels-secure/${CHANNEL_ID}/playlist.m3u8?${qs}`,
-    { ...BROWSER_HEADERS, Authorization: `Bearer ${token}` },
-  );
+  const lbHeaders = { ...BROWSER_HEADERS, Authorization: `Bearer ${token}`, ...(cookieHeader ? { Cookie: cookieHeader } : {}) };
+  const lbRes = await httpJson('GET', `${BASE_URL}/loadbalancer/services/v1/channels-secure/${CHANNEL_ID}/playlist.m3u8?${qs}`, lbHeaders);
+  cookieHeader = mergeCookies(cookieHeader, lbRes.headers?.['set-cookie']);
   const streamUrl = lbRes.body?.url;
   if (!streamUrl) throw new Error(`LB sin URL (status ${lbRes.status}): ${JSON.stringify(lbRes.body).slice(0, 200)}`);
   if (/cfvod\.streann\.tech|isVodPlaylist=true|unavailable|placeholder|slate/i.test(streamUrl)) {
     throw new Error(`TDMax devolvió placeholder/VOD: ${streamUrl.slice(0, 160)}`);
   }
 
-  return resolvePlayableHlsUrl(streamUrl);
+  const resolved = await resolvePlayableHlsUrl(streamUrl, cookieHeader);
+  return { ...resolved, accessToken: token, createdAt: Date.now() };
 }
 
 function buildSrtUrl() {
@@ -314,13 +339,13 @@ function handleRelevantFfmpegLine(line) {
     lastProgressAt = Date.now();
     return;
   }
-  if (LOG_VERBOSE) {
-    process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
-    return;
-  }
   // Detección de errores de auth → invalida caché de sesión TDMax/Nimble
   if (/HTTP\s*(401|403|410)|403 Forbidden|401 Unauthorized|410 Gone/i.test(line)) {
     recentAuthError = true;
+    process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
+    return;
+  }
+  if (LOG_VERBOSE) {
     process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
     return;
   }
@@ -329,9 +354,16 @@ function handleRelevantFfmpegLine(line) {
   }
 }
 
-function spawnSourceFfmpeg(hlsUrl) {
+function spawnSourceFfmpeg(session) {
+  const hlsUrl = session.url;
   const udpUrl = `udp://127.0.0.1:${LOCAL_UDP_PORT}?pkt_size=1316&buffer_size=655360`;
   log(`▶️  Stage A ${CHANNEL_NAME}: TDMax HLS → UDP local:${LOCAL_UDP_PORT}`);
+
+  const headerLines = [
+    `Referer: ${BROWSER_HEADERS.Referer}`,
+    `Origin: ${BROWSER_HEADERS.Origin}`,
+    session.accessToken ? `Authorization: Bearer ${session.accessToken}` : null,
+  ].filter(Boolean).join('\r\n') + '\r\n';
 
   const args = [
     '-hide_banner', '-nostdin', '-loglevel', LOG_VERBOSE ? 'info' : 'warning',
@@ -339,14 +371,12 @@ function spawnSourceFfmpeg(hlsUrl) {
     '-fflags', '+genpts+discardcorrupt+igndts',
     '-rw_timeout', '15000000',
     '-user_agent', BROWSER_HEADERS['User-Agent'],
-    '-headers', `Referer: ${BROWSER_HEADERS.Referer}\r\nOrigin: ${BROWSER_HEADERS.Origin}\r\n`,
-    '-reconnect', '1', '-reconnect_streamed', '1',
-    '-reconnect_at_eof', '1',
-    '-reconnect_on_network_error', '1',
-    '-reconnect_on_http_error', '5xx',
-    '-reconnect_delay_max', '4',
-    '-max_reload', '20',
-    '-m3u8_hold_counters', '20',
+    ...(session.cookies ? ['-cookies', `${session.cookies}\n`] : []),
+    '-headers', headerLines,
+    // Modo VLC-like/TDMax 1: el demuxer HLS maneja playlist/segmentos; no forzamos reconnect HTTP agresivo.
+    '-http_seekable', '0',
+    '-max_reload', '1000',
+    '-m3u8_hold_counters', '1000',
     '-re',
     '-i', hlsUrl,
     '-map', '0:v:0', '-map', '0:a:0?',
@@ -370,26 +400,24 @@ function spawnSourceFfmpeg(hlsUrl) {
 async function runSourceOnce() {
   if (stopRequested || startingSource || isAlive(sourceProc) || !isAlive(bridgeProc)) return;
   startingSource = true;
-  let hlsUrl;
+  let session;
   try {
-    const cacheAge = Date.now() - cachedHlsUrlAt;
-    const cacheValid = cachedHlsUrl && cacheAge < HLS_URL_TTL_MS && !forceRescrape && !recentAuthError;
+    const cacheValid = cachedHlsSession?.url && !forceRescrape && !recentAuthError;
     if (cacheValid) {
-      hlsUrl = cachedHlsUrl;
-      log(`♻️  ${CHANNEL_NAME}: reusando sesión TDMax/Nimble (edad=${Math.round(cacheAge / 60000)}min). Sin nuevo login.`);
+      session = cachedHlsSession;
+      const ageMin = Math.round((Date.now() - session.createdAt) / 60000);
+      log(`♻️  ${CHANNEL_NAME}: reusando la MISMA sesión TDMax/Nimble (edad=${ageMin}min). Sin login nuevo.`);
     } else {
       if (recentAuthError) warn(`${CHANNEL_NAME}: error de auth detectado → re-login TDMax forzado.`);
       else if (forceRescrape) warn(`${CHANNEL_NAME}: refresh manual → re-login TDMax.`);
-      else if (cachedHlsUrl) log(`⏰ ${CHANNEL_NAME}: caché HLS expiró (${Math.round(cacheAge / 60000)}min) → renovando.`);
-      hlsUrl = await getStreamHlsUrl();
-      cachedHlsUrl = hlsUrl;
-      cachedHlsUrlAt = Date.now();
+      session = await getStreamHlsUrl();
+      cachedHlsSession = session;
       forceRescrape = false;
       recentAuthError = false;
-      const newHost = new URL(hlsUrl).host;
+      const newHost = new URL(session.url).host;
       if (lastBaseHost && newHost !== lastBaseHost) log(`🔄 ${CHANNEL_NAME}: TDMax rotó CDN ${lastBaseHost} → ${newHost}`);
       lastBaseHost = newHost;
-      log(`🔑 ${CHANNEL_NAME}: nueva sesión TDMax/Nimble obtenida; se reusará hasta 8h o hasta error de auth.`);
+      log(`🔑 ${CHANNEL_NAME}: nueva sesión TDMax/Nimble obtenida; se reusará hasta que caiga por auth o refresh manual.`);
     }
     backoffMs = 3000;
   } catch (e) {
@@ -404,7 +432,7 @@ async function runSourceOnce() {
   startingSource = false;
   lastProgressAt = Date.now();
   lastFrame = 0;
-  sourceProc = spawnSourceFfmpeg(hlsUrl);
+  sourceProc = spawnSourceFfmpeg(session);
 
   watchdogTimer = setInterval(() => {
     if (!isAlive(sourceProc)) return;
@@ -423,7 +451,7 @@ async function runSourceOnce() {
     if (stopRequested || !isAlive(bridgeProc)) return;
     const delay = manualRefreshRequested ? 1000 : backoffMs;
     manualRefreshRequested = false;
-    warn(`${CHANNEL_NAME}: Stage A salió (code=${code ?? '-'}${signal ? `, signal=${signal}` : ''}); re-scrape en ${Math.round(delay / 1000)}s`);
+    warn(`${CHANNEL_NAME}: Stage A salió (code=${code ?? '-'}${signal ? `, signal=${signal}` : ''}); reinicio en ${Math.round(delay / 1000)}s usando sesión cacheada si sigue válida`);
     scheduleSourceRetry(delay);
     backoffMs = Math.min(Math.round(backoffMs * 1.5), 45000);
   });
