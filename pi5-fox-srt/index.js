@@ -318,7 +318,13 @@ function handleRelevantFfmpegLine(line) {
     process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
     return;
   }
-  if (/HTTP\s*(401|403|404|410)|403 Forbidden|Unauthorized|forbidden|invalid data|server returned|error|fail|denied|broken|Connection timed out|Connection reset/i.test(line)) {
+  // Detección de errores de auth → invalida caché de sesión TDMax/Nimble
+  if (/HTTP\s*(401|403|410)|403 Forbidden|401 Unauthorized|410 Gone/i.test(line)) {
+    recentAuthError = true;
+    process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
+    return;
+  }
+  if (/HTTP\s*(404)|invalid data|server returned|error|fail|denied|broken|Connection timed out|Connection reset/i.test(line)) {
     process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
   }
 }
