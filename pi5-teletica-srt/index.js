@@ -274,51 +274,6 @@ log(`🚀 Teletica SRT pusher iniciado → ${VPS_HOST}:${VPS_PORT} (streamid=${S
 runOnce();
 
 // ─────────────────────────────────────────────────────────────
-// Watchdog HLS: detecta URL "viva pero congelada" (CDN rotó por debajo).
-// Cada 60s relee el .m3u8 activo y compara #EXT-X-MEDIA-SEQUENCE.
-// Si no avanza durante 2 ciclos consecutivos (~120s) → recicla ffmpeg.
-// ─────────────────────────────────────────────────────────────
-function startWatchdog() {
-  stopWatchdog();
-  lastMediaSeq = -1;
-  sameSeqCount = 0;
-  watchdogTimer = setInterval(checkHlsFreshness, 60_000);
-  if (watchdogTimer.unref) watchdogTimer.unref();
-}
-function stopWatchdog() {
-  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
-}
-async function checkHlsFreshness() {
-  if (!currentProc || !currentHlsUrl) return;
-  try {
-    const res = await httpHead(currentHlsUrl, BROWSER_HEADERS);
-    if (res.status !== 200 || !res.body) {
-      warn(`Watchdog: playlist HTTP ${res.status} — reciclando ffmpeg`);
-      backoffMs = 3000;
-      killCurrent('SIGTERM');
-      return;
-    }
-    const m = res.body.match(/#EXT-X-MEDIA-SEQUENCE:(\d+)/);
-    if (!m) return; // sin sequence no podemos juzgar; lo dejamos pasar
-    const seq = parseInt(m[1], 10);
-    if (seq === lastMediaSeq) {
-      sameSeqCount++;
-      if (sameSeqCount >= 2) {
-        warn(`Watchdog: MEDIA-SEQUENCE congelada en ${seq} por ${sameSeqCount} ciclos — reciclando`);
-        backoffMs = 3000;
-        sameSeqCount = 0;
-        killCurrent('SIGTERM');
-      }
-    } else {
-      lastMediaSeq = seq;
-      sameSeqCount = 0;
-    }
-  } catch (e) {
-    warn(`Watchdog error leyendo playlist: ${e.message}`);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
 // Polling de comandos manuales desde el dashboard (Supabase).
 // Cada 15s busca un comando 'refresh' sin consumir y lo aplica.
 // ─────────────────────────────────────────────────────────────
