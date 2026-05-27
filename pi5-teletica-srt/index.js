@@ -6,7 +6,7 @@
  *  IP del Pi5 (necesario para que el CDN no bloquee los segments)
  *  y la reenvía vía SRT en modo CALLER al puerto 9004 del VPS.
  *
- *  - Re-scrapea TDMax ÚNICAMENTE cuando ffmpeg muere (mismo enfoque que el VPS).
+ *  - Re-scrapea TDMax ÚNICAMENTE cuando ffmpeg muere o cuando se pide refresh manual.
  *    No se tocan procesos sanos: si está emitiendo, sigue emitiendo.
  *  - Si FFmpeg muere por cualquier motivo, re-loguea y reintenta con backoff.
  *  - Si el VPS aún no abrió el SRT listener (el switch del panel está OFF),
@@ -44,12 +44,8 @@ const SUPABASE_URL      = process.env.SUPABASE_URL      || '';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 const PI_TARGET = 'teletica';
 
-// Estado del watchdog HLS + detección de cambio de host
+// Estado informativo para detectar cambios de host/CDN entre reinicios reales.
 let lastBaseHost   = '';
-let currentHlsUrl  = '';
-let watchdogTimer  = null;
-let lastMediaSeq   = -1;
-let sameSeqCount   = 0;
 
 // Mismos valores que la edge function scrape-channel
 const RESELLER_ID  = '61316705e4b0295f87dae396';
@@ -227,60 +223,11 @@ function killCurrent(signal = 'SIGTERM') {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Refresh programado diario (00:00 y 05:00 hora Costa Rica, UTC-6 sin DST)
-// Se calcula el próximo disparo exacto y se programa UN setTimeout.
-// Tras ejecutarse (o al iniciar el servicio), se reprograma el siguiente.
-// Nada de polling cada minuto.
-// ─────────────────────────────────────────────────────────────
-const REFRESH_HOURS_CR = [0, 5];
-const CR_OFFSET_MS = 6 * 60 * 60 * 1000; // Costa Rica = UTC-6
-
-function msUntilNextRefresh() {
-  const nowUtcMs = Date.now();
-  const crNow = new Date(nowUtcMs - CR_OFFSET_MS); // "reloj" CR en UTC fields
-  let best = Infinity;
-  let bestHh = -1;
-  for (const hh of REFRESH_HOURS_CR) {
-    // Próxima ocurrencia hoy en CR
-    const candCr = new Date(Date.UTC(
-      crNow.getUTCFullYear(), crNow.getUTCMonth(), crNow.getUTCDate(),
-      hh, 0, 0, 0,
-    ));
-    let candUtcMs = candCr.getTime() + CR_OFFSET_MS;
-    if (candUtcMs <= nowUtcMs) candUtcMs += 24 * 60 * 60 * 1000; // mañana
-    const delta = candUtcMs - nowUtcMs;
-    if (delta < best) { best = delta; bestHh = hh; }
-  }
-  return { ms: best, hh: bestHh };
-}
-
-let refreshTimer = null;
-function scheduleNextRefresh() {
-  if (refreshTimer) clearTimeout(refreshTimer);
-  const { ms, hh } = msUntilNextRefresh();
-  const mins = Math.round(ms / 60000);
-  log(`⏰ Próximo refresh programado: ${hh.toString().padStart(2,'0')}:00 CR (en ~${mins} min)`);
-  refreshTimer = setTimeout(() => {
-    if (stopRequested) return;
-    if (!currentProc) {
-      log(`⏰ Refresh ${hh}:00 CR — ffmpeg no activo, se omite reciclaje`);
-    } else {
-      log(`⏰ Refresh ${hh}:00 CR — reciclando ffmpeg + token TDMax`);
-      backoffMs = 3000;
-      killCurrent('SIGTERM');
-    }
-    scheduleNextRefresh();
-  }, ms);
-  if (refreshTimer.unref) refreshTimer.unref();
-}
-scheduleNextRefresh();
-
 async function runOnce() {
   let hlsUrl;
   try {
     hlsUrl = await getTeleticaUrl();
-    log('🔑 URL Teletica obtenida. ffmpeg corre indefinido; solo se re-scrapea si muere.');
+    log('🔑 URL Teletica obtenida. ffmpeg corre indefinido; solo se re-scrapea si muere o por refresh manual.');
     backoffMs = 3000; // reset backoff tras login OK
     try {
       const newHost = new URL(hlsUrl).host;
@@ -295,12 +242,9 @@ async function runOnce() {
   }
 
   currentProc = spawnFfmpeg(hlsUrl);
-  currentHlsUrl = hlsUrl;
-  startWatchdog();
 
   currentProc.on('exit', (code, signal) => {
     currentProc = null;
-    stopWatchdog();
     if (stopRequested) return;
     warn(`ffmpeg exit code=${code} signal=${signal} — reintentando en ${Math.round(backoffMs/1000)}s`);
     setTimeout(runOnce, backoffMs);
@@ -328,51 +272,6 @@ process.on('unhandledRejection', (e) => { err('unhandledRejection:', e?.stack ||
 
 log(`🚀 Teletica SRT pusher iniciado → ${VPS_HOST}:${VPS_PORT} (streamid=${SRT_STREAMID}, modo reactivo)`);
 runOnce();
-
-// ─────────────────────────────────────────────────────────────
-// Watchdog HLS: detecta URL "viva pero congelada" (CDN rotó por debajo).
-// Cada 60s relee el .m3u8 activo y compara #EXT-X-MEDIA-SEQUENCE.
-// Si no avanza durante 2 ciclos consecutivos (~120s) → recicla ffmpeg.
-// ─────────────────────────────────────────────────────────────
-function startWatchdog() {
-  stopWatchdog();
-  lastMediaSeq = -1;
-  sameSeqCount = 0;
-  watchdogTimer = setInterval(checkHlsFreshness, 60_000);
-  if (watchdogTimer.unref) watchdogTimer.unref();
-}
-function stopWatchdog() {
-  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
-}
-async function checkHlsFreshness() {
-  if (!currentProc || !currentHlsUrl) return;
-  try {
-    const res = await httpHead(currentHlsUrl, BROWSER_HEADERS);
-    if (res.status !== 200 || !res.body) {
-      warn(`Watchdog: playlist HTTP ${res.status} — reciclando ffmpeg`);
-      backoffMs = 3000;
-      killCurrent('SIGTERM');
-      return;
-    }
-    const m = res.body.match(/#EXT-X-MEDIA-SEQUENCE:(\d+)/);
-    if (!m) return; // sin sequence no podemos juzgar; lo dejamos pasar
-    const seq = parseInt(m[1], 10);
-    if (seq === lastMediaSeq) {
-      sameSeqCount++;
-      if (sameSeqCount >= 2) {
-        warn(`Watchdog: MEDIA-SEQUENCE congelada en ${seq} por ${sameSeqCount} ciclos — reciclando`);
-        backoffMs = 3000;
-        sameSeqCount = 0;
-        killCurrent('SIGTERM');
-      }
-    } else {
-      lastMediaSeq = seq;
-      sameSeqCount = 0;
-    }
-  } catch (e) {
-    warn(`Watchdog error leyendo playlist: ${e.message}`);
-  }
-}
 
 // ─────────────────────────────────────────────────────────────
 // Polling de comandos manuales desde el dashboard (Supabase).
@@ -429,7 +328,7 @@ async function pollCommands() {
     );
     if (cmd.command === 'refresh') {
       if (currentProc) {
-        log('🔄 Refresh manual — reciclando ffmpeg + token TDMax');
+        log('🔄 Refresh manual — reiniciando ffmpeg + token TDMax');
         backoffMs = 3000;
         killCurrent('SIGTERM');
       } else {
