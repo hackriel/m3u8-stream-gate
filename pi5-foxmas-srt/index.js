@@ -22,6 +22,7 @@
  *    SRT_PASSPHRASE     Passphrase (opcional, debe coincidir con FOXMAS_SRT_PASSPHRASE del VPS)
  *    TDMAX_EMAIL        Correo de la cuenta TDMax            (REQUERIDO)
  *    TDMAX_PASSWORD     Password de la cuenta TDMax          (REQUERIDO)
+ *    DEVICE_ID          Device ID TDMax exclusivo del canal  (default único FOX+)
  *    LOG_VERBOSE        '1' para ver stderr crudo de ffmpeg  (default 0)
  */
 
@@ -51,7 +52,10 @@ let lastBaseHost   = '';
 const RESELLER_ID  = '61316705e4b0295f87dae396';
 const BASE_URL     = 'https://cf.streann.tech';
 const FOXMAS_ID    = '6a10a6a2350cb5151ab6ca8c';
-const DEVICE_ID    = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+// CRÍTICO: cada pusher Pi5 debe usar un device-id distinto. Si Teletica,
+// FOX+ y FOX comparten el mismo device-id con la misma cuenta TDMax, un login
+// puede invalidar/rotar la sesión del otro y provocar cortes cada <1h.
+const DEVICE_ID    = process.env.DEVICE_ID || '2f64f7b8-7d75-4cf4-9a8c-b7e2e99a9005';
 const BROWSER_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
   'Accept': 'application/json, text/plain, */*',

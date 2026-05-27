@@ -11,5 +11,6 @@ type: feature
 - TDMax channel IDs:
   - FOX+ : `6a10a6a2350cb5151ab6ca8c`
   - FOX  : `664237788f085ac1f2a15f81`
+- Cada pusher Pi5 debe usar un `DEVICE_ID` TDMax distinto por canal; no compartir el mismo device-id entre Teletica/FOX+/FOX porque los logins con la cuenta `info@media.cr` pueden invalidar sesiones entre sí y causar cortes/reconexiones en menos de 1 hora.
 - Código: `pi5-foxmas-srt/` y `pi5-fox-srt/` (clones de `pi5-teletica-srt/`). Mismos refreshes 00:00 y 05:00 CR.
 - Cada Pi5 services es independiente: `foxmas-srt-pusher.service`, `fox-srt-pusher.service`, `teletica-srt-pusher.service`. Pueden correr los 3 en paralelo (~6-12% CPU total, ~9 Mbps subida).

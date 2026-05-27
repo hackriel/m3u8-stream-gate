@@ -60,6 +60,7 @@ SRT_LATENCY_US=2000000
 # Credenciales TDMax (cuenta dedicada Raspberry — info@media.cr)
 TDMAX_EMAIL=info@media.cr
 TDMAX_PASSWORD=Boanerges12*
+DEVICE_ID=2f64f7b8-7d75-4cf4-9a8c-b7e2e99a9005
 
 # Supabase (para el botón "Refresh Pi5" del dashboard)
 SUPABASE_URL=https://zbrkijgnkckcutydsmkt.supabase.co
@@ -71,6 +72,10 @@ ENV_EOF
   ok "Archivo .env creado"
 else
   warn "Ya existe $ENV_FILE — lo dejo como está"
+  if ! grep -q '^DEVICE_ID=' "$ENV_FILE"; then
+    echo 'DEVICE_ID=2f64f7b8-7d75-4cf4-9a8c-b7e2e99a9005' >> "$ENV_FILE"
+    ok "DEVICE_ID exclusivo agregado a $ENV_FILE"
+  fi
 fi
 
 # 4) Servicio systemd
