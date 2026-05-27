@@ -339,13 +339,13 @@ function handleRelevantFfmpegLine(line) {
     lastProgressAt = Date.now();
     return;
   }
-  if (LOG_VERBOSE) {
-    process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
-    return;
-  }
   // Detección de errores de auth → invalida caché de sesión TDMax/Nimble
   if (/HTTP\s*(401|403|410)|403 Forbidden|401 Unauthorized|410 Gone/i.test(line)) {
     recentAuthError = true;
+    process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
+    return;
+  }
+  if (LOG_VERBOSE) {
     process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
     return;
   }
