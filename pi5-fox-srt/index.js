@@ -107,7 +107,7 @@ function httpJson(method, url, headers, body) {
   });
 }
 
-function httpHead(url, headers, maxBytes = 65536) {
+function httpHead(url, headers, maxBytes = 65536, redirectsLeft = 3) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     let settled = false;
@@ -125,6 +125,13 @@ function httpHead(url, headers, maxBytes = 65536) {
       headers,
       timeout: 15000,
     }, (res) => {
+      // Seguir redirects 30x
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectsLeft > 0) {
+        settled = true;
+        try { req.destroy(); } catch {}
+        const next = new URL(res.headers.location, url).toString();
+        return httpHead(next, headers, maxBytes, redirectsLeft - 1).then(resolve, reject);
+      }
       let data = '';
       res.on('data', (c) => {
         data += c;
