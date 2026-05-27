@@ -6,7 +6,7 @@
  *  IP del Pi5 (necesario para que el CDN no bloquee los segments)
  *  y la reenvía vía SRT en modo CALLER al puerto 9005 del VPS.
  *
- *  - Re-scrapea TDMax ÚNICAMENTE cuando ffmpeg muere (mismo enfoque que el VPS).
+ *  - Re-scrapea TDMax ÚNICAMENTE cuando ffmpeg muere o cuando se pide refresh manual.
  *    No se tocan procesos sanos: si está emitiendo, sigue emitiendo.
  *  - Si FFmpeg muere por cualquier motivo, re-loguea y reintenta con backoff.
  *  - Si el VPS aún no abrió el SRT listener (el switch del panel está OFF),
