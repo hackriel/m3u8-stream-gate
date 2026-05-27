@@ -186,13 +186,17 @@ async function resolvePlayableHlsUrl(url) {
     if (res.status !== 200 || !body.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(body)) {
       throw new Error(`Playlist inválida (HTTP ${res.status})`);
     }
-    if (/#EXTINF:/i.test(body) || /#EXT-X-TARGETDURATION/i.test(body)) return currentUrl;
-
+    // Prioridad: si es master (tiene STREAM-INF) → SIEMPRE bajar a una variante única.
+    // Solo si NO hay variantes, lo tratamos como media playlist directa.
     const variants = parseMasterVariants(body, currentUrl);
-    if (!variants.length) throw new Error('Master HLS sin variantes reproducibles');
-    const selected = chooseBestVariant(variants);
-    log(`🧭 ${CHANNEL_NAME}: master HLS → variante directa ${selected.resolution || 'sin resolución'} ${selected.bandwidth || 0}bps`);
-    currentUrl = selected.url;
+    if (variants.length > 0) {
+      const selected = chooseBestVariant(variants);
+      log(`🧭 ${CHANNEL_NAME}: master HLS → variante única ${selected.resolution || '?'} ${selected.bandwidth || 0}bps`);
+      currentUrl = selected.url;
+      continue;
+    }
+    if (/#EXTINF:/i.test(body) || /#EXT-X-TARGETDURATION/i.test(body)) return currentUrl;
+    throw new Error('Playlist sin variantes ni segmentos');
   }
   throw new Error('Demasiados masters HLS anidados');
 }
