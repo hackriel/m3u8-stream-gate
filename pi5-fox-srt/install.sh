@@ -55,7 +55,7 @@ SRT_LATENCY_MS=3000
 # SRT_PASSPHRASE=
 LOCAL_UDP_PORT=10006
 STALL_TIMEOUT_MS=25000
-STARTUP_DELAY_MS=20000
+STARTUP_DELAY_MS=0
 
 # Credenciales TDMax (cuenta dedicada Raspberry — info@media.cr)
 TDMAX_EMAIL=info@media.cr
@@ -75,7 +75,7 @@ else
   grep -q '^SRT_LATENCY_MS=' "$ENV_FILE" || echo 'SRT_LATENCY_MS=3000' >> "$ENV_FILE"
   grep -q '^LOCAL_UDP_PORT=' "$ENV_FILE" || echo 'LOCAL_UDP_PORT=10006' >> "$ENV_FILE"
   grep -q '^STALL_TIMEOUT_MS=' "$ENV_FILE" || echo 'STALL_TIMEOUT_MS=25000' >> "$ENV_FILE"
-  grep -q '^STARTUP_DELAY_MS=' "$ENV_FILE" || echo 'STARTUP_DELAY_MS=20000' >> "$ENV_FILE"
+  grep -q '^STARTUP_DELAY_MS=' "$ENV_FILE" || echo 'STARTUP_DELAY_MS=0' >> "$ENV_FILE"
   if ! grep -q '^DEVICE_ID=' "$ENV_FILE"; then
     echo 'DEVICE_ID=2f64f7b8-7d75-4cf4-9a8c-b7e2e99a9006' >> "$ENV_FILE"
     ok "DEVICE_ID exclusivo agregado a $ENV_FILE"
