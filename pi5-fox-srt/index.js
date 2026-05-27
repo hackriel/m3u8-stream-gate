@@ -107,7 +107,7 @@ function httpJson(method, url, headers, body) {
   });
 }
 
-function httpHead(url, headers, maxBytes = 65536) {
+function httpHead(url, headers, maxBytes = 65536, redirectsLeft = 3) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     let settled = false;
@@ -125,6 +125,13 @@ function httpHead(url, headers, maxBytes = 65536) {
       headers,
       timeout: 15000,
     }, (res) => {
+      // Seguir redirects 30x
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectsLeft > 0) {
+        settled = true;
+        try { req.destroy(); } catch {}
+        const next = new URL(res.headers.location, url).toString();
+        return httpHead(next, headers, maxBytes, redirectsLeft - 1).then(resolve, reject);
+      }
       let data = '';
       res.on('data', (c) => {
         data += c;
@@ -186,13 +193,17 @@ async function resolvePlayableHlsUrl(url) {
     if (res.status !== 200 || !body.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(body)) {
       throw new Error(`Playlist inválida (HTTP ${res.status})`);
     }
-    if (/#EXTINF:/i.test(body) || /#EXT-X-TARGETDURATION/i.test(body)) return currentUrl;
-
+    // Prioridad: si es master (tiene STREAM-INF) → SIEMPRE bajar a una variante única.
+    // Solo si NO hay variantes, lo tratamos como media playlist directa.
     const variants = parseMasterVariants(body, currentUrl);
-    if (!variants.length) throw new Error('Master HLS sin variantes reproducibles');
-    const selected = chooseBestVariant(variants);
-    log(`🧭 ${CHANNEL_NAME}: master HLS → variante directa ${selected.resolution || 'sin resolución'} ${selected.bandwidth || 0}bps`);
-    currentUrl = selected.url;
+    if (variants.length > 0) {
+      const selected = chooseBestVariant(variants);
+      log(`🧭 ${CHANNEL_NAME}: master HLS → variante única ${selected.resolution || '?'} ${selected.bandwidth || 0}bps`);
+      currentUrl = selected.url;
+      continue;
+    }
+    if (/#EXTINF:/i.test(body) || /#EXT-X-TARGETDURATION/i.test(body)) return currentUrl;
+    throw new Error('Playlist sin variantes ni segmentos');
   }
   throw new Error('Demasiados masters HLS anidados');
 }
