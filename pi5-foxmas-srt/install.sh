@@ -25,19 +25,16 @@ echo "════════════════════════�
 echo ""
 
 # 1) Dependencias del SO
-echo "📦 [1/5] Instalando dependencias del sistema (ffmpeg + node)…"
+echo "📦 [1/5] Instalando dependencias del sistema (ffmpeg + srt-tools + node)…"
 apt-get update -qq
-apt-get install -y -qq ffmpeg curl ca-certificates
-if ! ffmpeg -hide_banner -protocols 2>/dev/null | grep -q '^ *srt$'; then
-  warn "Este ffmpeg no tiene soporte SRT. Instalando build alternativo…"
-  apt-get install -y -qq libsrt-openssl-dev || true
-fi
+apt-get install -y -qq ffmpeg srt-tools curl ca-certificates
+command -v srt-live-transmit &>/dev/null || fail "No se instaló srt-live-transmit; revisá el paquete srt-tools"
 if ! command -v node &>/dev/null || [ "$(node -v | cut -dv -f2 | cut -d. -f1)" -lt 18 ]; then
   echo "  ↳ Instalando Node.js 20…"
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   apt-get install -y nodejs
 fi
-ok "ffmpeg $(ffmpeg -version | head -1 | awk '{print $3}') / node $(node -v)"
+ok "ffmpeg $(ffmpeg -version | head -1 | awk '{print $3}') / srt-live-transmit OK / node $(node -v)"
 
 # 2) Copiar archivos
 echo "📂 [2/5] Copiando archivos a ${INSTALL_DIR}…"
@@ -54,8 +51,11 @@ if [ ! -f "$ENV_FILE" ]; then
 VPS_HOST=167.17.69.116
 VPS_PORT=9005
 SRT_STREAMID=foxmas
-SRT_LATENCY_US=2000000
+SRT_LATENCY_MS=3000
 # SRT_PASSPHRASE=
+LOCAL_UDP_PORT=10005
+STALL_TIMEOUT_MS=25000
+STARTUP_DELAY_MS=0
 
 # Credenciales TDMax (cuenta dedicada Raspberry — info@media.cr)
 TDMAX_EMAIL=info@media.cr
@@ -72,6 +72,10 @@ ENV_EOF
   ok "Archivo .env creado"
 else
   warn "Ya existe $ENV_FILE — lo dejo como está"
+  grep -q '^SRT_LATENCY_MS=' "$ENV_FILE" || echo 'SRT_LATENCY_MS=3000' >> "$ENV_FILE"
+  grep -q '^LOCAL_UDP_PORT=' "$ENV_FILE" || echo 'LOCAL_UDP_PORT=10005' >> "$ENV_FILE"
+  grep -q '^STALL_TIMEOUT_MS=' "$ENV_FILE" || echo 'STALL_TIMEOUT_MS=25000' >> "$ENV_FILE"
+  grep -q '^STARTUP_DELAY_MS=' "$ENV_FILE" || echo 'STARTUP_DELAY_MS=0' >> "$ENV_FILE"
   if ! grep -q '^DEVICE_ID=' "$ENV_FILE"; then
     echo 'DEVICE_ID=2f64f7b8-7d75-4cf4-9a8c-b7e2e99a9005' >> "$ENV_FILE"
     ok "DEVICE_ID exclusivo agregado a $ENV_FILE"
