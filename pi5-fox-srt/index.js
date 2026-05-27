@@ -233,15 +233,11 @@ function handleRelevantFfmpegLine(line) {
     return;
   }
   if (LOG_VERBOSE) {
-    process.stderr.write(line.endsWith('
-') ? line : `${line}
-`);
+    process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
     return;
   }
   if (/HTTP\s*(401|403|404|410)|403 Forbidden|Unauthorized|forbidden|invalid data|server returned|error|fail|denied|broken|Connection timed out|Connection reset/i.test(line)) {
-    process.stderr.write(line.endsWith('
-') ? line : `${line}
-`);
+    process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
   }
 }
 
