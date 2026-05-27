@@ -72,6 +72,10 @@ ENV_EOF
   ok "Archivo .env creado"
 else
   warn "Ya existe $ENV_FILE — lo dejo como está"
+  if ! grep -q '^DEVICE_ID=' "$ENV_FILE"; then
+    echo 'DEVICE_ID=2f64f7b8-7d75-4cf4-9a8c-b7e2e99a9006' >> "$ENV_FILE"
+    ok "DEVICE_ID exclusivo agregado a $ENV_FILE"
+  fi
 fi
 
 # 4) Servicio systemd
