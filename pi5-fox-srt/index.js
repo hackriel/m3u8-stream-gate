@@ -354,9 +354,16 @@ function handleRelevantFfmpegLine(line) {
   }
 }
 
-function spawnSourceFfmpeg(hlsUrl) {
+function spawnSourceFfmpeg(session) {
+  const hlsUrl = session.url;
   const udpUrl = `udp://127.0.0.1:${LOCAL_UDP_PORT}?pkt_size=1316&buffer_size=655360`;
   log(`▶️  Stage A ${CHANNEL_NAME}: TDMax HLS → UDP local:${LOCAL_UDP_PORT}`);
+
+  const headerLines = [
+    `Referer: ${BROWSER_HEADERS.Referer}`,
+    `Origin: ${BROWSER_HEADERS.Origin}`,
+    session.accessToken ? `Authorization: Bearer ${session.accessToken}` : null,
+  ].filter(Boolean).join('\r\n') + '\r\n';
 
   const args = [
     '-hide_banner', '-nostdin', '-loglevel', LOG_VERBOSE ? 'info' : 'warning',
@@ -364,14 +371,12 @@ function spawnSourceFfmpeg(hlsUrl) {
     '-fflags', '+genpts+discardcorrupt+igndts',
     '-rw_timeout', '15000000',
     '-user_agent', BROWSER_HEADERS['User-Agent'],
-    '-headers', `Referer: ${BROWSER_HEADERS.Referer}\r\nOrigin: ${BROWSER_HEADERS.Origin}\r\n`,
-    '-reconnect', '1', '-reconnect_streamed', '1',
-    '-reconnect_at_eof', '1',
-    '-reconnect_on_network_error', '1',
-    '-reconnect_on_http_error', '5xx',
-    '-reconnect_delay_max', '4',
-    '-max_reload', '20',
-    '-m3u8_hold_counters', '20',
+    ...(session.cookies ? ['-cookies', `${session.cookies}\n`] : []),
+    '-headers', headerLines,
+    // Modo VLC-like/TDMax 1: el demuxer HLS maneja playlist/segmentos; no forzamos reconnect HTTP agresivo.
+    '-http_seekable', '0',
+    '-max_reload', '1000',
+    '-m3u8_hold_counters', '1000',
     '-re',
     '-i', hlsUrl,
     '-map', '0:v:0', '-map', '0:a:0?',
@@ -395,26 +400,24 @@ function spawnSourceFfmpeg(hlsUrl) {
 async function runSourceOnce() {
   if (stopRequested || startingSource || isAlive(sourceProc) || !isAlive(bridgeProc)) return;
   startingSource = true;
-  let hlsUrl;
+  let session;
   try {
-    const cacheAge = Date.now() - cachedHlsUrlAt;
-    const cacheValid = cachedHlsUrl && cacheAge < HLS_URL_TTL_MS && !forceRescrape && !recentAuthError;
+    const cacheValid = cachedHlsSession?.url && !forceRescrape && !recentAuthError;
     if (cacheValid) {
-      hlsUrl = cachedHlsUrl;
-      log(`♻️  ${CHANNEL_NAME}: reusando sesión TDMax/Nimble (edad=${Math.round(cacheAge / 60000)}min). Sin nuevo login.`);
+      session = cachedHlsSession;
+      const ageMin = Math.round((Date.now() - session.createdAt) / 60000);
+      log(`♻️  ${CHANNEL_NAME}: reusando la MISMA sesión TDMax/Nimble (edad=${ageMin}min). Sin login nuevo.`);
     } else {
       if (recentAuthError) warn(`${CHANNEL_NAME}: error de auth detectado → re-login TDMax forzado.`);
       else if (forceRescrape) warn(`${CHANNEL_NAME}: refresh manual → re-login TDMax.`);
-      else if (cachedHlsUrl) log(`⏰ ${CHANNEL_NAME}: caché HLS expiró (${Math.round(cacheAge / 60000)}min) → renovando.`);
-      hlsUrl = await getStreamHlsUrl();
-      cachedHlsUrl = hlsUrl;
-      cachedHlsUrlAt = Date.now();
+      session = await getStreamHlsUrl();
+      cachedHlsSession = session;
       forceRescrape = false;
       recentAuthError = false;
-      const newHost = new URL(hlsUrl).host;
+      const newHost = new URL(session.url).host;
       if (lastBaseHost && newHost !== lastBaseHost) log(`🔄 ${CHANNEL_NAME}: TDMax rotó CDN ${lastBaseHost} → ${newHost}`);
       lastBaseHost = newHost;
-      log(`🔑 ${CHANNEL_NAME}: nueva sesión TDMax/Nimble obtenida; se reusará hasta 8h o hasta error de auth.`);
+      log(`🔑 ${CHANNEL_NAME}: nueva sesión TDMax/Nimble obtenida; se reusará hasta que caiga por auth o refresh manual.`);
     }
     backoffMs = 3000;
   } catch (e) {
@@ -429,7 +432,7 @@ async function runSourceOnce() {
   startingSource = false;
   lastProgressAt = Date.now();
   lastFrame = 0;
-  sourceProc = spawnSourceFfmpeg(hlsUrl);
+  sourceProc = spawnSourceFfmpeg(session);
 
   watchdogTimer = setInterval(() => {
     if (!isAlive(sourceProc)) return;
@@ -448,7 +451,7 @@ async function runSourceOnce() {
     if (stopRequested || !isAlive(bridgeProc)) return;
     const delay = manualRefreshRequested ? 1000 : backoffMs;
     manualRefreshRequested = false;
-    warn(`${CHANNEL_NAME}: Stage A salió (code=${code ?? '-'}${signal ? `, signal=${signal}` : ''}); re-scrape en ${Math.round(delay / 1000)}s`);
+    warn(`${CHANNEL_NAME}: Stage A salió (code=${code ?? '-'}${signal ? `, signal=${signal}` : ''}); reinicio en ${Math.round(delay / 1000)}s usando sesión cacheada si sigue válida`);
     scheduleSourceRetry(delay);
     backoffMs = Math.min(Math.round(backoffMs * 1.5), 45000);
   });
