@@ -512,6 +512,7 @@ async function pollCommands() {
     });
     if (cmd.command === 'refresh') {
       manualRefreshRequested = true;
+      forceRescrape = true;
       backoffMs = 1000;
       if (isAlive(sourceProc)) {
         log(`🔄 Refresh manual ${CHANNEL_NAME}: reinicio Stage A + token; Stage B SRT queda arriba.`);
