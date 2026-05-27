@@ -215,10 +215,12 @@ function chooseBestVariant(variants) {
   return scored[0]?.variant || variants[0];
 }
 
-async function resolvePlayableHlsUrl(url) {
+async function resolvePlayableHlsUrl(url, cookies = '') {
   let currentUrl = url;
+  let currentCookies = cookies || '';
   for (let depth = 0; depth < 3; depth += 1) {
-    const res = await httpHead(currentUrl, BROWSER_HEADERS, 131072);
+    const res = await httpHead(currentUrl, BROWSER_HEADERS, 131072, 3, currentCookies);
+    currentCookies = res.cookies || currentCookies;
     const body = String(res.body || '');
     if (res.status !== 200 || !body.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(body)) {
       throw new Error(`Playlist inválida (HTTP ${res.status})`);
@@ -232,7 +234,7 @@ async function resolvePlayableHlsUrl(url) {
       currentUrl = selected.url;
       continue;
     }
-    if (/#EXTINF:/i.test(body) || /#EXT-X-TARGETDURATION/i.test(body)) return currentUrl;
+    if (/#EXTINF:/i.test(body) || /#EXT-X-TARGETDURATION/i.test(body)) return { url: currentUrl, cookies: currentCookies };
     throw new Error('Playlist sin variantes ni segmentos');
   }
   throw new Error('Demasiados masters HLS anidados');
@@ -248,6 +250,7 @@ async function getStreamHlsUrl() {
   );
   const token = loginRes.body?.accessToken || loginRes.body?.access_token;
   if (!token) throw new Error(`Login fallido (status ${loginRes.status}): ${JSON.stringify(loginRes.body).slice(0, 200)}`);
+  let cookieHeader = mergeCookies('', loginRes.headers?.['set-cookie']);
 
   const qs = new URLSearchParams({
     r: RESELLER_ID,
@@ -258,18 +261,17 @@ async function getStreamHlsUrl() {
     'device-name': 'web',
     'device-type': 'web',
   });
-  const lbRes = await httpJson(
-    'GET',
-    `${BASE_URL}/loadbalancer/services/v1/channels-secure/${CHANNEL_ID}/playlist.m3u8?${qs}`,
-    { ...BROWSER_HEADERS, Authorization: `Bearer ${token}` },
-  );
+  const lbHeaders = { ...BROWSER_HEADERS, Authorization: `Bearer ${token}`, ...(cookieHeader ? { Cookie: cookieHeader } : {}) };
+  const lbRes = await httpJson('GET', `${BASE_URL}/loadbalancer/services/v1/channels-secure/${CHANNEL_ID}/playlist.m3u8?${qs}`, lbHeaders);
+  cookieHeader = mergeCookies(cookieHeader, lbRes.headers?.['set-cookie']);
   const streamUrl = lbRes.body?.url;
   if (!streamUrl) throw new Error(`LB sin URL (status ${lbRes.status}): ${JSON.stringify(lbRes.body).slice(0, 200)}`);
   if (/cfvod\.streann\.tech|isVodPlaylist=true|unavailable|placeholder|slate/i.test(streamUrl)) {
     throw new Error(`TDMax devolvió placeholder/VOD: ${streamUrl.slice(0, 160)}`);
   }
 
-  return resolvePlayableHlsUrl(streamUrl);
+  const resolved = await resolvePlayableHlsUrl(streamUrl, cookieHeader);
+  return { ...resolved, accessToken: token, createdAt: Date.now() };
 }
 
 function buildSrtUrl() {
