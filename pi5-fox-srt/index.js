@@ -82,6 +82,13 @@ let lastFrame = 0;
 let startingSource = false;
 let manualRefreshRequested = false;
 
+// 🔒 Caché de URL HLS resuelta: reusar la misma sesión Nimble por horas en vez de re-loguear cada restart
+let cachedHlsUrl = '';
+let cachedHlsUrlAt = 0;
+const HLS_URL_TTL_MS = 8 * 60 * 60 * 1000; // 8h: nimblesessionid suele durar más, refrescamos antes por seguridad
+let forceRescrape = false;
+let recentAuthError = false;
+
 function httpJson(method, url, headers, body) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
@@ -311,7 +318,13 @@ function handleRelevantFfmpegLine(line) {
     process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
     return;
   }
-  if (/HTTP\s*(401|403|404|410)|403 Forbidden|Unauthorized|forbidden|invalid data|server returned|error|fail|denied|broken|Connection timed out|Connection reset/i.test(line)) {
+  // Detección de errores de auth → invalida caché de sesión TDMax/Nimble
+  if (/HTTP\s*(401|403|410)|403 Forbidden|401 Unauthorized|410 Gone/i.test(line)) {
+    recentAuthError = true;
+    process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
+    return;
+  }
+  if (/HTTP\s*(404)|invalid data|server returned|error|fail|denied|broken|Connection timed out|Connection reset/i.test(line)) {
     process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
   }
 }
@@ -359,12 +372,26 @@ async function runSourceOnce() {
   startingSource = true;
   let hlsUrl;
   try {
-    hlsUrl = await getStreamHlsUrl();
+    const cacheAge = Date.now() - cachedHlsUrlAt;
+    const cacheValid = cachedHlsUrl && cacheAge < HLS_URL_TTL_MS && !forceRescrape && !recentAuthError;
+    if (cacheValid) {
+      hlsUrl = cachedHlsUrl;
+      log(`♻️  ${CHANNEL_NAME}: reusando sesión TDMax/Nimble (edad=${Math.round(cacheAge / 60000)}min). Sin nuevo login.`);
+    } else {
+      if (recentAuthError) warn(`${CHANNEL_NAME}: error de auth detectado → re-login TDMax forzado.`);
+      else if (forceRescrape) warn(`${CHANNEL_NAME}: refresh manual → re-login TDMax.`);
+      else if (cachedHlsUrl) log(`⏰ ${CHANNEL_NAME}: caché HLS expiró (${Math.round(cacheAge / 60000)}min) → renovando.`);
+      hlsUrl = await getStreamHlsUrl();
+      cachedHlsUrl = hlsUrl;
+      cachedHlsUrlAt = Date.now();
+      forceRescrape = false;
+      recentAuthError = false;
+      const newHost = new URL(hlsUrl).host;
+      if (lastBaseHost && newHost !== lastBaseHost) log(`🔄 ${CHANNEL_NAME}: TDMax rotó CDN ${lastBaseHost} → ${newHost}`);
+      lastBaseHost = newHost;
+      log(`🔑 ${CHANNEL_NAME}: nueva sesión TDMax/Nimble obtenida; se reusará hasta 8h o hasta error de auth.`);
+    }
     backoffMs = 3000;
-    const newHost = new URL(hlsUrl).host;
-    if (lastBaseHost && newHost !== lastBaseHost) log(`🔄 ${CHANNEL_NAME}: TDMax rotó CDN ${lastBaseHost} → ${newHost}`);
-    lastBaseHost = newHost;
-    log(`🔑 ${CHANNEL_NAME}: URL TDMax OK; una sesión activa, sin duplicar reproductor.`);
   } catch (e) {
     startingSource = false;
     err(`${CHANNEL_NAME}: scrape TDMax falló: ${e.message}`);
@@ -485,6 +512,7 @@ async function pollCommands() {
     });
     if (cmd.command === 'refresh') {
       manualRefreshRequested = true;
+      forceRescrape = true;
       backoffMs = 1000;
       if (isAlive(sourceProc)) {
         log(`🔄 Refresh manual ${CHANNEL_NAME}: reinicio Stage A + token; Stage B SRT queda arriba.`);
