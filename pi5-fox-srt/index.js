@@ -107,9 +107,16 @@ function httpJson(method, url, headers, body) {
   });
 }
 
-function httpHead(url, headers) {
+function httpHead(url, headers, maxBytes = 65536) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+      try { req.destroy(); } catch {}
+    };
     const req = https.request({
       method: 'GET',
       hostname: u.hostname,
@@ -119,14 +126,75 @@ function httpHead(url, headers) {
       timeout: 15000,
     }, (res) => {
       let data = '';
-      res.on('data', (c) => { data += c; if (data.length > 8192) res.destroy(); });
-      res.on('end', () => resolve({ status: res.statusCode, body: data }));
-      res.on('close', () => resolve({ status: res.statusCode, body: data }));
+      res.on('data', (c) => {
+        data += c;
+        if (data.length >= maxBytes) finish({ status: res.statusCode, body: data });
+      });
+      res.on('end', () => finish({ status: res.statusCode, body: data }));
+      res.on('close', () => finish({ status: res.statusCode, body: data }));
     });
     req.on('timeout', () => req.destroy(new Error('timeout')));
-    req.on('error', reject);
+    req.on('error', (e) => { if (!settled) reject(e); });
     req.end();
   });
+}
+
+function absolutizeHlsUrl(child, baseUrl) {
+  const url = new URL(child, baseUrl);
+  const base = new URL(baseUrl);
+  if (!url.search && base.search) url.search = base.search;
+  return url.toString();
+}
+
+function parseMasterVariants(body, baseUrl) {
+  const variants = [];
+  const lines = body.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let pending = null;
+  for (const line of lines) {
+    if (line.startsWith('#EXT-X-STREAM-INF')) {
+      const bandwidth = Number(line.match(/BANDWIDTH=(\d+)/i)?.[1] || 0);
+      const resolution = line.match(/RESOLUTION=(\d+x\d+)/i)?.[1] || '';
+      const height = Number(resolution.split('x')[1] || 0);
+      pending = { bandwidth, resolution, height };
+      continue;
+    }
+    if (pending && !line.startsWith('#')) {
+      variants.push({ ...pending, url: absolutizeHlsUrl(line, baseUrl) });
+      pending = null;
+    }
+  }
+  return variants;
+}
+
+function chooseBestVariant(variants) {
+  const scored = variants.map((variant) => {
+    const height = variant.height || 0;
+    const bandwidth = variant.bandwidth || 0;
+    const heightPenalty = height > 720 ? 100000000 : 0;
+    const targetPenalty = Math.abs((bandwidth || 2500000) - 2500000);
+    return { variant, score: heightPenalty + targetPenalty };
+  });
+  scored.sort((a, b) => a.score - b.score);
+  return scored[0]?.variant || variants[0];
+}
+
+async function resolvePlayableHlsUrl(url) {
+  let currentUrl = url;
+  for (let depth = 0; depth < 3; depth += 1) {
+    const res = await httpHead(currentUrl, BROWSER_HEADERS, 131072);
+    const body = String(res.body || '');
+    if (res.status !== 200 || !body.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(body)) {
+      throw new Error(`Playlist inválida (HTTP ${res.status})`);
+    }
+    if (/#EXTINF:/i.test(body) || /#EXT-X-TARGETDURATION/i.test(body)) return currentUrl;
+
+    const variants = parseMasterVariants(body, currentUrl);
+    if (!variants.length) throw new Error('Master HLS sin variantes reproducibles');
+    const selected = chooseBestVariant(variants);
+    log(`🧭 ${CHANNEL_NAME}: master HLS → variante directa ${selected.resolution || 'sin resolución'} ${selected.bandwidth || 0}bps`);
+    currentUrl = selected.url;
+  }
+  throw new Error('Demasiados masters HLS anidados');
 }
 
 async function getStreamHlsUrl() {
@@ -160,11 +228,7 @@ async function getStreamHlsUrl() {
     throw new Error(`TDMax devolvió placeholder/VOD: ${streamUrl.slice(0, 160)}`);
   }
 
-  const verify = await httpHead(streamUrl, BROWSER_HEADERS);
-  if (verify.status !== 200 || !verify.body.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(verify.body)) {
-    throw new Error(`Playlist inválida (HTTP ${verify.status})`);
-  }
-  return streamUrl;
+  return resolvePlayableHlsUrl(streamUrl);
 }
 
 function buildSrtUrl() {
