@@ -272,8 +272,7 @@ function spawnSourceFfmpeg(hlsUrl) {
 
   const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
   proc.stderr.on('data', (chunk) => {
-    for (const line of chunk.toString().split(/?
-/)) {
+    for (const line of chunk.toString().split(/\r?\n/)) {
       if (line.trim()) handleRelevantFfmpegLine(line);
     }
   });
