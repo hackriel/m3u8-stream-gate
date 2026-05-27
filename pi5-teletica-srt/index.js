@@ -328,7 +328,7 @@ async function pollCommands() {
     );
     if (cmd.command === 'refresh') {
       if (currentProc) {
-        log('🔄 Refresh manual — reciclando ffmpeg + token TDMax');
+        log('🔄 Refresh manual — reiniciando ffmpeg + token TDMax');
         backoffMs = 3000;
         killCurrent('SIGTERM');
       } else {
