@@ -40,7 +40,7 @@ const TDMAX_EMAIL = process.env.TDMAX_EMAIL || '';
 const TDMAX_PASSWORD = process.env.TDMAX_PASSWORD || '';
 const DEVICE_ID = process.env.DEVICE_ID || '2f64f7b8-7d75-4cf4-9a8c-b7e2e99a9006';
 const LOG_VERBOSE = process.env.LOG_VERBOSE === '1';
-const STALL_TIMEOUT_MS = Math.max(15000, parseInt(process.env.STALL_TIMEOUT_MS || '15000', 10) || 15000);
+const STALL_TIMEOUT_MS = Math.max(15000, parseInt(process.env.STALL_TIMEOUT_MS || '45000', 10) || 45000);
 const STARTUP_DELAY_MS = Math.max(0, parseInt(process.env.STARTUP_DELAY_MS || '0', 10) || 0);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
