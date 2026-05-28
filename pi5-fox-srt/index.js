@@ -79,6 +79,9 @@ let bridgeRetryTimer = null;
 let watchdogTimer = null;
 let lastProgressAt = 0;
 let lastFrame = 0;
+let lastOutTimeMs = 0;
+let eofLoopCount = 0;
+let lastEofAt = 0;
 let startingSource = false;
 let manualRefreshRequested = false;
 
@@ -336,17 +339,42 @@ function scheduleSourceRetry(delayMs = backoffMs) {
 }
 
 function handleRelevantFfmpegLine(line) {
+  if (/Will reconnect .*End of file|Error when loading first segment|Error opening input|Immediate exit requested/i.test(line)) {
+    process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
+    const now = Date.now();
+    eofLoopCount = now - lastEofAt < 10000 ? eofLoopCount + 1 : 1;
+    lastEofAt = now;
+    if (/Error when loading first segment|Error opening input|Immediate exit requested/i.test(line) || eofLoopCount >= 6) {
+      cachedHlsSession = null;
+      forceRescrape = true;
+      backoffMs = 1000;
+      warn(`${CHANNEL_NAME}: EOF/HLS atascado (${eofLoopCount}); invalidando sesión TDMax/Nimble y forzando re-login.`);
+      killSource('SIGTERM');
+    }
+    return;
+  }
+
   const frameMatch = line.match(/^frame=(\d+)/m) || line.match(/frame=\s*(\d+)/);
   if (frameMatch) {
     const frame = Number(frameMatch[1]);
     if (frame > lastFrame) {
       lastFrame = frame;
       lastProgressAt = Date.now();
+      eofLoopCount = 0;
     }
     return;
   }
-  if (/^out_time_ms=\d+/m.test(line) || /^progress=continue/m.test(line)) {
-    lastProgressAt = Date.now();
+  const outTimeMatch = line.match(/^out_time_ms=(\d+)/m);
+  if (outTimeMatch) {
+    const outTimeMs = Number(outTimeMatch[1]);
+    if (outTimeMs > lastOutTimeMs) {
+      lastOutTimeMs = outTimeMs;
+      lastProgressAt = Date.now();
+      eofLoopCount = 0;
+    }
+    return;
+  }
+  if (/^progress=continue/m.test(line)) {
     return;
   }
   // Detección de errores de auth → invalida caché de sesión TDMax/Nimble
@@ -454,6 +482,9 @@ async function runSourceOnce() {
   startingSource = false;
   lastProgressAt = Date.now();
   lastFrame = 0;
+  lastOutTimeMs = 0;
+  eofLoopCount = 0;
+  lastEofAt = 0;
   sourceProc = spawnSourceFfmpeg(session);
 
   watchdogTimer = setInterval(() => {
