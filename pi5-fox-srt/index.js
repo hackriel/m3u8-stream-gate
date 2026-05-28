@@ -31,9 +31,9 @@ const VPS_PORT = process.env.VPS_PORT || '9006';
 const SRT_STREAMID = process.env.SRT_STREAMID || 'fox';
 const LEGACY_LATENCY_US = parseInt(process.env.SRT_LATENCY_US || '', 10);
 const SRT_LATENCY_MS = String(Math.max(500, parseInt(
-  process.env.SRT_LATENCY_MS || (Number.isFinite(LEGACY_LATENCY_US) ? String(Math.round(LEGACY_LATENCY_US / 1000)) : '3000'),
+  process.env.SRT_LATENCY_MS || (Number.isFinite(LEGACY_LATENCY_US) ? String(Math.round(LEGACY_LATENCY_US / 1000)) : '8000'),
   10,
-) || 3000));
+) || 8000));
 const SRT_PASSPHRASE = process.env.SRT_PASSPHRASE || '';
 const LOCAL_UDP_PORT = process.env.LOCAL_UDP_PORT || '10006';
 const TDMAX_EMAIL = process.env.TDMAX_EMAIL || '';
