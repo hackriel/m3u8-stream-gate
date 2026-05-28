@@ -40,7 +40,7 @@ const TDMAX_EMAIL = process.env.TDMAX_EMAIL || '';
 const TDMAX_PASSWORD = process.env.TDMAX_PASSWORD || '';
 const DEVICE_ID = process.env.DEVICE_ID || '2f64f7b8-7d75-4cf4-9a8c-b7e2e99a9006';
 const LOG_VERBOSE = process.env.LOG_VERBOSE === '1';
-const STALL_TIMEOUT_MS = Math.max(15000, parseInt(process.env.STALL_TIMEOUT_MS || '25000', 10) || 25000);
+const STALL_TIMEOUT_MS = Math.max(15000, parseInt(process.env.STALL_TIMEOUT_MS || '15000', 10) || 15000);
 const STARTUP_DELAY_MS = Math.max(0, parseInt(process.env.STARTUP_DELAY_MS || '0', 10) || 0);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
@@ -339,12 +339,12 @@ function scheduleSourceRetry(delayMs = backoffMs) {
 }
 
 function handleRelevantFfmpegLine(line) {
-  if (/Will reconnect .*End of file|Error when loading first segment|Error opening input|Immediate exit requested/i.test(line)) {
+  if (/Will reconnect .*End of file|Failed to reload playlist|HTTP error (403|404|410)|Error when loading first segment|Error opening input|Immediate exit requested/i.test(line)) {
     process.stderr.write(line.endsWith('\n') ? line : `${line}\n`);
     const now = Date.now();
     eofLoopCount = now - lastEofAt < 10000 ? eofLoopCount + 1 : 1;
     lastEofAt = now;
-    if (/Error when loading first segment|Error opening input|Immediate exit requested/i.test(line) || eofLoopCount >= 6) {
+    if (/Error when loading first segment|Error opening input|Immediate exit requested|HTTP error (403|410)/i.test(line) || eofLoopCount >= 6) {
       cachedHlsSession = null;
       forceRescrape = true;
       backoffMs = 1000;
@@ -491,7 +491,9 @@ async function runSourceOnce() {
     if (!isAlive(sourceProc)) return;
     const quietFor = Date.now() - lastProgressAt;
     if (quietFor >= STALL_TIMEOUT_MS) {
-      warn(`${CHANNEL_NAME}: Stage A sin frames por ${Math.round(quietFor / 1000)}s; reinicio limpio sin tumbar Stage B SRT.`);
+      cachedHlsSession = null;
+      forceRescrape = true;
+      warn(`${CHANNEL_NAME}: Stage A sin frames por ${Math.round(quietFor / 1000)}s; invalidando sesión TDMax/Nimble y re-login sin tumbar Stage B SRT.`);
       backoffMs = 1000;
       killSource('SIGTERM');
     }

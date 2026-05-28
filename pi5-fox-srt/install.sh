@@ -65,10 +65,10 @@ if [ ! -f "$ENV_FILE" ]; then
 VPS_HOST=167.17.69.116
 VPS_PORT=9006
 SRT_STREAMID=fox
-SRT_LATENCY_MS=3000
+SRT_LATENCY_MS=8000
 # SRT_PASSPHRASE=
 LOCAL_UDP_PORT=10006
-STALL_TIMEOUT_MS=25000
+STALL_TIMEOUT_MS=15000
 STARTUP_DELAY_MS=0
 
 # Credenciales TDMax (cuenta dedicada Raspberry — info@media.cr)
@@ -86,9 +86,9 @@ ENV_EOF
   ok "Archivo .env creado"
 else
   warn "Ya existe $ENV_FILE — lo dejo como está"
-  grep -q '^SRT_LATENCY_MS=' "$ENV_FILE" || echo 'SRT_LATENCY_MS=3000' >> "$ENV_FILE"
+  grep -q '^SRT_LATENCY_MS=' "$ENV_FILE" || echo 'SRT_LATENCY_MS=8000' >> "$ENV_FILE"
   grep -q '^LOCAL_UDP_PORT=' "$ENV_FILE" || echo 'LOCAL_UDP_PORT=10006' >> "$ENV_FILE"
-  grep -q '^STALL_TIMEOUT_MS=' "$ENV_FILE" || echo 'STALL_TIMEOUT_MS=25000' >> "$ENV_FILE"
+  grep -q '^STALL_TIMEOUT_MS=' "$ENV_FILE" || echo 'STALL_TIMEOUT_MS=15000' >> "$ENV_FILE"
   grep -q '^STARTUP_DELAY_MS=' "$ENV_FILE" || echo 'STARTUP_DELAY_MS=0' >> "$ENV_FILE"
   if ! grep -q '^DEVICE_ID=' "$ENV_FILE"; then
     echo 'DEVICE_ID=2f64f7b8-7d75-4cf4-9a8c-b7e2e99a9006' >> "$ENV_FILE"
