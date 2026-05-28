@@ -1108,9 +1108,9 @@ const startSrtIngest = (process_id) => {
   resetTigoSrtMetric(process_id);
 
   // fifo_size grande + overrun_nonfatal para tolerar bursts.
-  // timeout=0 ⇒ lectura UDP indefinida (no cerramos por inactividad; el
-  // watchdog de stalls del flujo principal se encarga de eso).
-  const udpInput = `udp://127.0.0.1:${cfg.udpPort}?fifo_size=1000000&overrun_nonfatal=1&timeout=0`;
+  // timeout=15s ⇒ si el Pi5/srt-live-transmit deja de alimentar UDP, FFmpeg
+  // sale limpio y dispara recovery; así VLC/XUI no se quedan pegados al último segmento.
+  const udpInput = `udp://127.0.0.1:${cfg.udpPort}?fifo_size=1000000&overrun_nonfatal=1&timeout=15000000`;
 
   const args = [
     '-hide_banner',
@@ -1127,9 +1127,9 @@ const startSrtIngest = (process_id) => {
     '-map', '0:a:0',
     '-c', 'copy',
     '-f', 'hls',
-    '-hls_time', '10',
-    '-hls_list_size', '8',
-    '-hls_flags', 'delete_segments+append_list+independent_segments+omit_endlist',
+    '-hls_time', '4',
+    '-hls_list_size', '6',
+    '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
     '-hls_segment_type', 'mpegts',
     '-hls_segment_filename', path.join(cfg.bufferDir, 'buf_%05d.ts'),
     '-hls_allow_cache', '0',
