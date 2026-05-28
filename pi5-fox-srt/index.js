@@ -356,7 +356,9 @@ function handleRelevantFfmpegLine(line) {
 
 function spawnSourceFfmpeg(session) {
   const hlsUrl = session.url;
-  const udpUrl = `udp://127.0.0.1:${LOCAL_UDP_PORT}?pkt_size=1316&buffer_size=655360`;
+  // UDP local con buffer GRANDE en envío (8 MB) para absorber ráfagas del demuxer HLS
+  // sin perder paquetes hacia srt-live-transmit. pkt_size=1316 = 7 × 188 (TS) para SRT MTU.
+  const udpUrl = `udp://127.0.0.1:${LOCAL_UDP_PORT}?pkt_size=1316&buffer_size=8388608`;
   log(`▶️  Stage A ${CHANNEL_NAME}: TDMax HLS → UDP local:${LOCAL_UDP_PORT}`);
 
   const headerLines = [
@@ -382,9 +384,19 @@ function spawnSourceFfmpeg(session) {
     '-map', '0:v:0', '-map', '0:a:0?',
     '-c', 'copy',
     '-bsf:v', 'h264_mp4toannexb',
-    '-mpegts_flags', '+resend_headers',
+    // MPEG-TS broadcast-grade para SRT:
+    //  - muxrate CBR 4.5 Mbps: paquetes TS salen a ritmo constante (no ráfagas) → SRT estable
+    //  - pcr_period 20ms / pat_period 100ms / sdt_period 500ms = perfil DVB live
+    //  - resend_headers + initial_discontinuity ayudan al VPS al reabrir Stage A
+    //  - latm = no, mpegts_copyts no (genpts ya maneja)
+    '-mpegts_flags', '+resend_headers+initial_discontinuity+pat_pmt_at_frames',
+    '-muxrate', '4500k',
+    '-pcr_period', '20',
+    '-pat_period', '0.1',
+    '-sdt_period', '0.5',
+    '-mpegts_pmt_start_pid', '0x1000',
+    '-mpegts_start_pid', '0x0100',
     '-f', 'mpegts',
-    '-flush_packets', '1',
     udpUrl,
   ];
 
