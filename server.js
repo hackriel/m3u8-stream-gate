@@ -1108,9 +1108,11 @@ const startSrtIngest = (process_id) => {
   resetTigoSrtMetric(process_id);
 
   // fifo_size grande + overrun_nonfatal para tolerar bursts.
-  // timeout=15s ⇒ si el Pi5/srt-live-transmit deja de alimentar UDP, FFmpeg
-  // sale limpio y dispara recovery; así VLC/XUI no se quedan pegados al último segmento.
-  const udpInput = `udp://127.0.0.1:${cfg.udpPort}?fifo_size=1000000&overrun_nonfatal=1&timeout=15000000`;
+  // timeout=60s ⇒ tolera el ciclo completo del Pi5 (refresh TDMax + re-login
+  // Stage A + reanudación SRT) sin matar el FFmpeg que lee UDP. Coherente con
+  // STALL_TIMEOUT_MS=45s del Pi y el watchdog SRT de 180s del VPS.
+  // (Antes era 15s → FFmpeg salía code=0 cada ~36 min cuando rotaba el token.)
+  const udpInput = `udp://127.0.0.1:${cfg.udpPort}?fifo_size=1000000&overrun_nonfatal=1&timeout=60000000`;
 
   const args = [
     '-hide_banner',
