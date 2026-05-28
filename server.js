@@ -1558,6 +1558,8 @@ setInterval(() => {
       ? 60000
       : PROXY_PROCESSES.has(String(processId))
       ? 120000  // Tigo via Pi5: aguantar reloads de token (60s) + jitter SOCKS5 sin matar
+      : isSrtIngestProc
+      ? 90000   // SRT ingest (IDs 21/22/23): tolerar micro-cortes de red Pi5↔VPS sin matar (ETAPA1 lee de srt://listener)
       : isScrapedProcess
       ? SCRAPED_WATCHDOG_STALL_TIMEOUT
       : WATCHDOG_STALL_TIMEOUT;
