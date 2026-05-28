@@ -279,8 +279,18 @@ function buildSrtUrl() {
     mode: 'caller',
     streamid: SRT_STREAMID,
     latency: SRT_LATENCY_MS,
-    pkt_size: '1316',
+    // Forzar al peer (VPS) a anunciar la misma latencia → SRT escoge el max y queda simétrico
+    peerlatency: SRT_LATENCY_MS,
+    // Buffers grandes para 4.5 Mbps × 8 s + margen
+    rcvbuf: '12058624',
+    sndbuf: '12058624',
+    // Flight Flag Size: ventana de paquetes en vuelo (default 25600). 60000 evita stalls bajo jitter.
+    fc: '60000',
+    // Tipo live: optimiza scheduler para baja varianza, no para throughput
     transtype: 'live',
+    // MSS estándar internet residencial (1500 - cabeceras)
+    mss: '1500',
+    pkt_size: '1316',
   });
   if (SRT_PASSPHRASE) {
     qs.set('pbkeylen', '16');
@@ -356,7 +366,9 @@ function handleRelevantFfmpegLine(line) {
 
 function spawnSourceFfmpeg(session) {
   const hlsUrl = session.url;
-  const udpUrl = `udp://127.0.0.1:${LOCAL_UDP_PORT}?pkt_size=1316&buffer_size=655360`;
+  // UDP local con buffer GRANDE en envío (8 MB) para absorber ráfagas del demuxer HLS
+  // sin perder paquetes hacia srt-live-transmit. pkt_size=1316 = 7 × 188 (TS) para SRT MTU.
+  const udpUrl = `udp://127.0.0.1:${LOCAL_UDP_PORT}?pkt_size=1316&buffer_size=8388608`;
   log(`▶️  Stage A ${CHANNEL_NAME}: TDMax HLS → UDP local:${LOCAL_UDP_PORT}`);
 
   const headerLines = [
@@ -382,9 +394,19 @@ function spawnSourceFfmpeg(session) {
     '-map', '0:v:0', '-map', '0:a:0?',
     '-c', 'copy',
     '-bsf:v', 'h264_mp4toannexb',
-    '-mpegts_flags', '+resend_headers',
+    // MPEG-TS broadcast-grade para SRT:
+    //  - muxrate CBR 4.5 Mbps: paquetes TS salen a ritmo constante (no ráfagas) → SRT estable
+    //  - pcr_period 20ms / pat_period 100ms / sdt_period 500ms = perfil DVB live
+    //  - resend_headers + initial_discontinuity ayudan al VPS al reabrir Stage A
+    //  - latm = no, mpegts_copyts no (genpts ya maneja)
+    '-mpegts_flags', '+resend_headers+initial_discontinuity+pat_pmt_at_frames',
+    '-muxrate', '4500k',
+    '-pcr_period', '20',
+    '-pat_period', '0.1',
+    '-sdt_period', '0.5',
+    '-mpegts_pmt_start_pid', '0x1000',
+    '-mpegts_start_pid', '0x0100',
     '-f', 'mpegts',
-    '-flush_packets', '1',
     udpUrl,
   ];
 
@@ -466,11 +488,21 @@ function startBridge() {
   if (bridgeRetryTimer) clearTimeout(bridgeRetryTimer);
   bridgeRetryTimer = null;
 
-  const inputUrl = `udp://:${LOCAL_UDP_PORT}?pkt_size=1316`;
+  // UDP local con receive buffer 8 MB (kernel default 208KB) → 0 drops loopback
+  const inputUrl = `udp://:${LOCAL_UDP_PORT}?pkt_size=1316&buffer_size=8388608&fifo_size=1000000&overrun_nonfatal=1`;
   const outputUrl = buildSrtUrl();
   log(`🛰️  Stage B ${CHANNEL_NAME}: UDP local:${LOCAL_UDP_PORT} → SRT ${VPS_HOST}:${VPS_PORT} (latency=${SRT_LATENCY_MS}ms)`);
 
-  bridgeProc = spawn('srt-live-transmit', [inputUrl, outputUrl, '-loglevel:warning', '-stats-report-frequency:5000'], {
+  bridgeProc = spawn('srt-live-transmit', [
+    inputUrl,
+    outputUrl,
+    '-loglevel:warning',
+    '-stats-report-frequency:5000',
+    // Chunk de transferencia interno alineado a paquete SRT
+    '-chunk-size:1316',
+    // Mantener el caller vivo aunque haya un breakdown SRT puntual
+    '-auto-reconnect:yes',
+  ], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   bridgeProc.stdout.on('data', handleBridgeOutput);

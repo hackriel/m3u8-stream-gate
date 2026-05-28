@@ -36,6 +36,20 @@ if ! command -v node &>/dev/null || [ "$(node -v | cut -dv -f2 | cut -d. -f1)" -
 fi
 ok "ffmpeg $(ffmpeg -version | head -1 | awk '{print $3}') / srt-live-transmit OK / node $(node -v)"
 
+# 1b) Tuning de kernel para UDP loopback grande (sino buffer_size=8MB se ignora)
+echo "🔧 [1b] Subiendo límites de buffer UDP del kernel a 16 MB…"
+cat > /etc/sysctl.d/99-srt-pusher.conf <<SYSCTL_EOF
+# Buffers UDP grandes para Stage A (FFmpeg) → Stage B (srt-live-transmit) sin drops loopback
+net.core.rmem_max=16777216
+net.core.wmem_max=16777216
+net.core.rmem_default=8388608
+net.core.wmem_default=8388608
+# Cola de qdisc generosa
+net.core.netdev_max_backlog=5000
+SYSCTL_EOF
+sysctl --system >/dev/null 2>&1 || true
+ok "Kernel UDP buffers a 16 MB"
+
 # 2) Copiar archivos
 echo "📂 [2/5] Copiando archivos a ${INSTALL_DIR}…"
 mkdir -p "$INSTALL_DIR"
