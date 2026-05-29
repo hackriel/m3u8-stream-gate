@@ -3634,7 +3634,8 @@ app.post('/api/emit', async (req, res) => {
       spawnCmd = 'ffmpeg';
       spawnArgs = ingest.args;
       const encInfo = cfg.passphrase ? '🔐 AES-128' : '⚠️ sin encriptación';
-      sendLog(process_id, 'success', `🛰️ ETAPA 1 SRT activa: srt://0.0.0.0:${cfg.port} → ${cfg.bufferPlaylist} (${encInfo}, latency=${cfg.latencyMs}ms)`);
+      const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
+      sendLog(process_id, 'success', `🛰️ SRT ingest activo (1 solo proceso): srt://0.0.0.0:${cfg.port} → /live/${slug}/playlist.m3u8 (${encInfo}, latency=${cfg.latencyMs}ms, perfil ${cfg._lastProfile || 'default'})`);
     } else if (PROXY_PROCESSES.has(process_id)) {
       // ── MODO PROXY (legacy/fallback): proxychains4 → CDN HLS ──
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
