@@ -3883,10 +3883,10 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // ── SRT BUFFER ETAPA 2 (Tigo / Disney 7 / FUTV SRT) ─────────────
-    // Tras spawnear el SRT listener (ETAPA 1), espera ≥3 segs en buffer
-    // y arranca un transcoder local que lee del buffer del proceso
-    // y emite a /live/<slug>/playlist.m3u8 (lo que consumen los usuarios).
-    if (isSrtIngestMode) {
+    // DEPRECATED (May 2026): ahora `startSrtIngest` hace listener+encoder
+    // en UN solo FFmpeg que escribe directo a /live/<slug>/playlist.m3u8.
+    // No hay buffer intermedio ni ETAPA 2. Bloque deshabilitado.
+    if (false && isSrtIngestMode) {
       const cfg = srtIngestCfg;
       (async () => {
         const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
