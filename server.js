@@ -1093,54 +1093,99 @@ const startSrtIngest = (process_id) => {
   const cfg = getSrtConfig(process_id);
   if (!cfg) throw new Error(`No SRT config for process_id=${process_id}`);
 
-  // Asegurar que el listener persistente esté arriba ANTES del ffmpeg.
-  ensureSrtListener(process_id);
+  // ─────────────────────────────────────────────────────────────────
+  // ARQUITECTURA SRT INGEST (May 2026): UN SOLO FFMPEG por canal.
+  // FFmpeg actúa simultáneamente como SRT listener (input) y como
+  // encoder HLS final (output). Antes había 3 procesos por canal
+  // (srt-live-transmit → udp → ffmpeg buffer → ffmpeg ETAPA 2),
+  // y la cascada de muertes parciales causaba caídas de 30-90 min
+  // tanto al Pearl Nano como al Raspberry. Ahora es 1 solo proceso:
+  // si cae, reinicia limpio y el Caller (Pearl/Pi/OBS) reconecta solo.
+  // ─────────────────────────────────────────────────────────────────
 
-  // Blindaje: matar ffmpeg residual sobre este buffer u output HLS.
+  ensureSrtPortFree(cfg.port, process_id, cfg.label || `SRT ${process_id}`);
+
+  const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
+  const outDir = path.join(HLS_OUTPUT_DIR, slug);
+  // Wipe agresivo de la carpeta HLS (mismo patrón que isHlsOutput, evita
+  // que XUI sirva un manifest con segmentos viejos mezclados con timestamps
+  // nuevos tras un recovery).
   try {
-    const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
-    const patterns = [cfg.bufferDir, `live/${slug}/`, `udp://127.0.0.1:${cfg.udpPort}`];
+    if (fs.existsSync(outDir)) fs.rmSync(outDir, { recursive: true, force: true });
+  } catch (_) {}
+  try { fs.mkdirSync(outDir, { recursive: true }); } catch (_) {}
+
+  // Matar residuales sobre este puerto/output (defensa en profundidad).
+  try {
+    const patterns = [`srt://0.0.0.0:${cfg.port}`, `live/${slug}/`];
     for (const pat of patterns) {
       try { execSync(`pkill -9 -f ${JSON.stringify(pat)}`, { stdio: 'ignore' }); } catch (_) {}
     }
   } catch (_) {}
-  cleanSrtBufferDir(cfg);
   resetTigoSrtMetric(process_id);
 
-  // fifo_size grande + overrun_nonfatal para tolerar bursts.
-  // timeout=60s ⇒ tolera el ciclo completo del Pi5 (refresh TDMax + re-login
-  // Stage A + reanudación SRT) sin matar el FFmpeg que lee UDP. Coherente con
-  // STALL_TIMEOUT_MS=45s del Pi y el watchdog SRT de 180s del VPS.
-  // (Antes era 15s → FFmpeg salía code=0 cada ~36 min cuando rotaba el token.)
-  const udpInput = `udp://127.0.0.1:${cfg.udpPort}?fifo_size=1000000&overrun_nonfatal=1&timeout=60000000`;
+  // Perfil de encoding (mismo helper que el resto del sistema usa).
+  const stageProfile = getOutputProfileConfig(getStoredOutputProfile(process_id));
+  const vBitrate = stageProfile.videoBitrate;
+  const vBufsize = stageProfile.bufsize;
+  const vHeight = stageProfile.width;
+  const aBitrate = stageProfile.audioBitrate;
+  const vPreset  = stageProfile.preset || 'veryfast';
+  // FPS estándar para todas las fuentes externas (Pearl/OBS/Pi están
+  // configuradas a 29.97 o 30; CFR + -r 30 alinea cualquier variación).
+  const srtFps = '30';
+  const srtGop = '60';
 
+  // SRT listener: latency configurable por canal (default 2000ms).
+  let srtInput = `srt://0.0.0.0:${cfg.port}?mode=listener&latency=${cfg.latencyMs}&pkt_size=1316`;
+  if (cfg.passphrase && cfg.passphrase.length >= 10) {
+    srtInput += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
+  }
+
+  const outPlaylist = path.join(outDir, 'playlist.m3u8');
   const args = [
     '-hide_banner',
     '-loglevel', 'verbose',
     '-stats',
     '-fflags', '+genpts+discardcorrupt+nobuffer',
-    // Fase 2: bajamos de 10s/5MB a 3s/2MB. El stream ya viene "limpio"
-    // desde srt-live-transmit (MPEG-TS estable) y no necesita 10s de análisis;
-    // esto recorta ~7s del arranque y acelera el recovery.
     '-analyzeduration', '3000000',
     '-probesize', '2000000',
-    '-i', udpInput,
-    '-map', '0:v:0',
-    '-map', '0:a:0',
-    '-c', 'copy',
+    '-i', srtInput,
+    '-map', '0:v:0?',
+    '-map', '0:a:0?',
+    '-c:v', 'libx264',
+    '-preset', vPreset,
+    '-profile:v', 'main',
+    '-threads', '4',
+    '-b:v', vBitrate,
+    '-maxrate', vBitrate,
+    '-bufsize', vBufsize,
+    ...(stageProfile.x264Params ? ['-x264-params', stageProfile.x264Params] : []),
+    '-vf', `scale=-2:${vHeight}`,
+    '-r', srtFps,
+    '-vsync', 'cfr',
+    '-g', srtGop,
+    '-keyint_min', srtGop,
+    '-sc_threshold', '0',
+    '-c:a', 'aac',
+    '-b:a', aBitrate,
+    '-ar', '48000',
+    '-max_muxing_queue_size', '1024',
+    '-reset_timestamps', '1',
     '-f', 'hls',
     '-hls_time', '4',
     '-hls_list_size', '6',
-    '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
+    '-hls_flags', 'delete_segments+independent_segments',
     '-hls_segment_type', 'mpegts',
-    '-hls_segment_filename', path.join(cfg.bufferDir, 'buf_%05d.ts'),
-    '-hls_allow_cache', '0',
+    '-hls_segment_filename', path.join(outDir, 'seg_%05d.ts'),
+    '-hls_allow_cache', '1',
     '-hls_start_number_source', 'epoch',
-    cfg.bufferPlaylist,
+    outPlaylist,
   ];
 
   const proc = spawn('ffmpeg', args);
   updateTigoSrtMetric(process_id, { connected: false, since: Date.now() });
+  cfg._lastProfile = `${vHeight}p CBR ${vBitrate} @ ${srtFps}fps preset=${vPreset}`;
   return { process: proc, args, command: `ffmpeg ${args.join(' ')}`, cfg };
 };
 
@@ -3589,7 +3634,8 @@ app.post('/api/emit', async (req, res) => {
       spawnCmd = 'ffmpeg';
       spawnArgs = ingest.args;
       const encInfo = cfg.passphrase ? '🔐 AES-128' : '⚠️ sin encriptación';
-      sendLog(process_id, 'success', `🛰️ ETAPA 1 SRT activa: srt://0.0.0.0:${cfg.port} → ${cfg.bufferPlaylist} (${encInfo}, latency=${cfg.latencyMs}ms)`);
+      const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
+      sendLog(process_id, 'success', `🛰️ SRT ingest activo (1 solo proceso): srt://0.0.0.0:${cfg.port} → /live/${slug}/playlist.m3u8 (${encInfo}, latency=${cfg.latencyMs}ms, perfil ${cfg._lastProfile || 'default'})`);
     } else if (PROXY_PROCESSES.has(process_id)) {
       // ── MODO PROXY (legacy/fallback): proxychains4 → CDN HLS ──
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
@@ -3837,10 +3883,10 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // ── SRT BUFFER ETAPA 2 (Tigo / Disney 7 / FUTV SRT) ─────────────
-    // Tras spawnear el SRT listener (ETAPA 1), espera ≥3 segs en buffer
-    // y arranca un transcoder local que lee del buffer del proceso
-    // y emite a /live/<slug>/playlist.m3u8 (lo que consumen los usuarios).
-    if (isSrtIngestMode) {
+    // DEPRECATED (May 2026): ahora `startSrtIngest` hace listener+encoder
+    // en UN solo FFmpeg que escribe directo a /live/<slug>/playlist.m3u8.
+    // No hay buffer intermedio ni ETAPA 2. Bloque deshabilitado.
+    if (false && isSrtIngestMode) {
       const cfg = srtIngestCfg;
       (async () => {
         const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
