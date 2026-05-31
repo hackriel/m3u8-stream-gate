@@ -754,8 +754,8 @@ const startTigoKeepAlive = (process_id, playlistUrl, userAgent) => {
         method: 'GET',
         headers: {
           'User-Agent': userAgent || 'Mozilla/5.0',
-          'Referer': 'https://www.teletica.com/',
-          'Origin': 'https://www.teletica.com',
+          'Referer': 'https://www.app.tdmax.com/',
+          'Origin': 'https://www.app.tdmax.com',
           'Accept': '*/*',
         },
         signal: AbortSignal.timeout(8000),
@@ -2861,8 +2861,11 @@ app.post('/api/emit', async (req, res) => {
       const hostname = sourceUrl.hostname.toLowerCase();
 
       if (hostname.includes('teletica.com')) {
-        refererDomain = 'https://www.teletica.com/';
-        originDomain = 'https://www.teletica.com';
+        // Teletica CDN ahora valida el wmsAuthSign contra el Origin de TDMax.
+        // Si mandamos teletica.com como Referer/Origin, el CDN responde 200 pero
+        // entrega chunks vacíos / inválidos. El navegador real usa app.tdmax.com.
+        refererDomain = 'https://www.app.tdmax.com/';
+        originDomain = 'https://www.app.tdmax.com';
       } else if (hostname.includes('cloudfront.net') || hostname.includes('repretel.com') || hostname.includes('mediatiquestream.com')) {
         isMediatiqueSource = true;
         refererDomain = 'https://www.repretel.com/';
