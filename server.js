@@ -754,8 +754,8 @@ const startTigoKeepAlive = (process_id, playlistUrl, userAgent) => {
         method: 'GET',
         headers: {
           'User-Agent': userAgent || 'Mozilla/5.0',
-          'Referer': 'https://www.teletica.com/',
-          'Origin': 'https://www.teletica.com',
+          'Referer': 'https://www.app.tdmax.com/',
+          'Origin': 'https://www.app.tdmax.com',
           'Accept': '*/*',
         },
         signal: AbortSignal.timeout(8000),
