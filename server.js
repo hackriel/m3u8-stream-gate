@@ -3056,15 +3056,15 @@ app.post('/api/emit', async (req, res) => {
         '-rw_timeout', '30000000',   // 30s timeout generoso (como Disney 7)
       ];
       sendLog(process_id, 'info', `🔧 Akamai CDN: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
-    } else if (isProxyScrapedSource) {
-      // Tigo/Teletica via Pi5: el token ya viene fresco del scraper, pero
+    } else if (isProxyScrapedSource || isTeleticaSource) {
+      // Tigo via Pi5 y Teletica CDN: el token ya viene fresco del scraper, pero
       // reconnect_streamed/reconnect_at_eof rompen el demuxer HLS y provocan
       // loops de EOF/byte-offset (similar a VLC vs FFmpeg en otros CDNs).
       // Estrategia: dejar SOLO al demuxer HLS recargar playlists/segmentos.
       effectiveResilienceArgs = [
         '-rw_timeout', '30000000',
       ];
-      sendLog(process_id, 'info', `🔧 Tigo/Teletica via Pi5: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
+      sendLog(process_id, 'info', `🔧 ${isTeleticaSource ? 'Teletica CDN' : 'Tigo via Pi5'}: modo VLC-like (sin reconnect HTTP, solo demuxer HLS)`);
     } else if (process_id === '19') {
       // RANDOM Disney 7: misma resiliencia que Disney 7 (ID 0) manual.
       // reconnect_at_eof + reconnect_streamed + delay_max=15s cubren caídas
