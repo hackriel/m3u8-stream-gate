@@ -3259,11 +3259,15 @@ app.post('/api/emit', async (req, res) => {
       // Pasar directo a FFmpeg sin resolución de variantes. Usar map genérico video+audio.
       sendLog(process_id, 'info', `📺 Akamai: URL directa sin resolución de variante`);
       // hlsProgramIndex stays -1, will use '-map', '0:v:0?', '-map', '0:a:0?'
-    } else if (isScrapedChannel && isProxyScrapedSource) {
+    } else if ((isScrapedChannel && isProxyScrapedSource) || isTeleticaSource) {
       // Tigo via Pi5 (Fase 1 endurecida) — Variant Pinning manual.
+      // Teletica (ID 13 + ID 4): el master playlist trae wmsAuthSign con
+      // validminutes=1. FFmpeg recarga el master cada pocos segundos y al
+      // re-firmar pierde la sesión → "End of file" en loop. Resolviendo el
+      // master UNA vez aquí, la CDN nos asigna nimblesessionid en la
+      // sub-playlist y FFmpeg solo recarga chunks.m3u8 con sesión sticky.
       // Resolvemos el master playlist UNA vez aquí (no FFmpeg) y pasamos
-      // directamente la sub-playlist 720p para que FFmpeg no abra las 4
-      // variantes en paralelo (lo que Wowza/Nimble penaliza con 403).
+      // directamente la sub-playlist 720p.
       try {
         const masterResp = await fetchWithOptionalProxy(inputSourceUrl, {
           headers: {
@@ -3301,14 +3305,15 @@ app.post('/api/emit', async (req, res) => {
                 pinnedUrl = new URL(pinnedUrl, inputSourceUrl).toString();
               }
               inputSourceUrl = pinnedUrl;
-              sendLog(process_id, 'success', `📌 Tigo Variant Pinning → ${best.resolution || '?'} @ ${Math.round((best.bandwidth || 0) / 1000)}kbps`);
+              const pinLabel = isTeleticaSource && !isProxyScrapedSource ? 'Teletica' : 'Tigo';
+              sendLog(process_id, 'success', `📌 ${pinLabel} Variant Pinning → ${best.resolution || '?'} @ ${Math.round((best.bandwidth || 0) / 1000)}kbps (sub-playlist directa)`);
             }
           } else {
-            sendLog(process_id, 'info', `📺 Tigo: URL ya es sub-playlist directa (sin master)`);
+            sendLog(process_id, 'info', `📺 URL ya es sub-playlist directa (sin master)`);
           }
         }
       } catch (err) {
-        sendLog(process_id, 'warn', `⚠️ Tigo Variant Pinning falló (${err.message}) — usando URL original`);
+        sendLog(process_id, 'warn', `⚠️ Variant Pinning falló (${err.message}) — usando URL master original`);
       }
     } else if (needsTdmaxLikePinning) {
       // Canales scrapeados (NO proxy): mantener master playlist vivo (token de 1min necesita renovación del CDN)
