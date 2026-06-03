@@ -403,6 +403,21 @@ export default function EmisorM3U8Panel() {
           });
           setProcesses(loadedProcesses);
 
+          // Hidrata el selector "Formato de salida" desde la DB para que
+          // se vea el mismo perfil que el servidor está usando realmente,
+          // sin depender del sessionStorage del navegador (que es por
+          // dispositivo y queda desincronizado entre móvil y desktop).
+          const profilesFromDb: Record<number, OutputProfile> = {};
+          for (const row of data) {
+            const raw = (row as unknown as { output_profile?: string }).output_profile;
+            if (raw === 'normal' || raw === 'balanced' || raw === 'optimized') {
+              profilesFromDb[row.id] = raw;
+            }
+          }
+          if (Object.keys(profilesFromDb).length > 0) {
+            setOutputProfiles((prev) => ({ ...prev, ...profilesFromDb }));
+          }
+
           const existingIds = new Set(data.map(row => row.id));
           const missingRows = baseRows.filter(row => !existingIds.has(row.id));
           if (missingRows.length > 0) {
