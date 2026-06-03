@@ -35,6 +35,7 @@ export type Database = {
           m3u8: string
           m3u8_backup: string | null
           night_rest: boolean
+          output_profile: string
           player_url: string | null
           preview_suffix: string
           process_logs: string | null
@@ -64,6 +65,7 @@ export type Database = {
           m3u8?: string
           m3u8_backup?: string | null
           night_rest?: boolean
+          output_profile?: string
           player_url?: string | null
           preview_suffix?: string
           process_logs?: string | null
@@ -93,6 +95,7 @@ export type Database = {
           m3u8?: string
           m3u8_backup?: string | null
           night_rest?: boolean
+          output_profile?: string
           player_url?: string | null
           preview_suffix?: string
           process_logs?: string | null
