@@ -454,6 +454,17 @@ export default function EmisorM3U8Panel() {
           console.log('🔄 Cambio detectado en base de datos:', payload);
           if (payload.eventType === 'UPDATE') {
             const row = payload.new as EmissionProcessRow;
+            // Mantén el selector "Formato de salida" en sync con la DB
+            // en tiempo real (cuando se cambia desde otro dispositivo).
+            const rawProfile = (row as unknown as { output_profile?: string }).output_profile;
+            if (
+              (rawProfile === 'normal' || rawProfile === 'balanced' || rawProfile === 'optimized') &&
+              row.id >= 0 && row.id < NUM_PROCESSES
+            ) {
+              setOutputProfiles((prev) =>
+                prev[row.id] === rawProfile ? prev : { ...prev, [row.id]: rawProfile },
+              );
+            }
             setProcesses(prev => {
               const newProcesses = [...prev];
               if (row.id >= 0 && row.id < NUM_PROCESSES) {
