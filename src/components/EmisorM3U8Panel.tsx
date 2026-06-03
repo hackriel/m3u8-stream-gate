@@ -403,6 +403,21 @@ export default function EmisorM3U8Panel() {
           });
           setProcesses(loadedProcesses);
 
+          // Hidrata el selector "Formato de salida" desde la DB para que
+          // se vea el mismo perfil que el servidor está usando realmente,
+          // sin depender del sessionStorage del navegador (que es por
+          // dispositivo y queda desincronizado entre móvil y desktop).
+          const profilesFromDb: Record<number, OutputProfile> = {};
+          for (const row of data) {
+            const raw = (row as unknown as { output_profile?: string }).output_profile;
+            if (raw === 'normal' || raw === 'balanced' || raw === 'optimized') {
+              profilesFromDb[row.id] = raw;
+            }
+          }
+          if (Object.keys(profilesFromDb).length > 0) {
+            setOutputProfiles((prev) => ({ ...prev, ...profilesFromDb }));
+          }
+
           const existingIds = new Set(data.map(row => row.id));
           const missingRows = baseRows.filter(row => !existingIds.has(row.id));
           if (missingRows.length > 0) {
@@ -439,6 +454,17 @@ export default function EmisorM3U8Panel() {
           console.log('🔄 Cambio detectado en base de datos:', payload);
           if (payload.eventType === 'UPDATE') {
             const row = payload.new as EmissionProcessRow;
+            // Mantén el selector "Formato de salida" en sync con la DB
+            // en tiempo real (cuando se cambia desde otro dispositivo).
+            const rawProfile = (row as unknown as { output_profile?: string }).output_profile;
+            if (
+              (rawProfile === 'normal' || rawProfile === 'balanced' || rawProfile === 'optimized') &&
+              row.id >= 0 && row.id < NUM_PROCESSES
+            ) {
+              setOutputProfiles((prev) =>
+                prev[row.id] === rawProfile ? prev : { ...prev, [row.id]: rawProfile },
+              );
+            }
             setProcesses(prev => {
               const newProcesses = [...prev];
               if (row.id >= 0 && row.id < NUM_PROCESSES) {
@@ -540,6 +566,15 @@ export default function EmisorM3U8Panel() {
 
   const setOutputProfile = (processIndex: number, profile: OutputProfile) => {
     setOutputProfiles((prev) => ({ ...prev, [processIndex]: profile }));
+    // Sincroniza el perfil en la DB para que TODOS los dispositivos
+    // (móvil, computadora, otra pestaña) vean el mismo valor que
+    // realmente está usando el servidor. Sin esto, cada navegador
+    // muestra lo que tenga en sessionStorage y puede no coincidir
+    // con el perfil real en ejecución.
+    void supabase
+      .from('emission_processes')
+      .update({ output_profile: profile } as never)
+      .eq('id', processIndex);
   };
 
   // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
@@ -1275,7 +1310,10 @@ export default function EmisorM3U8Panel() {
         .update({ 
           start_time: startTimeUnix,
           is_emitting: true,
-          emit_status: 'running'
+          emit_status: 'running',
+          // Persistir también el perfil para que el selector quede
+          // coherente con lo que el servidor está emitiendo realmente.
+          output_profile: selectedProfile,
         })
         .eq('id', processIndex);
       
