@@ -1310,7 +1310,10 @@ export default function EmisorM3U8Panel() {
         .update({ 
           start_time: startTimeUnix,
           is_emitting: true,
-          emit_status: 'running'
+          emit_status: 'running',
+          // Persistir también el perfil para que el selector quede
+          // coherente con lo que el servidor está emitiendo realmente.
+          output_profile: selectedProfile,
         })
         .eq('id', processIndex);
       
