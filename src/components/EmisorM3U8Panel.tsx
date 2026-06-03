@@ -540,6 +540,15 @@ export default function EmisorM3U8Panel() {
 
   const setOutputProfile = (processIndex: number, profile: OutputProfile) => {
     setOutputProfiles((prev) => ({ ...prev, [processIndex]: profile }));
+    // Sincroniza el perfil en la DB para que TODOS los dispositivos
+    // (móvil, computadora, otra pestaña) vean el mismo valor que
+    // realmente está usando el servidor. Sin esto, cada navegador
+    // muestra lo que tenga en sessionStorage y puede no coincidir
+    // con el perfil real en ejecución.
+    void supabase
+      .from('emission_processes')
+      .update({ output_profile: profile } as never)
+      .eq('id', processIndex);
   };
 
   // Extrae el channel_id del query param 'id' de una URL TDMax tipo:
