@@ -1255,6 +1255,23 @@ export default function EmisorM3U8Panel() {
       }
     }
 
+    // Mutex FOX+ URL (24) ↔ FOX+ SRT (22): comparten /live/foxmas/playlist.m3u8.
+    if (processIndex === FOXMAS_URL_INDEX || processIndex === FOXMAS_SRT_INDEX) {
+      const otherIdx = processIndex === FOXMAS_URL_INDEX ? FOXMAS_SRT_INDEX : FOXMAS_URL_INDEX;
+      if (processes[otherIdx]?.isEmitiendo) {
+        toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida FOX+)...`);
+        try {
+          await fetch("/api/emit/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ process_id: otherIdx.toString() })
+          });
+        } catch (e) {
+          console.warn(`No se pudo detener proceso ${otherIdx}:`, e);
+        }
+      }
+    }
+
     if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
