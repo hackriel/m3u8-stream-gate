@@ -1879,6 +1879,7 @@ export default function EmisorM3U8Panel() {
                 [FOXMAS_SRT_INDEX]: 'foxmas',
                 [FOX_SRT_INDEX]: 'fox',
                 [FOXMAS_URL_INDEX]: 'foxmas',
+                [FOX_URL_INDEX]: 'fox',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
