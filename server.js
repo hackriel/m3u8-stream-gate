@@ -2586,7 +2586,8 @@ app.post('/api/local-scrape', async (req, res) => {
 
     const channelName = CHANNEL_MAP[process_id]?.channelName || `Canal ${channel_id.substring(0, 8)}`;
     const useProxy = PROXY_PROCESSES.has(String(process_id));
-    const result = await scrapeStreamUrlLocal(channel_id, channelName, { useProxy });
+    const account = accountForProcess(process_id);
+    const result = await scrapeStreamUrlLocal(channel_id, channelName, { useProxy, account });
     
     if (!result.url) {
       return res.json({ success: false, error: result.error || 'No se obtuvo URL' });
@@ -2720,7 +2721,7 @@ app.post('/api/emit', async (req, res) => {
       } else {
         const { channelId, channelName } = CHANNEL_MAP[process_id];
         sendLog(process_id, 'info', `🔄 Refrescando URL via Pi5 (token de 60s)...`);
-        const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
+        const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true, account: accountForProcess(process_id) });
         if (fresh.url) {
           effectiveSourceM3u8 = fresh.url;
           scrapeSessionCache.set(process_id, {
@@ -4579,7 +4580,7 @@ app.post('/api/emit', async (req, res) => {
                   } else {
                     const { channelId, channelName } = CHANNEL_MAP[String(process_id)];
                     sendLog(process_id, 'info', `🔄 RETRY: refrescando URL via Pi5 (token expirado)...`);
-                    const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
+                    const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true, account: accountForProcess(process_id) });
                     if (fresh.url) {
                       // Cache-buster: forzar a Wowza/Nimble a tratar el master playlist como
                       // request fresco y NO reutilizar el nimblesessionid de la sesión anterior
