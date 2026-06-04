@@ -201,6 +201,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "Teletica SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "FOX+ SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "FOX SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
+  { name: "FOX+ URL", scrapeFn: "scrape-channel", channelId: "6a10a6a2350cb5151ab6ca8c", fetchLabel: "🔄 FOX+" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
