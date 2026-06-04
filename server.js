@@ -711,6 +711,25 @@ const saveOutputProfileForProcess = (processId, profile) => {
 const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080';
 // IDs de proceso que deben enrutar TODO su tráfico (scraping + FFmpeg) por el proxy
 const PROXY_PROCESSES = new Set();
+// IDs que deben usar la SEGUNDA cuenta TDMax (info@media.cr, la del Raspberry)
+// en vez de la cuenta principal (arlopfa). Evita exceder el cupo de devices
+// permitidos por TDMax en una sola cuenta.
+const PI_ACCOUNT_PROCESSES = new Set(['24', '25']); // FOX+ URL, FOX URL
+const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
+const getTdmaxCreds = (account) => {
+  if (account === 'pi') {
+    return {
+      email: process.env.TDMAX_EMAIL_PI,
+      password: process.env.TDMAX_PASSWORD_PI,
+      label: 'PI (info@media.cr)',
+    };
+  }
+  return {
+    email: process.env.TDMAX_EMAIL,
+    password: process.env.TDMAX_PASSWORD,
+    label: 'DEFAULT',
+  };
+};
 // Comando proxychains4 (instalable con: apt install -y proxychains4)
 // Config dinámica generada en /tmp para no chocar con instalación global
 const PROXYCHAINS_CONF_PATH = '/tmp/proxychains-tigo.conf';
