@@ -1576,6 +1576,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-cyan-600", text: "text-cyan-400", stroke: "#0891b2", name: "Teletica SRT" },
       { bg: "bg-red-500", text: "text-red-400", stroke: "#ef4444", name: "FOX+ SRT" },
       { bg: "bg-red-700", text: "text-red-500", stroke: "#b91c1c", name: "FOX SRT" },
+      { bg: "bg-red-600", text: "text-red-500", stroke: "#dc2626", name: "FOX+ URL" },
     ];
     return colors[processIndex];
   };
