@@ -6293,6 +6293,28 @@ server.listen(PORT, () => {
     }, 60 * 1000); // chequea cada 1 min (ventana de actuación de 5 min al inicio de la hora objetivo)
   }
 
+  // ====== AUTO-REFRESH CANAL 6 TS (3:00 AM hora Costa Rica) ======
+  // Reinicia el shared encoder de /canal6.ts una vez al día para forzar
+  // reconexión fresca a CloudFront (renueva edge token y limpia cualquier
+  // degradación acumulada). Solo actúa si está enabled.
+  let canal6TsLastRefreshMs = 0;
+  setInterval(() => {
+    try {
+      const { hour: crHour, minute: crMinute } = getCostaRicaHour();
+      if (crHour !== 3 || crMinute >= 5) return;
+      const now = Date.now();
+      if (now - canal6TsLastRefreshMs < 60 * 60 * 1000) return;
+      if (!canal6TsState.enabled || !canal6TsState.sourceUrl) return;
+      canal6TsLastRefreshMs = now;
+      console.log('[canal6.ts] ⏰ Refresh programado 3:00 CR — reiniciando shared encoder');
+      // stopSharedEncoder mata el ffmpeg; el handler exit respawnea automáticamente
+      // porque enabled sigue en true.
+      stopSharedEncoder('refresh diario 3:00 CR');
+    } catch (err) {
+      console.error('[canal6.ts] scheduler refresh error:', err);
+    }
+  }, 60 * 1000);
+
   // ====== WATCHDOG ALWAYS-ON (IDs 15, 21, 22, 23) ======
   // Si el switch "Encendido siempre" está activo y el proceso está caído (no emitiendo)
   // SIN parada manual ni descanso nocturno, lo relanzamos automáticamente.
