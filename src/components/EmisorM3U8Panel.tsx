@@ -17,7 +17,7 @@ import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 25;
+const NUM_PROCESSES = 26;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
@@ -34,6 +34,7 @@ const TELETICA_SRT_INDEX = 21; // TELETICA SRT: ingest SRT desde Pi5 por puerto 
 const FOXMAS_SRT_INDEX = 22; // FOX+ SRT: ingest SRT desde Pi5 por puerto 9005
 const FOX_SRT_INDEX = 23;    // FOX SRT:  ingest SRT desde Pi5 por puerto 9006
 const FOXMAS_URL_INDEX = 24; // FOX+ URL: scraping TDMax vía edge function (mismo patrón que TELETICA URL)
+const FOX_URL_INDEX = 25;    // FOX URL: scraping TDMax vía edge function (canal FOX, mismo patrón que FOX+ URL)
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "srt://167.17.69.116:9000?streamid=tigo&latency=2000000";
 const DISNEY7_OBS_INGEST_URL = "srt://167.17.69.116:9001?streamid=disney7&latency=2000000";
@@ -64,7 +65,7 @@ const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 19]);
 // Procesos que emiten HLS local (sin RTMP)
 // ID 0 (Disney 7) ahora emite HLS al slug 'Disney7' (igual que RANDOM Disney 7).
 // Disney 8 (ID 10) NO está aquí: usa RTMP destino manual pegado por el usuario.
-const HLS_OUTPUT_PROCESSES = new Set([0, FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX, FOXMAS_SRT_INDEX, FOX_SRT_INDEX, FOXMAS_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([0, FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX, FOXMAS_SRT_INDEX, FOX_SRT_INDEX, FOXMAS_URL_INDEX, FOX_URL_INDEX]);
 // Procesos que reciben SRT desde OBS (entrada manual interna)
 const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX, FUTV_SRT_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX, FOXMAS_SRT_INDEX, FOX_SRT_INDEX]);
 // Procesos eventuales que aceptan URL pegada del usuario y necesitan scraping dinámico
@@ -202,6 +203,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "FOX+ SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "FOX SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "FOX+ URL", scrapeFn: "scrape-channel", channelId: "6a10a6a2350cb5151ab6ca8c", fetchLabel: "🔄 FOX+" },
+  { name: "FOX URL", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 FOX" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -1272,6 +1274,23 @@ export default function EmisorM3U8Panel() {
       }
     }
 
+    // Mutex FOX URL (25) ↔ FOX SRT (23): comparten /live/fox/playlist.m3u8.
+    if (processIndex === FOX_URL_INDEX || processIndex === FOX_SRT_INDEX) {
+      const otherIdx = processIndex === FOX_URL_INDEX ? FOX_SRT_INDEX : FOX_URL_INDEX;
+      if (processes[otherIdx]?.isEmitiendo) {
+        toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida FOX)...`);
+        try {
+          await fetch("/api/emit/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ process_id: otherIdx.toString() })
+          });
+        } catch (e) {
+          console.warn(`No se pudo detener proceso ${otherIdx}:`, e);
+        }
+      }
+    }
+
     if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
@@ -1594,6 +1613,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-red-500", text: "text-red-400", stroke: "#ef4444", name: "FOX+ SRT" },
       { bg: "bg-red-700", text: "text-red-500", stroke: "#b91c1c", name: "FOX SRT" },
       { bg: "bg-red-600", text: "text-red-500", stroke: "#dc2626", name: "FOX+ URL" },
+      { bg: "bg-red-800", text: "text-red-400", stroke: "#991b1b", name: "FOX URL" },
     ];
     return colors[processIndex];
   };
@@ -1859,6 +1879,7 @@ export default function EmisorM3U8Panel() {
                 [FOXMAS_SRT_INDEX]: 'foxmas',
                 [FOX_SRT_INDEX]: 'fox',
                 [FOXMAS_URL_INDEX]: 'foxmas',
+                [FOX_URL_INDEX]: 'fox',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;

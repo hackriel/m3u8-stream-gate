@@ -8,12 +8,13 @@ const BASE_URL = 'https://cf.streann.tech';
 
 const CHANNEL_MAP: Record<string, string> = {
   '641cba02e4b068d89b2344e3': 'FUTV',
-  '664237788f085ac1f2a15f81': 'Tigo Sports',
+  '664237788f085ac1f2a15f81': 'FOX',
   '66608d188f0839b8a740cfe9': 'TDmas 1',
   '617c2f66e4b045a692106126': 'Teletica',
   '65d7aca4e4b0140cbf380bd0': 'Canal 6',
   '664e5de58f089fa849a58697': 'Multimedios',
   '61a8c0e8e4b010fa97ffde55': 'Evento Alterno',
+  '6a10a6a2350cb5151ab6ca8c': 'FOX+',
 };
 
 const BROWSER_HEADERS = {
