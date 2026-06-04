@@ -1858,6 +1858,7 @@ export default function EmisorM3U8Panel() {
                 [TELETICA_SRT_INDEX]: 'Teletica',
                 [FOXMAS_SRT_INDEX]: 'foxmas',
                 [FOX_SRT_INDEX]: 'fox',
+                [FOXMAS_URL_INDEX]: 'foxmas',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
