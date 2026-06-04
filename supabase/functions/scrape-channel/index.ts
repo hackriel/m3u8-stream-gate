@@ -121,13 +121,19 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const channelId = body.channel_id;
+    const account = body.account === 'pi' ? 'pi' : 'default';
 
-    const email = Deno.env.get('TDMAX_EMAIL');
-    const password = Deno.env.get('TDMAX_PASSWORD');
+    const email = account === 'pi'
+      ? Deno.env.get('TDMAX_EMAIL_PI')
+      : Deno.env.get('TDMAX_EMAIL');
+    const password = account === 'pi'
+      ? Deno.env.get('TDMAX_PASSWORD_PI')
+      : Deno.env.get('TDMAX_PASSWORD');
 
     if (!email || !password) {
+      const envVars = account === 'pi' ? 'TDMAX_EMAIL_PI / TDMAX_PASSWORD_PI' : 'TDMAX_EMAIL / TDMAX_PASSWORD';
       return new Response(
-        JSON.stringify({ success: false, error: 'Credenciales TDMAX no configuradas' }),
+        JSON.stringify({ success: false, error: `Credenciales TDMAX no configuradas (${envVars})` }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }

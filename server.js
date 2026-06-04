@@ -711,6 +711,25 @@ const saveOutputProfileForProcess = (processId, profile) => {
 const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080';
 // IDs de proceso que deben enrutar TODO su tráfico (scraping + FFmpeg) por el proxy
 const PROXY_PROCESSES = new Set();
+// IDs que deben usar la SEGUNDA cuenta TDMax (info@media.cr, la del Raspberry)
+// en vez de la cuenta principal (arlopfa). Evita exceder el cupo de devices
+// permitidos por TDMax en una sola cuenta.
+const PI_ACCOUNT_PROCESSES = new Set(['24', '25']); // FOX+ URL, FOX URL
+const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
+const getTdmaxCreds = (account) => {
+  if (account === 'pi') {
+    return {
+      email: process.env.TDMAX_EMAIL_PI,
+      password: process.env.TDMAX_PASSWORD_PI,
+      label: 'PI (info@media.cr)',
+    };
+  }
+  return {
+    email: process.env.TDMAX_EMAIL,
+    password: process.env.TDMAX_PASSWORD,
+    label: 'DEFAULT',
+  };
+};
 // Comando proxychains4 (instalable con: apt install -y proxychains4)
 // Config dinámica generada en /tmp para no chocar con instalación global
 const PROXYCHAINS_CONF_PATH = '/tmp/proxychains-tigo.conf';
@@ -1695,15 +1714,14 @@ const STREANN_BASE_URL = 'https://cf.streann.tech';
 // así el CDN valida correctamente la IP que hace el request de video.
 // Si useProxy=true, todo el tráfico (login + token) sale por el SOCKS5 del Pi 5
 // para que el token quede vinculado a la IP residencial CR (caso Tigo).
-const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false } = {}) => {
+const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, account = 'default' } = {}) => {
   const tag = useProxy ? 'LOCAL via Pi5 (CR)' : 'LOCAL';
-  sendLog('system', 'info', `🔄 Scraping ${tag} ${channelName}: obteniendo URL...`);
-  
-  const email = process.env.TDMAX_EMAIL;
-  const password = process.env.TDMAX_PASSWORD;
-  
+  const { email, password, label: accountLabel } = getTdmaxCreds(account);
+  sendLog('system', 'info', `🔄 Scraping ${tag} ${channelName} [cuenta ${accountLabel}]: obteniendo URL...`);
+
   if (!email || !password) {
-    return { url: null, error: 'Credenciales TDMAX no configuradas en el VPS (TDMAX_EMAIL / TDMAX_PASSWORD)' };
+    const envVars = account === 'pi' ? 'TDMAX_EMAIL_PI / TDMAX_PASSWORD_PI' : 'TDMAX_EMAIL / TDMAX_PASSWORD';
+    return { url: null, error: `Credenciales TDMAX no configuradas en el VPS (${envVars})` };
   }
   
   try {
@@ -1829,8 +1847,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false }
 };
 
 // Scraping vía Edge Function (fallback si el local no está disponible)
-const scrapeStreamUrlRemote = async (channelId, channelName) => {
-  sendLog('system', 'info', `🔄 Scraping REMOTO ${channelName}: obteniendo URL via Edge Function...`);
+const scrapeStreamUrlRemote = async (channelId, channelName, { account = 'default' } = {}) => {
+  sendLog('system', 'info', `🔄 Scraping REMOTO ${channelName} [cuenta ${account}]: obteniendo URL via Edge Function...`);
   
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
@@ -1841,7 +1859,7 @@ const scrapeStreamUrlRemote = async (channelId, channelName) => {
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
         'apikey': SUPABASE_ANON_KEY,
       },
-      body: JSON.stringify({ mode: 'full', channel_id: channelId }),
+      body: JSON.stringify({ mode: 'full', channel_id: channelId, account }),
     });
     const data = await resp.json();
     
@@ -1868,16 +1886,17 @@ const scrapeStreamUrl = async (channelId, channelName, opts = {}) => {
   
   // Fallback: Edge Function (NOTA: la edge function NO usa proxy; si Tigo requiere proxy
   // estricto, este fallback puede fallar y será mejor que el local-via-proxy reintente)
-  return await scrapeStreamUrlRemote(channelId, channelName);
+  return await scrapeStreamUrlRemote(channelId, channelName, { account: opts.account || 'default' });
 };
 
 const scrapeStreamUrlWithRetries = async (process_id, channelId, channelName) => {
   let lastError = 'No se obtuvo URL';
   const useProxy = PROXY_PROCESSES.has(String(process_id));
+  const account = accountForProcess(process_id);
 
   for (let attempt = 1; attempt <= RECOVERY_SCRAPE_ATTEMPTS; attempt++) {
     try {
-      const result = await scrapeStreamUrl(channelId, channelName, { useProxy });
+      const result = await scrapeStreamUrl(channelId, channelName, { useProxy, account });
 
       if (result?.url) {
         if (attempt > 1) {
@@ -2567,7 +2586,8 @@ app.post('/api/local-scrape', async (req, res) => {
 
     const channelName = CHANNEL_MAP[process_id]?.channelName || `Canal ${channel_id.substring(0, 8)}`;
     const useProxy = PROXY_PROCESSES.has(String(process_id));
-    const result = await scrapeStreamUrlLocal(channel_id, channelName, { useProxy });
+    const account = accountForProcess(process_id);
+    const result = await scrapeStreamUrlLocal(channel_id, channelName, { useProxy, account });
     
     if (!result.url) {
       return res.json({ success: false, error: result.error || 'No se obtuvo URL' });
@@ -2701,7 +2721,7 @@ app.post('/api/emit', async (req, res) => {
       } else {
         const { channelId, channelName } = CHANNEL_MAP[process_id];
         sendLog(process_id, 'info', `🔄 Refrescando URL via Pi5 (token de 60s)...`);
-        const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
+        const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true, account: accountForProcess(process_id) });
         if (fresh.url) {
           effectiveSourceM3u8 = fresh.url;
           scrapeSessionCache.set(process_id, {
@@ -4560,7 +4580,7 @@ app.post('/api/emit', async (req, res) => {
                   } else {
                     const { channelId, channelName } = CHANNEL_MAP[String(process_id)];
                     sendLog(process_id, 'info', `🔄 RETRY: refrescando URL via Pi5 (token expirado)...`);
-                    const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true });
+                    const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true, account: accountForProcess(process_id) });
                     if (fresh.url) {
                       // Cache-buster: forzar a Wowza/Nimble a tratar el master playlist como
                       // request fresco y NO reutilizar el nimblesessionid de la sesión anterior
