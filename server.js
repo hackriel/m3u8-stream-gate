@@ -1714,15 +1714,14 @@ const STREANN_BASE_URL = 'https://cf.streann.tech';
 // así el CDN valida correctamente la IP que hace el request de video.
 // Si useProxy=true, todo el tráfico (login + token) sale por el SOCKS5 del Pi 5
 // para que el token quede vinculado a la IP residencial CR (caso Tigo).
-const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false } = {}) => {
+const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, account = 'default' } = {}) => {
   const tag = useProxy ? 'LOCAL via Pi5 (CR)' : 'LOCAL';
-  sendLog('system', 'info', `🔄 Scraping ${tag} ${channelName}: obteniendo URL...`);
-  
-  const email = process.env.TDMAX_EMAIL;
-  const password = process.env.TDMAX_PASSWORD;
-  
+  const { email, password, label: accountLabel } = getTdmaxCreds(account);
+  sendLog('system', 'info', `🔄 Scraping ${tag} ${channelName} [cuenta ${accountLabel}]: obteniendo URL...`);
+
   if (!email || !password) {
-    return { url: null, error: 'Credenciales TDMAX no configuradas en el VPS (TDMAX_EMAIL / TDMAX_PASSWORD)' };
+    const envVars = account === 'pi' ? 'TDMAX_EMAIL_PI / TDMAX_PASSWORD_PI' : 'TDMAX_EMAIL / TDMAX_PASSWORD';
+    return { url: null, error: `Credenciales TDMAX no configuradas en el VPS (${envVars})` };
   }
   
   try {
