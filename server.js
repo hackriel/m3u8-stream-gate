@@ -6388,25 +6388,7 @@ server.listen(PORT, () => {
     }
   }, 2 * 60 * 1000); // cada 2 min
 
-  setTimeout(async () => {
-    try {
-      const tigoRunning = ffmpegProcesses.get('12');
-      if (tigoRunning?.process && !tigoRunning.process.killed) return;
-
-      sendLog('12', 'info', '🚀 Auto-arranque TIGO SRT al iniciar servidor...');
-      await fetch(`http://localhost:${PORT}/api/emit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_m3u8: 'srt://obs',
-          target_rtmp: 'hls-local',
-          process_id: '12'
-        })
-      });
-    } catch (error) {
-      console.error('Error auto-arrancando TIGO SRT:', error);
-    }
-  }, 1500);
+  // Auto-arranque TIGO SRT (ID 12) deshabilitado: tab oculto y canal descartado (HDCP).
 
   // Auto-arranque DISNEY 7 SRT (id 16): salida HLS local lista para recibir SRT de OBS
   setTimeout(async () => {
