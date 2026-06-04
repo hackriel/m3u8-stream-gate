@@ -1847,8 +1847,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
 };
 
 // Scraping vía Edge Function (fallback si el local no está disponible)
-const scrapeStreamUrlRemote = async (channelId, channelName) => {
-  sendLog('system', 'info', `🔄 Scraping REMOTO ${channelName}: obteniendo URL via Edge Function...`);
+const scrapeStreamUrlRemote = async (channelId, channelName, { account = 'default' } = {}) => {
+  sendLog('system', 'info', `🔄 Scraping REMOTO ${channelName} [cuenta ${account}]: obteniendo URL via Edge Function...`);
   
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
@@ -1859,7 +1859,7 @@ const scrapeStreamUrlRemote = async (channelId, channelName) => {
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
         'apikey': SUPABASE_ANON_KEY,
       },
-      body: JSON.stringify({ mode: 'full', channel_id: channelId }),
+      body: JSON.stringify({ mode: 'full', channel_id: channelId, account }),
     });
     const data = await resp.json();
     
@@ -1886,16 +1886,17 @@ const scrapeStreamUrl = async (channelId, channelName, opts = {}) => {
   
   // Fallback: Edge Function (NOTA: la edge function NO usa proxy; si Tigo requiere proxy
   // estricto, este fallback puede fallar y será mejor que el local-via-proxy reintente)
-  return await scrapeStreamUrlRemote(channelId, channelName);
+  return await scrapeStreamUrlRemote(channelId, channelName, { account: opts.account || 'default' });
 };
 
 const scrapeStreamUrlWithRetries = async (process_id, channelId, channelName) => {
   let lastError = 'No se obtuvo URL';
   const useProxy = PROXY_PROCESSES.has(String(process_id));
+  const account = accountForProcess(process_id);
 
   for (let attempt = 1; attempt <= RECOVERY_SCRAPE_ATTEMPTS; attempt++) {
     try {
-      const result = await scrapeStreamUrl(channelId, channelName, { useProxy });
+      const result = await scrapeStreamUrl(channelId, channelName, { useProxy, account });
 
       if (result?.url) {
         if (attempt > 1) {
