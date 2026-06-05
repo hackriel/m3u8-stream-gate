@@ -187,6 +187,8 @@ Environment=SUPABASE_URL=https://zbrkijgnkckcutydsmkt.supabase.co
 Environment=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpicmtpamdua2NrY3V0eWRzbWt0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4OTE3NzMsImV4cCI6MjA3ODQ2Nzc3M30.igte07DdM7xmA3A-nsWXOTIno89-15i2d0PlEiIC7L8
 Environment=TDMAX_EMAIL=arlopfa@gmail.com
 Environment=TDMAX_PASSWORD=vM5SdnKpPjlypvJW
+Environment=TDMAX_EMAIL_PI=info@media.cr
+Environment=TDMAX_PASSWORD_PI=Boanerges12*
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
