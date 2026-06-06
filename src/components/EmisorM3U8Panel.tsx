@@ -1784,6 +1784,24 @@ export default function EmisorM3U8Panel() {
                   </div>
                 )}
                 {!M3U_FILE_PROCESSES.has(processIndex) && (
+                <>
+                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && (
+                  <div className="mb-2 flex items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
+                        (processIndex === 24 || processIndex === 25)
+                          ? 'bg-yellow-500/15 border-yellow-500/40 text-yellow-300'
+                          : 'bg-blue-500/15 border-blue-500/40 text-blue-300'
+                      }`}
+                      title="Cuenta TDMax usada para scrapear este canal"
+                    >
+                      <span className="opacity-70">🔐 Logueado con:</span>
+                      <span className="font-mono">
+                        {(processIndex === 24 || processIndex === 25) ? 'info@media.cr' : 'arlopfa@gmail.com'}
+                      </span>
+                    </span>
+                  </div>
+                )}
                 <div className="flex gap-2 mb-4">
                   <input
                     type="url"
@@ -1836,6 +1854,7 @@ export default function EmisorM3U8Panel() {
                     </button>
                   )}
                 </div>
+                </>
                 )}
                 {/* Backup URL field removed - Canal 6 now uses single URL */}
               </>
