@@ -1854,6 +1854,7 @@ export default function EmisorM3U8Panel() {
                     </button>
                   )}
                 </div>
+                </>
                 )}
                 {/* Backup URL field removed - Canal 6 now uses single URL */}
               </>
