@@ -4706,6 +4706,10 @@ app.post('/api/emit', async (req, res) => {
                   sendLog(process_id, 'warn', `⚠️ RETRY RÁPIDO falló (${emitResp.status}${errText ? `: ${errText.substring(0, 120)}` : ''}), iniciando recovery completo...`);
                   if (CHANNEL_MAP[process_id]) {
                     const { channelId, channelName } = CHANNEL_MAP[process_id];
+                    if (String(process_id) === '13' && getTeleticaSourceMode('13') === 'official') {
+                      setTeleticaSourceMode('13', 'scraping');
+                      sendLog('13', 'warn', '⚠️ Fuente OFICIAL Teletica falló en RETRY — cambiando AUTOMÁTICAMENTE a modo SCRAPING');
+                    }
                     await autoRecoverChannel(process_id, channelId, channelName);
                   }
                 }
@@ -4713,6 +4717,10 @@ app.post('/api/emit', async (req, res) => {
                 sendLog(process_id, 'warn', `⚠️ RETRY: No hay URL/RTMP guardados ni en base ni en memoria, saltando a recovery completo`);
                 if (CHANNEL_MAP[process_id]) {
                   const { channelId, channelName } = CHANNEL_MAP[process_id];
+                  if (String(process_id) === '13' && getTeleticaSourceMode('13') === 'official') {
+                    setTeleticaSourceMode('13', 'scraping');
+                    sendLog('13', 'warn', '⚠️ Fuente OFICIAL Teletica falló (sin URL guardada) — cambiando AUTOMÁTICAMENTE a modo SCRAPING');
+                  }
                   await autoRecoverChannel(process_id, channelId, channelName);
                 }
               }
@@ -4720,6 +4728,10 @@ app.post('/api/emit', async (req, res) => {
               sendLog(process_id, 'error', `❌ RETRY error: ${retryErr.message}, iniciando recovery completo...`);
               if (CHANNEL_MAP[process_id]) {
                 const { channelId, channelName } = CHANNEL_MAP[process_id];
+                if (String(process_id) === '13' && getTeleticaSourceMode('13') === 'official') {
+                  setTeleticaSourceMode('13', 'scraping');
+                  sendLog('13', 'warn', '⚠️ Fuente OFICIAL Teletica falló en RETRY (excepción) — cambiando AUTOMÁTICAMENTE a modo SCRAPING');
+                }
                 await autoRecoverChannel(process_id, channelId, channelName);
               }
             }
