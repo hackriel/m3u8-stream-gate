@@ -1732,7 +1732,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
   const { email, password, label: accountLabel } = getTdmaxCreds(account);
   const deviceId = getDeviceIdForProcess(processId);
   const deviceTag = processId !== null && processId !== undefined ? ` device:${deviceId.slice(0,8)}` : '';
-  sendLog('system', 'info', `🔄 Scraping ${tag} ${channelName} [cuenta ${accountLabel}${deviceTag}]: obteniendo URL...`);
+  const logTarget = processId !== null && processId !== undefined ? processId : 'system';
+  sendLog(logTarget, 'info', `🔄 Scraping ${tag} ${channelName} [cuenta ${accountLabel}${deviceTag}]: obteniendo URL...`);
 
   if (!email || !password) {
     const envVars = account === 'pi' ? 'TDMAX_EMAIL_PI / TDMAX_PASSWORD_PI' : 'TDMAX_EMAIL / TDMAX_PASSWORD';
