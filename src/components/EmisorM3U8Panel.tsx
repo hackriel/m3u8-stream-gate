@@ -229,7 +229,9 @@ const defaultProcess = (): EmissionProcess => ({
 export default function EmisorM3U8Panel() {
   const logContainerRefs = useRef<Array<HTMLDivElement | null>>([]);
   
-  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem("emisor-active-tab") || "0");
+  // Siempre arrancar en el primer tab al refrescar para evitar caer en un SRT
+  // que se auto-inició (always-on/recovery). El tab solo cambia con click manual.
+  const [activeTab, setActiveTab] = useState("0");
   // Estado independiente del tab Canal 6 TS (passthrough MPEG-TS)
   const [canal6TsStatus, setCanal6TsStatus] = useState<{
     enabled: boolean;
@@ -373,9 +375,8 @@ export default function EmisorM3U8Panel() {
 
   
   // Cargar datos desde Supabase al montar el componente
-  useEffect(() => {
-    sessionStorage.setItem("emisor-active-tab", activeTab);
-  }, [activeTab]);
+  // (Removido) persistencia de activeTab en sessionStorage — evita que un refresh
+  // restaure un tab de SRT auto-iniciado.
 
   useEffect(() => {
     const loadFromDatabase = async () => {
