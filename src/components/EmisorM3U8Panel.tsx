@@ -1867,7 +1867,7 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
-                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && (
+                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
