@@ -534,6 +534,46 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
+  // TELETICA URL (13): modo fuente. 'official' = URL directa Bradmax CDN
+  // (sin token); 'scraping' = TDMax. Default scraping (comportamiento histórico).
+  // Persistido en localStorage. El server flipa oficial→scraping si falla.
+  const TELETICA_OFFICIAL_M3U8 = 'https://cdn01.teletica.com/TeleticaLiveStream/Stream/playlist_dvr.m3u8';
+  const [teleticaMode, setTeleticaMode] = useState<'official' | 'scraping'>(() => {
+    try {
+      const v = localStorage.getItem('teletica13_source_mode');
+      return v === 'official' ? 'official' : 'scraping';
+    } catch {
+      return 'scraping';
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('teletica13_source_mode', teleticaMode); } catch {}
+    if (teleticaMode === 'official') {
+      // Auto-rellenar el input M3U8 del proceso 13 con la URL fija.
+      setProcesses(prev => {
+        const next = [...prev];
+        if (next[TELETICA_URL_INDEX] && next[TELETICA_URL_INDEX].m3u8 !== TELETICA_OFFICIAL_M3U8) {
+          next[TELETICA_URL_INDEX] = { ...next[TELETICA_URL_INDEX], m3u8: TELETICA_OFFICIAL_M3U8 };
+          return next;
+        }
+        return prev;
+      });
+    }
+  }, [teleticaMode]);
+  // Poll del modo en el server (refleja fallbacks automáticos oficial→scraping).
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const r = await fetch('/api/teletica/source-mode');
+        if (!r.ok) return;
+        const { mode } = await r.json();
+        if (mode === 'official' || mode === 'scraping') {
+          setTeleticaMode(prev => (prev !== mode ? mode : prev));
+        }
+      } catch {}
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
   const [outputProfiles, setOutputProfiles] = useState<Record<number, OutputProfile>>(() => {
     try {
       const parsed = JSON.parse(sessionStorage.getItem("emisor-output-profiles") || "{}");
