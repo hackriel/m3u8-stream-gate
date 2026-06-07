@@ -692,6 +692,18 @@ const getTeleticaSourceMode = (pid) => (teleticaSourceMode.get(String(pid)) === 
 const setTeleticaSourceMode = (pid, mode) => {
   const m = mode === 'official' ? 'official' : 'scraping';
   teleticaSourceMode.set(String(pid), m);
+  // Persistir en DB para que sobreviva reinicios del servicio (fire-and-forget).
+  try {
+    if (typeof supabase !== 'undefined' && supabase) {
+      supabase
+        .from('emission_processes')
+        .update({ source_mode: m })
+        .eq('id', parseInt(String(pid), 10))
+        .then(({ error }) => {
+          if (error) console.error(`[teleticaSourceMode] persist error pid=${pid}:`, error.message);
+        });
+    }
+  } catch (_) { /* ignorar: persistencia best-effort */ }
   return m;
 };
 
@@ -4694,6 +4706,10 @@ app.post('/api/emit', async (req, res) => {
                   sendLog(process_id, 'warn', `⚠️ RETRY RÁPIDO falló (${emitResp.status}${errText ? `: ${errText.substring(0, 120)}` : ''}), iniciando recovery completo...`);
                   if (CHANNEL_MAP[process_id]) {
                     const { channelId, channelName } = CHANNEL_MAP[process_id];
+                    if (String(process_id) === '13' && getTeleticaSourceMode('13') === 'official') {
+                      setTeleticaSourceMode('13', 'scraping');
+                      sendLog('13', 'warn', '⚠️ Fuente OFICIAL Teletica falló en RETRY — cambiando AUTOMÁTICAMENTE a modo SCRAPING');
+                    }
                     await autoRecoverChannel(process_id, channelId, channelName);
                   }
                 }
@@ -4701,6 +4717,10 @@ app.post('/api/emit', async (req, res) => {
                 sendLog(process_id, 'warn', `⚠️ RETRY: No hay URL/RTMP guardados ni en base ni en memoria, saltando a recovery completo`);
                 if (CHANNEL_MAP[process_id]) {
                   const { channelId, channelName } = CHANNEL_MAP[process_id];
+                  if (String(process_id) === '13' && getTeleticaSourceMode('13') === 'official') {
+                    setTeleticaSourceMode('13', 'scraping');
+                    sendLog('13', 'warn', '⚠️ Fuente OFICIAL Teletica falló (sin URL guardada) — cambiando AUTOMÁTICAMENTE a modo SCRAPING');
+                  }
                   await autoRecoverChannel(process_id, channelId, channelName);
                 }
               }
@@ -4708,6 +4728,10 @@ app.post('/api/emit', async (req, res) => {
               sendLog(process_id, 'error', `❌ RETRY error: ${retryErr.message}, iniciando recovery completo...`);
               if (CHANNEL_MAP[process_id]) {
                 const { channelId, channelName } = CHANNEL_MAP[process_id];
+                if (String(process_id) === '13' && getTeleticaSourceMode('13') === 'official') {
+                  setTeleticaSourceMode('13', 'scraping');
+                  sendLog('13', 'warn', '⚠️ Fuente OFICIAL Teletica falló en RETRY (excepción) — cambiando AUTOMÁTICAMENTE a modo SCRAPING');
+                }
                 await autoRecoverChannel(process_id, channelId, channelName);
               }
             }
@@ -6205,6 +6229,22 @@ server.listen(PORT, () => {
         });
     }
 
+    // ====== Cargar modo Teletica URL (13) desde DB para sobrevivir reinicios ======
+    (async () => {
+      try {
+        const { data: row } = await supabase
+          .from('emission_processes')
+          .select('source_mode')
+          .eq('id', 13)
+          .maybeSingle();
+        const persisted = row?.source_mode === 'official' ? 'official' : 'scraping';
+        teleticaSourceMode.set('13', persisted);
+        sendLog('13', 'info', `🎛️ Modo Teletica restaurado desde DB: ${persisted.toUpperCase()}`);
+      } catch (err) {
+        console.error('Error cargando teletica source_mode desde DB:', err.message);
+      }
+    })();
+
     // ====== RECUPERACIÓN AL ARRANCAR: levantar canales con always_on=true ======
     // Espera 8s para que el servidor esté completamente listo y luego relanza
     // todas las emisiones marcadas como "Encendido siempre".
@@ -6251,6 +6291,20 @@ server.listen(PORT, () => {
                   source_m3u8: 'srt://obs',
                   target_rtmp: 'hls-local',
                   process_id: pid,
+                  is_recovery: true,
+                }),
+              });
+            } else if (pid === '13' && getTeleticaSourceMode('13') === 'official') {
+              // TELETICA URL en modo OFICIAL: relanzar con URL fija de Bradmax,
+              // sin scraping TDMax. Respeta la selección del usuario tras reinicio.
+              sendLog('13', 'info', `🔁 Always-on: relanzando Teletica URL en modo OFICIAL (Bradmax CDN)...`);
+              await fetch(`http://localhost:${PORT}/api/emit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  source_m3u8: TELETICA_OFFICIAL_URL,
+                  target_rtmp: row.rtmp || 'rtmp://localhost:1935/live/Teletica',
+                  process_id: '13',
                   is_recovery: true,
                 }),
               });
@@ -6358,7 +6412,22 @@ server.listen(PORT, () => {
 
             if (CHANNEL_MAP[pid]) {
               const { channelId, channelName } = CHANNEL_MAP[pid];
-              await autoRecoverChannel(pid, channelId, channelName);
+              // TELETICA URL (13) en modo OFICIAL: NO scrapear, relanzar con Bradmax.
+              if (pid === '13' && getTeleticaSourceMode('13') === 'official') {
+                sendLog('13', 'info', `🔄 Refresh 3:00 CR: Teletica en modo OFICIAL, relanzando con Bradmax CDN (sin scraping)...`);
+                await fetch(`http://localhost:${PORT}/api/emit`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    source_m3u8: TELETICA_OFFICIAL_URL,
+                    target_rtmp: row.rtmp || 'rtmp://localhost:1935/live/Teletica',
+                    process_id: '13',
+                    is_recovery: true,
+                  }),
+                });
+              } else {
+                await autoRecoverChannel(pid, channelId, channelName);
+              }
             } else if (pid === '17') {
               const playerUrl = row.player_url;
               const m = playerUrl ? (String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i)) : null;

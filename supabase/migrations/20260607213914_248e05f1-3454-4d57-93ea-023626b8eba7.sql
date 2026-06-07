@@ -1,0 +1,1 @@
+ALTER TABLE public.emission_processes ADD COLUMN IF NOT EXISTS source_mode text NOT NULL DEFAULT 'scraping';
