@@ -41,6 +41,7 @@ export type Database = {
           process_logs: string | null
           recovery_count: number
           rtmp: string
+          source_mode: string
           source_url: string
           start_time: number
           updated_at: string
@@ -71,6 +72,7 @@ export type Database = {
           process_logs?: string | null
           recovery_count?: number
           rtmp?: string
+          source_mode?: string
           source_url?: string
           start_time?: number
           updated_at?: string
@@ -101,6 +103,7 @@ export type Database = {
           process_logs?: string | null
           recovery_count?: number
           rtmp?: string
+          source_mode?: string
           source_url?: string
           start_time?: number
           updated_at?: string
