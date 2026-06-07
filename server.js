@@ -2736,7 +2736,7 @@ app.post('/api/emit', async (req, res) => {
       } else {
         const { channelId, channelName } = CHANNEL_MAP[process_id];
         sendLog(process_id, 'info', `🔄 Refrescando URL via Pi5 (token de 60s)...`);
-        const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true, account: accountForProcess(process_id) });
+        const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true, account: accountForProcess(process_id), processId: process_id });
         if (fresh.url) {
           effectiveSourceM3u8 = fresh.url;
           scrapeSessionCache.set(process_id, {
@@ -4595,7 +4595,7 @@ app.post('/api/emit', async (req, res) => {
                   } else {
                     const { channelId, channelName } = CHANNEL_MAP[String(process_id)];
                     sendLog(process_id, 'info', `🔄 RETRY: refrescando URL via Pi5 (token expirado)...`);
-                    const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true, account: accountForProcess(process_id) });
+                    const fresh = await scrapeStreamUrlLocal(channelId, channelName, { useProxy: true, account: accountForProcess(process_id), processId: String(process_id) });
                     if (fresh.url) {
                       // Cache-buster: forzar a Wowza/Nimble a tratar el master playlist como
                       // request fresco y NO reutilizar el nimblesessionid de la sesión anterior
