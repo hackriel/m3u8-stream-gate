@@ -672,6 +672,29 @@ const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '
 // FOX URL (25) y FOX SRT (23) comparten slug 'fox' → mutex automático por slug HLS.
 const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox', '24': 'foxmas', '25': 'fox' };
 
+// ───────────────────────────────────────────────────────────────────────
+// TELETICA URL (ID 13) — selector de fuente: 'official' | 'scraping'
+//
+// • 'official': URL directa del CDN de Teletica vía Bradmax (sin token).
+//   Validada manualmente: HTTP 200 + master playlist Nimble con 4 variantes.
+//   Solo requiere Referer https://bradmax.com/ — sin login, sin wmsAuthSign.
+// • 'scraping': flujo histórico TDMax (login + wmsAuthSign de 60s).
+//
+// Fallback unidireccional: si 'official' falla durante una emisión activa,
+// el recovery cambia AUTOMÁTICAMENTE el modo a 'scraping'. De 'scraping'
+// nunca se promueve a 'official' (solo el usuario puede volver a elegir).
+// El estado vive en memoria — se reinicia al restart del servicio (default
+// 'scraping' = comportamiento histórico).
+// ───────────────────────────────────────────────────────────────────────
+const TELETICA_OFFICIAL_URL = 'https://cdn01.teletica.com/TeleticaLiveStream/Stream/playlist_dvr.m3u8';
+const teleticaSourceMode = new Map(); // process_id (string) -> 'official' | 'scraping'
+const getTeleticaSourceMode = (pid) => (teleticaSourceMode.get(String(pid)) === 'official' ? 'official' : 'scraping');
+const setTeleticaSourceMode = (pid, mode) => {
+  const m = mode === 'official' ? 'official' : 'scraping';
+  teleticaSourceMode.set(String(pid), m);
+  return m;
+};
+
 const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 // Perfiles de salida (CBR x264).
 //   - preset:      compromiso CPU vs calidad visual (faster ≈ +15% calidad vs veryfast).
