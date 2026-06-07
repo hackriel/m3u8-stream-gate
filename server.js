@@ -11,6 +11,7 @@ import os from 'os';
 import net from 'net';
 import http from 'http';
 import https from 'https';
+import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
@@ -1709,6 +1710,18 @@ setInterval(async () => {
 const FIXED_DEVICE_ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
 const STREANN_RESELLER_ID = '61316705e4b0295f87dae396';
 const STREANN_BASE_URL = 'https://cf.streann.tech';
+
+// Device-id determinístico por process_id.
+// Mantiene SIEMPRE el mismo UUID por canal (no crece con re-logins / recoveries),
+// para que TDMax cuente cada canal como UN dispositivo estable y los 3 canales
+// de arlopfa (FUTV, TDmas 1, Teletica) no se invaliden mutuamente al re-loguear
+// (cross-invalidation cuando comparten un mismo device-id global).
+// Si no hay process_id (llamadas legacy), cae al UUID fijo anterior.
+const getDeviceIdForProcess = (pid) => {
+  if (pid === undefined || pid === null || pid === '') return FIXED_DEVICE_ID;
+  const hash = crypto.createHash('sha1').update(`tdmax-device-v1-${pid}`).digest('hex');
+  return `${hash.slice(0,8)}-${hash.slice(8,12)}-${hash.slice(12,16)}-${hash.slice(16,20)}-${hash.slice(20,32)}`;
+};
 
 // Scraping LOCAL (directo desde el VPS) — el token se genera con la IP del VPS
 // así el CDN valida correctamente la IP que hace el request de video.
