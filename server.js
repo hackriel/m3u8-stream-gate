@@ -2699,6 +2699,18 @@ app.post('/api/emit', async (req, res) => {
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
+
+    // ── TELETICA URL (13): persistir modo enviado por el frontend y, si es
+    //    'official', sobrescribir el source con la URL fija de Bradmax CDN.
+    //    En 'official' NO se hace scraping previo; el FFmpeg lee directo de la
+    //    CDN con Referer https://bradmax.com/.
+    if (process_id === '13' && !is_recovery && (source_mode === 'official' || source_mode === 'scraping')) {
+      setTeleticaSourceMode('13', source_mode);
+      sendLog('13', 'info', `🎛️ Modo Teletica seleccionado: ${source_mode.toUpperCase()}`);
+    }
+    if (process_id === '13' && getTeleticaSourceMode('13') === 'official') {
+      effectiveSourceM3u8 = TELETICA_OFFICIAL_URL;
+    }
     // SRT ingest: si el caller no provee source_m3u8 (o lo marca como srt://obs),
     // arrancamos un listener SRT que recibe de OBS en el puerto del proceso.
     const isSrtIngest = isSrtIngestProcess(process_id) && (
