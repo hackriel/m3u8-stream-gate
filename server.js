@@ -6282,6 +6282,20 @@ server.listen(PORT, () => {
                   is_recovery: true,
                 }),
               });
+            } else if (pid === '13' && getTeleticaSourceMode('13') === 'official') {
+              // TELETICA URL en modo OFICIAL: relanzar con URL fija de Bradmax,
+              // sin scraping TDMax. Respeta la selección del usuario tras reinicio.
+              sendLog('13', 'info', `🔁 Always-on: relanzando Teletica URL en modo OFICIAL (Bradmax CDN)...`);
+              await fetch(`http://localhost:${PORT}/api/emit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  source_m3u8: TELETICA_OFFICIAL_URL,
+                  target_rtmp: row.rtmp || 'rtmp://localhost:1935/live/Teletica',
+                  process_id: '13',
+                  is_recovery: true,
+                }),
+              });
             } else if (CHANNEL_MAP[pid]) {
               // Canales scrapeados: obtener URL fresca
               const { channelId, channelName } = CHANNEL_MAP[pid];
