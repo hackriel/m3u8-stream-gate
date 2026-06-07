@@ -4729,6 +4729,13 @@ app.post('/api/emit', async (req, res) => {
               manualStopProcesses.delete(Number(process_id));
               return;
             }
+            // TELETICA URL (13): fallback unidireccional oficial → scraping.
+            // Si la fuente oficial cayó, cambiamos a scraping para el recovery
+            // y persistimos el modo. De scraping NUNCA se promueve a oficial.
+            if (process_id === '13' && getTeleticaSourceMode('13') === 'official') {
+              setTeleticaSourceMode('13', 'scraping');
+              sendLog('13', 'warn', '⚠️ Fuente OFICIAL Teletica falló — cambiando AUTOMÁTICAMENTE a modo SCRAPING para recovery');
+            }
             await autoRecoverChannel(process_id, channelId, channelName);
           });
         } else if (MANUAL_URL_PROCESSES.has(String(process_id)) || AUTO_INGEST_PROCESSES.has(String(process_id))) {
