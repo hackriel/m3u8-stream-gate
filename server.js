@@ -1727,10 +1727,12 @@ const getDeviceIdForProcess = (pid) => {
 // así el CDN valida correctamente la IP que hace el request de video.
 // Si useProxy=true, todo el tráfico (login + token) sale por el SOCKS5 del Pi 5
 // para que el token quede vinculado a la IP residencial CR (caso Tigo).
-const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, account = 'default' } = {}) => {
+const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, account = 'default', processId = null } = {}) => {
   const tag = useProxy ? 'LOCAL via Pi5 (CR)' : 'LOCAL';
   const { email, password, label: accountLabel } = getTdmaxCreds(account);
-  sendLog('system', 'info', `🔄 Scraping ${tag} ${channelName} [cuenta ${accountLabel}]: obteniendo URL...`);
+  const deviceId = getDeviceIdForProcess(processId);
+  const deviceTag = processId !== null && processId !== undefined ? ` device:${deviceId.slice(0,8)}` : '';
+  sendLog('system', 'info', `🔄 Scraping ${tag} ${channelName} [cuenta ${accountLabel}${deviceTag}]: obteniendo URL...`);
 
   if (!email || !password) {
     const envVars = account === 'pi' ? 'TDMAX_EMAIL_PI / TDMAX_PASSWORD_PI' : 'TDMAX_EMAIL / TDMAX_PASSWORD';
@@ -1777,11 +1779,11 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
     // Los nombres anteriores camelCase devuelven code 628: "redirect url is null".
     const lbParams = new URLSearchParams({
       r: STREANN_RESELLER_ID,
-      'device-id': FIXED_DEVICE_ID,
+      'device-id': deviceId,
       access_token: accessToken,
       country_code: 'CR',
       doNotUseRedirect: 'true',
-      'device-name': 'web',
+      'device-name': processId !== null && processId !== undefined ? `web-p${processId}` : 'web',
       'device-type': 'web',
     });
     const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?${lbParams.toString()}`;
