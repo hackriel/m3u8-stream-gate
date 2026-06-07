@@ -5716,6 +5716,8 @@ app.get('/api/status', (req, res) => {
       timestamp: new Date().toISOString()
     });
   } else {
+    // Cuando no se pide un process_id, también devolvemos el modo Teletica
+    // (usado por el frontend para sincronizar el toggle tras un fallback automático).
     // Estado de todos los procesos
     const allStatuses = {};
     for (let i = 0; i <= 20; i++) {
