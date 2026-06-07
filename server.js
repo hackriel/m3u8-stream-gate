@@ -6400,7 +6400,22 @@ server.listen(PORT, () => {
 
             if (CHANNEL_MAP[pid]) {
               const { channelId, channelName } = CHANNEL_MAP[pid];
-              await autoRecoverChannel(pid, channelId, channelName);
+              // TELETICA URL (13) en modo OFICIAL: NO scrapear, relanzar con Bradmax.
+              if (pid === '13' && getTeleticaSourceMode('13') === 'official') {
+                sendLog('13', 'info', `🔄 Refresh 3:00 CR: Teletica en modo OFICIAL, relanzando con Bradmax CDN (sin scraping)...`);
+                await fetch(`http://localhost:${PORT}/api/emit`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    source_m3u8: TELETICA_OFFICIAL_URL,
+                    target_rtmp: row.rtmp || 'rtmp://localhost:1935/live/Teletica',
+                    process_id: '13',
+                    is_recovery: true,
+                  }),
+                });
+              } else {
+                await autoRecoverChannel(pid, channelId, channelName);
+              }
             } else if (pid === '17') {
               const playerUrl = row.player_url;
               const m = playerUrl ? (String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i)) : null;
