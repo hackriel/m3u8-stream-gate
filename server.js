@@ -692,6 +692,18 @@ const getTeleticaSourceMode = (pid) => (teleticaSourceMode.get(String(pid)) === 
 const setTeleticaSourceMode = (pid, mode) => {
   const m = mode === 'official' ? 'official' : 'scraping';
   teleticaSourceMode.set(String(pid), m);
+  // Persistir en DB para que sobreviva reinicios del servicio (fire-and-forget).
+  try {
+    if (typeof supabase !== 'undefined' && supabase) {
+      supabase
+        .from('emission_processes')
+        .update({ source_mode: m })
+        .eq('id', parseInt(String(pid), 10))
+        .then(({ error }) => {
+          if (error) console.error(`[teleticaSourceMode] persist error pid=${pid}:`, error.message);
+        });
+    }
+  } catch (_) { /* ignorar: persistencia best-effort */ }
   return m;
 };
 
