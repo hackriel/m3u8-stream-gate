@@ -2676,6 +2676,7 @@ app.post('/api/emit', async (req, res) => {
       referer: customReferer = null,
       user_agent: customUserAgent = null,
       output_profile = null,
+      source_mode = null, // Teletica URL (13): 'official' | 'scraping'
     } = req.body;
     // Normalizar el modo. Compat: si llega `passthrough: true` sin `passthrough_mode`,
     // asumimos 'copy' (comportamiento histórico). Si llega 'transcode', desactivamos
