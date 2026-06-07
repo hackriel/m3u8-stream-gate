@@ -2937,11 +2937,19 @@ app.post('/api/emit', async (req, res) => {
       const hostname = sourceUrl.hostname.toLowerCase();
 
       if (hostname.includes('teletica.com')) {
-        // Teletica CDN ahora valida el wmsAuthSign contra el Origin de TDMax.
-        // Si mandamos teletica.com como Referer/Origin, el CDN responde 200 pero
-        // entrega chunks vacíos / inválidos. El navegador real usa app.tdmax.com.
-        refererDomain = 'https://www.app.tdmax.com/';
-        originDomain = 'https://www.app.tdmax.com';
+        // Teletica CDN tiene DOS rutas con políticas de Referer distintas:
+        //   • /TeleticaLiveStream/...  → fuente "oficial" pública vía Bradmax player.
+        //     Solo valida Referer https://bradmax.com/  (sin token, sin wmsAuthSign).
+        //   • /StreamTeletica/... (cdn02/cdn12) → ruta TDMax con wmsAuthSign de 60s.
+        //     Valida Referer/Origin contra https://www.app.tdmax.com/. Si se manda
+        //     teletica.com como Origin, CDN responde 200 OK pero con chunks vacíos.
+        if (sourceUrl.pathname.toLowerCase().includes('/teleticalivestream/')) {
+          refererDomain = 'https://bradmax.com/';
+          originDomain = 'https://bradmax.com';
+        } else {
+          refererDomain = 'https://www.app.tdmax.com/';
+          originDomain = 'https://www.app.tdmax.com';
+        }
       } else if (hostname.includes('cloudfront.net') || hostname.includes('repretel.com') || hostname.includes('mediatiquestream.com')) {
         isMediatiqueSource = true;
         refererDomain = 'https://www.repretel.com/';
