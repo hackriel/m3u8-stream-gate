@@ -672,6 +672,29 @@ const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '
 // FOX URL (25) y FOX SRT (23) comparten slug 'fox' → mutex automático por slug HLS.
 const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox', '24': 'foxmas', '25': 'fox' };
 
+// ───────────────────────────────────────────────────────────────────────
+// TELETICA URL (ID 13) — selector de fuente: 'official' | 'scraping'
+//
+// • 'official': URL directa del CDN de Teletica vía Bradmax (sin token).
+//   Validada manualmente: HTTP 200 + master playlist Nimble con 4 variantes.
+//   Solo requiere Referer https://bradmax.com/ — sin login, sin wmsAuthSign.
+// • 'scraping': flujo histórico TDMax (login + wmsAuthSign de 60s).
+//
+// Fallback unidireccional: si 'official' falla durante una emisión activa,
+// el recovery cambia AUTOMÁTICAMENTE el modo a 'scraping'. De 'scraping'
+// nunca se promueve a 'official' (solo el usuario puede volver a elegir).
+// El estado vive en memoria — se reinicia al restart del servicio (default
+// 'scraping' = comportamiento histórico).
+// ───────────────────────────────────────────────────────────────────────
+const TELETICA_OFFICIAL_URL = 'https://cdn01.teletica.com/TeleticaLiveStream/Stream/playlist_dvr.m3u8';
+const teleticaSourceMode = new Map(); // process_id (string) -> 'official' | 'scraping'
+const getTeleticaSourceMode = (pid) => (teleticaSourceMode.get(String(pid)) === 'official' ? 'official' : 'scraping');
+const setTeleticaSourceMode = (pid, mode) => {
+  const m = mode === 'official' ? 'official' : 'scraping';
+  teleticaSourceMode.set(String(pid), m);
+  return m;
+};
+
 const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 // Perfiles de salida (CBR x264).
 //   - preset:      compromiso CPU vs calidad visual (faster ≈ +15% calidad vs veryfast).
@@ -2653,6 +2676,7 @@ app.post('/api/emit', async (req, res) => {
       referer: customReferer = null,
       user_agent: customUserAgent = null,
       output_profile = null,
+      source_mode = null, // Teletica URL (13): 'official' | 'scraping'
     } = req.body;
     // Normalizar el modo. Compat: si llega `passthrough: true` sin `passthrough_mode`,
     // asumimos 'copy' (comportamiento histórico). Si llega 'transcode', desactivamos
@@ -2675,6 +2699,18 @@ app.post('/api/emit', async (req, res) => {
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
+
+    // ── TELETICA URL (13): persistir modo enviado por el frontend y, si es
+    //    'official', sobrescribir el source con la URL fija de Bradmax CDN.
+    //    En 'official' NO se hace scraping previo; el FFmpeg lee directo de la
+    //    CDN con Referer https://bradmax.com/.
+    if (process_id === '13' && !is_recovery && (source_mode === 'official' || source_mode === 'scraping')) {
+      setTeleticaSourceMode('13', source_mode);
+      sendLog('13', 'info', `🎛️ Modo Teletica seleccionado: ${source_mode.toUpperCase()}`);
+    }
+    if (process_id === '13' && getTeleticaSourceMode('13') === 'official') {
+      effectiveSourceM3u8 = TELETICA_OFFICIAL_URL;
+    }
     // SRT ingest: si el caller no provee source_m3u8 (o lo marca como srt://obs),
     // arrancamos un listener SRT que recibe de OBS en el puerto del proceso.
     const isSrtIngest = isSrtIngestProcess(process_id) && (
@@ -2901,11 +2937,19 @@ app.post('/api/emit', async (req, res) => {
       const hostname = sourceUrl.hostname.toLowerCase();
 
       if (hostname.includes('teletica.com')) {
-        // Teletica CDN ahora valida el wmsAuthSign contra el Origin de TDMax.
-        // Si mandamos teletica.com como Referer/Origin, el CDN responde 200 pero
-        // entrega chunks vacíos / inválidos. El navegador real usa app.tdmax.com.
-        refererDomain = 'https://www.app.tdmax.com/';
-        originDomain = 'https://www.app.tdmax.com';
+        // Teletica CDN tiene DOS rutas con políticas de Referer distintas:
+        //   • /TeleticaLiveStream/...  → fuente "oficial" pública vía Bradmax player.
+        //     Solo valida Referer https://bradmax.com/  (sin token, sin wmsAuthSign).
+        //   • /StreamTeletica/... (cdn02/cdn12) → ruta TDMax con wmsAuthSign de 60s.
+        //     Valida Referer/Origin contra https://www.app.tdmax.com/. Si se manda
+        //     teletica.com como Origin, CDN responde 200 OK pero con chunks vacíos.
+        if (sourceUrl.pathname.toLowerCase().includes('/teleticalivestream/')) {
+          refererDomain = 'https://bradmax.com/';
+          originDomain = 'https://bradmax.com';
+        } else {
+          refererDomain = 'https://www.app.tdmax.com/';
+          originDomain = 'https://www.app.tdmax.com';
+        }
       } else if (hostname.includes('cloudfront.net') || hostname.includes('repretel.com') || hostname.includes('mediatiquestream.com')) {
         isMediatiqueSource = true;
         refererDomain = 'https://www.repretel.com/';
@@ -4685,6 +4729,13 @@ app.post('/api/emit', async (req, res) => {
               manualStopProcesses.delete(Number(process_id));
               return;
             }
+            // TELETICA URL (13): fallback unidireccional oficial → scraping.
+            // Si la fuente oficial cayó, cambiamos a scraping para el recovery
+            // y persistimos el modo. De scraping NUNCA se promueve a oficial.
+            if (process_id === '13' && getTeleticaSourceMode('13') === 'official') {
+              setTeleticaSourceMode('13', 'scraping');
+              sendLog('13', 'warn', '⚠️ Fuente OFICIAL Teletica falló — cambiando AUTOMÁTICAMENTE a modo SCRAPING para recovery');
+            }
             await autoRecoverChannel(process_id, channelId, channelName);
           });
         } else if (MANUAL_URL_PROCESSES.has(String(process_id)) || AUTO_INGEST_PROCESSES.has(String(process_id))) {
@@ -5651,8 +5702,13 @@ app.delete('/api/emit/files', (req, res) => {
 
 
 
+app.get('/api/teletica/source-mode', (req, res) => {
+  res.json({ mode: getTeleticaSourceMode('13') });
+});
+
 app.get('/api/status', (req, res) => {
   const { process_id } = req.query;
+
   
   if (process_id) {
     // Estado de un proceso específico
@@ -5665,6 +5721,8 @@ app.get('/api/status', (req, res) => {
       timestamp: new Date().toISOString()
     });
   } else {
+    // Cuando no se pide un process_id, también devolvemos el modo Teletica
+    // (usado por el frontend para sincronizar el toggle tras un fallback automático).
     // Estado de todos los procesos
     const allStatuses = {};
     for (let i = 0; i <= 20; i++) {

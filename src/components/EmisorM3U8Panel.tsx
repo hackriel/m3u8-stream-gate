@@ -534,6 +534,46 @@ export default function EmisorM3U8Panel() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [fetchingChannel, setFetchingChannel] = useState<number | null>(null);
+  // TELETICA URL (13): modo fuente. 'official' = URL directa Bradmax CDN
+  // (sin token); 'scraping' = TDMax. Default scraping (comportamiento histórico).
+  // Persistido en localStorage. El server flipa oficial→scraping si falla.
+  const TELETICA_OFFICIAL_M3U8 = 'https://cdn01.teletica.com/TeleticaLiveStream/Stream/playlist_dvr.m3u8';
+  const [teleticaMode, setTeleticaMode] = useState<'official' | 'scraping'>(() => {
+    try {
+      const v = localStorage.getItem('teletica13_source_mode');
+      return v === 'official' ? 'official' : 'scraping';
+    } catch {
+      return 'scraping';
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('teletica13_source_mode', teleticaMode); } catch {}
+    if (teleticaMode === 'official') {
+      // Auto-rellenar el input M3U8 del proceso 13 con la URL fija.
+      setProcesses(prev => {
+        const next = [...prev];
+        if (next[TELETICA_URL_INDEX] && next[TELETICA_URL_INDEX].m3u8 !== TELETICA_OFFICIAL_M3U8) {
+          next[TELETICA_URL_INDEX] = { ...next[TELETICA_URL_INDEX], m3u8: TELETICA_OFFICIAL_M3U8 };
+          return next;
+        }
+        return prev;
+      });
+    }
+  }, [teleticaMode]);
+  // Poll del modo en el server (refleja fallbacks automáticos oficial→scraping).
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const r = await fetch('/api/teletica/source-mode');
+        if (!r.ok) return;
+        const { mode } = await r.json();
+        if (mode === 'official' || mode === 'scraping') {
+          setTeleticaMode(prev => (prev !== mode ? mode : prev));
+        }
+      } catch {}
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
   const [outputProfiles, setOutputProfiles] = useState<Record<number, OutputProfile>>(() => {
     try {
       const parsed = JSON.parse(sessionStorage.getItem("emisor-output-profiles") || "{}");
@@ -1320,6 +1360,7 @@ export default function EmisorM3U8Panel() {
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString(),
           output_profile: selectedProfile,
+          ...(processIndex === TELETICA_URL_INDEX ? { source_mode: teleticaMode } : {}),
           ...(isM3uFileProcess && m3uPayload ? {
             // passthrough_mode: 'transcode' → usa el perfil estándar 720p CBR 2000k
             // (mismo que Disney 7 ID 0). Resuelve el "video crudo no va bien" en Xui/IPTV.
@@ -1786,7 +1827,47 @@ export default function EmisorM3U8Panel() {
                 )}
                 {!M3U_FILE_PROCESSES.has(processIndex) && (
                 <>
-                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && (
+                {processIndex === TELETICA_URL_INDEX && (
+                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
+                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                      Fuente Teletica
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTeleticaMode('official')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          teleticaMode === 'official'
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="URL directa Bradmax CDN (sin token, sin login)"
+                      >
+                        🏛️ Oficial (Bradmax)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTeleticaMode('scraping')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          teleticaMode === 'scraping'
+                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Login TDMax + wmsAuthSign (método histórico)"
+                      >
+                        🔐 Scraping (TDMax)
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      {teleticaMode === 'official'
+                        ? 'URL directa de la CDN de Teletica (Referer Bradmax). Si falla, el servidor cambia automáticamente a SCRAPING.'
+                        : 'Login TDMax + token de 60s. Si falla, NO promueve a oficial (solo manual).'}
+                    </p>
+                  </div>
+                )}
+                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
@@ -1827,7 +1908,7 @@ export default function EmisorM3U8Panel() {
                     }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    readOnly={PASTE_URL_PROCESSES.has(processIndex)}
+                    readOnly={PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official')}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
@@ -1837,7 +1918,7 @@ export default function EmisorM3U8Panel() {
                           : 'border-border'
                     }`}
                   />
-                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && (
+                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && (
                     <button
                       onClick={() => fetchChannelUrl(processIndex)}
                       disabled={fetchingChannel !== null}
