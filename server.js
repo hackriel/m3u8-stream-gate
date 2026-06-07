@@ -6168,6 +6168,15 @@ server.listen(PORT, () => {
           // TELETICA SRT (21), FOX+ SRT (22) y FOX SRT (23) son SRT-ingest desde Pi5: se relanzan abajo.
           if (pid === '12' || pid === '16' || pid === '18') continue;
 
+          // Si el usuario ya arrancó manualmente este canal mientras esperábamos
+          // los 8s de gracia, NO disparar el relaunch: mataría el FFmpeg recién
+          // nacido y haría un scrape redundante. Solo continuar si NO hay
+          // proceso vivo para este pid.
+          if (ffmpegProcesses.has(pid) || ffmpegProcesses.has(Number(pid))) {
+            sendLog(pid, 'info', `⏭️ Always-on omitido: ya hay emisión activa iniciada manualmente`);
+            continue;
+          }
+
           // Limpiar manualStop por si quedó marcado
           manualStopProcesses.delete(pid);
           manualStopProcesses.delete(Number(pid));
