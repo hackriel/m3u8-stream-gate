@@ -5704,6 +5704,13 @@ app.delete('/api/emit/files', (req, res) => {
 
 app.get('/api/status', (req, res) => {
   const { process_id } = req.query;
+
+  // Endpoint inline: modo actual de Teletica URL (13) — el frontend lo polea
+  // para reflejar fallbacks automáticos oficial→scraping.
+  if (String(process_id) === '__teletica_mode__') {
+    return res.json({ mode: getTeleticaSourceMode('13') });
+  }
+
   
   if (process_id) {
     // Estado de un proceso específico
