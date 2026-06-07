@@ -5703,6 +5703,10 @@ app.delete('/api/emit/files', (req, res) => {
 
 
 app.get('/api/status', (req, res) => {
+app.get('/api/teletica/source-mode', (req, res) => {
+  res.json({ mode: getTeleticaSourceMode('13') });
+});
+
   const { process_id } = req.query;
 
   
