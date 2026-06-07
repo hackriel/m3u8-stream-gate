@@ -1827,6 +1827,46 @@ export default function EmisorM3U8Panel() {
                 )}
                 {!M3U_FILE_PROCESSES.has(processIndex) && (
                 <>
+                {processIndex === TELETICA_URL_INDEX && (
+                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
+                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                      Fuente Teletica
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTeleticaMode('official')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          teleticaMode === 'official'
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="URL directa Bradmax CDN (sin token, sin login)"
+                      >
+                        🏛️ Oficial (Bradmax)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTeleticaMode('scraping')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          teleticaMode === 'scraping'
+                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Login TDMax + wmsAuthSign (método histórico)"
+                      >
+                        🔐 Scraping (TDMax)
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      {teleticaMode === 'official'
+                        ? 'URL directa de la CDN de Teletica (Referer Bradmax). Si falla, el servidor cambia automáticamente a SCRAPING.'
+                        : 'Login TDMax + token de 60s. Si falla, NO promueve a oficial (solo manual).'}
+                    </p>
+                  </div>
+                )}
                 {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
