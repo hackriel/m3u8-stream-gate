@@ -30,8 +30,19 @@ const BROWSER_HEADERS = {
   'x-app-version': '3.1.1',
 };
 
-// Login and return accessToken + deviceId
-async function loginAndGetToken(email: string, password: string): Promise<{ accessToken: string; deviceId: string }> {
+// Deterministic device-id derived from process_id. Must match server.js
+// getDeviceIdForProcess() so the same channel always uses the same TDMax device,
+// avoiding cross-invalidation between channels that share an account.
+async function deviceIdForProcess(processId: string | null | undefined): Promise<string> {
+  if (!processId) return 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+  const data = new TextEncoder().encode(`tdmax-device-v1-${processId}`);
+  const buf = await crypto.subtle.digest('SHA-1', data);
+  const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `${hash.slice(0,8)}-${hash.slice(8,12)}-${hash.slice(12,16)}-${hash.slice(16,20)}-${hash.slice(20,32)}`;
+}
+
+// Login and return accessToken
+async function loginAndGetToken(email: string, password: string): Promise<{ accessToken: string }> {
   const loginResp = await fetch(
     `${BASE_URL}/web/services/v3/external/login?r=${RESELLER_ID}`,
     {
@@ -57,14 +68,11 @@ async function loginAndGetToken(email: string, password: string): Promise<{ acce
   if (!accessToken) {
     throw new Error('No se obtuvo token de acceso');
   }
-
-  // Usar deviceId fijo para no crear sesiones fantasma en TDMax
-  const deviceId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
-  return { accessToken, deviceId };
+  return { accessToken };
 }
 
 // Use an existing token to get stream URL for a channel
-async function getStreamUrl(channelId: string, accessToken: string, deviceId: string): Promise<string> {
+async function getStreamUrl(channelId: string, accessToken: string, deviceId: string, deviceName: string): Promise<string> {
   // TDMax web app now uses dashed/snake_case query params. The old camelCase
   // names can return code 628: "redirect url is null or empty".
   const lbParams = new URLSearchParams({
@@ -73,7 +81,7 @@ async function getStreamUrl(channelId: string, accessToken: string, deviceId: st
     access_token: accessToken,
     country_code: 'CR',
     doNotUseRedirect: 'true',
-    'device-name': 'web',
+    'device-name': deviceName,
     'device-type': 'web',
   });
   const lbUrl = `${BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?${lbParams.toString()}`;
@@ -122,6 +130,9 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const channelId = body.channel_id;
     const account = body.account === 'pi' ? 'pi' : 'default';
+    const processId = body.process_id !== undefined && body.process_id !== null
+      ? String(body.process_id)
+      : null;
 
     const email = account === 'pi'
       ? Deno.env.get('TDMAX_EMAIL_PI')
@@ -146,8 +157,10 @@ Deno.serve(async (req) => {
     }
 
     const channelName = CHANNEL_MAP[channelId] || channelId;
-    const { accessToken, deviceId } = await loginAndGetToken(email, password);
-    const streamUrl = await getStreamUrl(channelId, accessToken, deviceId);
+    const { accessToken } = await loginAndGetToken(email, password);
+    const deviceId = await deviceIdForProcess(processId);
+    const deviceName = processId ? `web-p${processId}` : 'web';
+    const streamUrl = await getStreamUrl(channelId, accessToken, deviceId, deviceName);
 
     return new Response(
       JSON.stringify({ success: true, url: streamUrl, channel: channelName }),
