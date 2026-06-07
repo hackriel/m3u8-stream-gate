@@ -1908,7 +1908,7 @@ export default function EmisorM3U8Panel() {
                     }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    readOnly={PASTE_URL_PROCESSES.has(processIndex)}
+                    readOnly={PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official')}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
@@ -1918,7 +1918,7 @@ export default function EmisorM3U8Panel() {
                           : 'border-border'
                     }`}
                   />
-                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && (
+                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && (
                     <button
                       onClick={() => fetchChannelUrl(processIndex)}
                       disabled={fetchingChannel !== null}
