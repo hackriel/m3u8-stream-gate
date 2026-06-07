@@ -1862,8 +1862,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
 };
 
 // Scraping vía Edge Function (fallback si el local no está disponible)
-const scrapeStreamUrlRemote = async (channelId, channelName, { account = 'default' } = {}) => {
-  sendLog('system', 'info', `🔄 Scraping REMOTO ${channelName} [cuenta ${account}]: obteniendo URL via Edge Function...`);
+const scrapeStreamUrlRemote = async (channelId, channelName, { account = 'default', processId = null } = {}) => {
+  sendLog('system', 'info', `🔄 Scraping REMOTO ${channelName} [cuenta ${account}${processId !== null ? ` pid:${processId}` : ''}]: obteniendo URL via Edge Function...`);
   
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-channel`, {
@@ -1874,7 +1874,7 @@ const scrapeStreamUrlRemote = async (channelId, channelName, { account = 'defaul
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
         'apikey': SUPABASE_ANON_KEY,
       },
-      body: JSON.stringify({ mode: 'full', channel_id: channelId, account }),
+      body: JSON.stringify({ mode: 'full', channel_id: channelId, account, process_id: processId }),
     });
     const data = await resp.json();
     
@@ -1901,7 +1901,7 @@ const scrapeStreamUrl = async (channelId, channelName, opts = {}) => {
   
   // Fallback: Edge Function (NOTA: la edge function NO usa proxy; si Tigo requiere proxy
   // estricto, este fallback puede fallar y será mejor que el local-via-proxy reintente)
-  return await scrapeStreamUrlRemote(channelId, channelName, { account: opts.account || 'default' });
+  return await scrapeStreamUrlRemote(channelId, channelName, { account: opts.account || 'default', processId: opts.processId ?? null });
 };
 
 const scrapeStreamUrlWithRetries = async (process_id, channelId, channelName) => {
@@ -1911,7 +1911,7 @@ const scrapeStreamUrlWithRetries = async (process_id, channelId, channelName) =>
 
   for (let attempt = 1; attempt <= RECOVERY_SCRAPE_ATTEMPTS; attempt++) {
     try {
-      const result = await scrapeStreamUrl(channelId, channelName, { useProxy, account });
+      const result = await scrapeStreamUrl(channelId, channelName, { useProxy, account, processId: process_id });
 
       if (result?.url) {
         if (attempt > 1) {
@@ -2602,7 +2602,7 @@ app.post('/api/local-scrape', async (req, res) => {
     const channelName = CHANNEL_MAP[process_id]?.channelName || `Canal ${channel_id.substring(0, 8)}`;
     const useProxy = PROXY_PROCESSES.has(String(process_id));
     const account = accountForProcess(process_id);
-    const result = await scrapeStreamUrlLocal(channel_id, channelName, { useProxy, account });
+    const result = await scrapeStreamUrlLocal(channel_id, channelName, { useProxy, account, processId: process_id });
     
     if (!result.url) {
       return res.json({ success: false, error: result.error || 'No se obtuvo URL' });
