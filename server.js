@@ -6217,6 +6217,22 @@ server.listen(PORT, () => {
         });
     }
 
+    // ====== Cargar modo Teletica URL (13) desde DB para sobrevivir reinicios ======
+    (async () => {
+      try {
+        const { data: row } = await supabase
+          .from('emission_processes')
+          .select('source_mode')
+          .eq('id', 13)
+          .maybeSingle();
+        const persisted = row?.source_mode === 'official' ? 'official' : 'scraping';
+        teleticaSourceMode.set('13', persisted);
+        sendLog('13', 'info', `🎛️ Modo Teletica restaurado desde DB: ${persisted.toUpperCase()}`);
+      } catch (err) {
+        console.error('Error cargando teletica source_mode desde DB:', err.message);
+      }
+    })();
+
     // ====== RECUPERACIÓN AL ARRANCAR: levantar canales con always_on=true ======
     // Espera 8s para que el servidor esté completamente listo y luego relanza
     // todas las emisiones marcadas como "Encendido siempre".
