@@ -4588,7 +4588,7 @@ app.post('/api/emit', async (req, res) => {
 
         // === CIRCUIT BREAKER: registrar fallo y verificar si estamos en tormenta ===
         recordFailure(process_id);
-        if (isCircuitBroken(process_id)) {
+        if (shouldCircuitBreakProcess(process_id)) {
           sendLog(process_id, 'error', `🔴 CIRCUIT BREAKER: ${CIRCUIT_BREAKER_MAX_FAILURES}+ caídas en ${CIRCUIT_BREAKER_WINDOW_MS / 60000} min. Recovery DETENIDO para evitar saturación del servidor.`);
           if (supabase) {
             await supabase.from('emission_processes').update({
