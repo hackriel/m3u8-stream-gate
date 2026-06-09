@@ -4389,6 +4389,10 @@ app.post('/api/emit', async (req, res) => {
 
     // Manejar cierre del proceso
     ffmpegProcess.on('close', async (code, signal) => {
+      if (ignoredLateCloseProcesses.has(ffmpegProcess)) {
+        sendLog(process_id, 'info', `ℹ️ Close tardío de FFmpeg reemplazado por watchdog (pid ${ffmpegProcess.pid}) ignorado`);
+        return;
+      }
       // Detener keep-alive de Tigo (si estaba activo) — evita fugas de timers
       stopTigoKeepAlive(process_id);
       // Si Tigo BUFFER estaba activo, matar también la ETAPA 2 (transcoder local)
