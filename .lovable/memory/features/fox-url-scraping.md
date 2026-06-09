@@ -7,4 +7,5 @@ type: feature
 - Misma lógica que FOX+ URL (24) / TELETICA URL (13): hostname `*.teletica.com` activa `isTeleticaSource` → modo VLC-like (sin `-reconnect_at_eof`) + Variant Pinning + headers TDMax.
 - Slug HLS: `fox` (compartido con FOX SRT id 23) → mutex por slug + mutex explícito en frontend.
 - Salida pública: `http://167.17.69.116:3001/live/fox/playlist.m3u8`.
+- Recovery: NO usar Quick Retry con misma URL porque `wmsAuthSign` expira/queda 404 tras horas; ID 25 va directo a scraping fresco. Si watchdog detecta arranque colgado sin primer frame, mata el FFmpeg viejo, ignora su close tardío y encola scraping fresco inmediato. Circuit breaker no debe cortar FOX URL mientras `always_on` está activo.
 - Para encontrar IDs nuevos: login a `https://cf.streann.tech/web/services/v3/external/login?r=61316705e4b0295f87dae396` y GET `/web/services/v3/user/channels/active?r=...&dt=web&id=<uid>&ln=es` con `Authorization: Bearer <accessToken>`.
