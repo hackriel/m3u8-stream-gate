@@ -3515,7 +3515,7 @@ app.post('/api/emit', async (req, res) => {
     // Saneo de timestamps para evitar audio repetido / saltos hacia atrás
     // y reloads del player por EXT-X-DISCONTINUITY.
     // Canal 6 URL (15) requiere el mismo saneo que los scrapeados, pero con salida 30fps.
-    const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '15', '17', '18'].includes(String(process_id));
+    const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '15', '17', '18', '24', '25'].includes(String(process_id));
     const fflags = isHlsTimestampFix
       ? '+genpts+discardcorrupt+igndts'
       : (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
