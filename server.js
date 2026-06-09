@@ -1663,6 +1663,25 @@ setInterval(() => {
         console.error(`Watchdog start: error matando proceso ${processId}:`, e);
       }
 
+      if (['24', '25'].includes(String(processId)) && CHANNEL_MAP[String(processId)]) {
+        const { channelId, channelName } = CHANNEL_MAP[String(processId)];
+        ignoredLateCloseProcesses.add(processData.process);
+        ffmpegProcesses.delete(processId);
+        lastFrameTime.delete(processId);
+        emissionStatuses.set(processId, 'idle');
+        scrapeSessionCache.delete(String(processId));
+        quickRetryState.delete(String(processId));
+        enqueueRecovery(processId, async () => {
+          await sleep(1500);
+          if (manualStopProcesses.has(String(processId)) || manualStopProcesses.has(Number(processId))) {
+            sendLog(processId, 'info', `🛑 Recovery FOX cancelado: parada manual detectada`);
+            return;
+          }
+          sendLog(processId, 'warn', `🦊 ${channelName}: arranque colgado, forzando scraping fresco inmediato`);
+          await autoRecoverChannel(String(processId), channelId, channelName);
+        });
+      }
+
       continue;
     }
     
