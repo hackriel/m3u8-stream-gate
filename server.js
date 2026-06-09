@@ -565,6 +565,7 @@ const autoRecoveryInProgress = new Map(); // Map<processId(string), boolean>
 const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hacer auto-recovery)
 const nightRestStoppedProcesses = new Set(); // Procesos apagados por descanso nocturno
 const detectedErrors = new Map(); // Map<processId, { type, reason }> — último error detectado por stderr
+const ignoredLateCloseProcesses = new WeakSet(); // FFmpeg viejos ya manejados por watchdog fallback
 
 // === CIRCUIT BREAKER: evita loops infinitos de recovery que saturan el servidor ===
 // Registra timestamps de cada fallo para detectar "tormenta de caídas"
@@ -591,6 +592,14 @@ const recordFailure = (processId) => {
 
 const resetCircuitBreaker = (processId) => {
   failureTimestamps.delete(String(processId));
+};
+
+const shouldCircuitBreakProcess = (processId) => {
+  // FOX URL/FOX+ URL usan tokens TDMax cortos y pueden necesitar varios re-scrapes
+  // después de un 404 real del CDN. No cortar el auto-recovery por circuito: si
+  // always_on está activo, debe seguir intentando con URL fresca.
+  if (['24', '25'].includes(String(processId))) return false;
+  return isCircuitBroken(processId);
 };
 
 // === CONCURRENCY LIMITER: máx 2 recoveries simultáneos para no saturar CPU/red ===
@@ -1546,9 +1555,10 @@ const scrapeSessionCache = new Map(); // Map<processId, { cookies, accessToken, 
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 // Canales scrapeados desde TDMax con wmsAuthSign de vida corta:
-// FUTV URL (11), Teletica URL (13) y TDMAS 1 URL (14). Si caen tras horas,
-// reusar la misma URL solo provoca 403/404. Deben ir directo a scraping fresco.
-const QUICK_RETRY_DISABLED_PROCESSES = new Set(['11', '13', '14']);
+// FUTV URL (11), Teletica URL (13), TDMAS 1 URL (14), FOX+ URL (24) y FOX URL (25).
+// Si caen tras horas, reusar la misma URL solo provoca 403/404/stall. Deben ir
+// directo a scraping fresco para obtener token + cookies nuevos.
+const QUICK_RETRY_DISABLED_PROCESSES = new Set(['11', '13', '14', '24', '25']);
 
 // Última configuración útil conocida para no depender 100% de la base en un recovery
 const lastKnownStreamState = new Map(); // Map<processId, { source_m3u8, target_rtmp, updatedAt }>
@@ -1651,6 +1661,25 @@ setInterval(() => {
         processData.process.kill('SIGKILL');
       } catch (e) {
         console.error(`Watchdog start: error matando proceso ${processId}:`, e);
+      }
+
+      if (['24', '25'].includes(String(processId)) && CHANNEL_MAP[String(processId)]) {
+        const { channelId, channelName } = CHANNEL_MAP[String(processId)];
+        ignoredLateCloseProcesses.add(processData.process);
+        ffmpegProcesses.delete(processId);
+        lastFrameTime.delete(processId);
+        emissionStatuses.set(processId, 'idle');
+        scrapeSessionCache.delete(String(processId));
+        quickRetryState.delete(String(processId));
+        enqueueRecovery(processId, async () => {
+          await sleep(1500);
+          if (manualStopProcesses.has(String(processId)) || manualStopProcesses.has(Number(processId))) {
+            sendLog(processId, 'info', `🛑 Recovery FOX cancelado: parada manual detectada`);
+            return;
+          }
+          sendLog(processId, 'warn', `🦊 ${channelName}: arranque colgado, forzando scraping fresco inmediato`);
+          await autoRecoverChannel(String(processId), channelId, channelName);
+        });
       }
 
       continue;
@@ -2274,6 +2303,7 @@ const detectAndCategorizeError = (output, processId) => {
   
   if (output.includes('Invalid data found') || 
       output.includes('Server returned 404') ||
+      output.includes('HTTP error 404') ||
       output.includes('Server returned 403') ||
       output.includes('HTTP error 403') ||
       output.includes('Server returned 5') ||
@@ -2291,6 +2321,7 @@ const detectAndCategorizeError = (output, processId) => {
     // por si FFmpeg termina cerrando el proceso después de agotar sus reintentos internos.
     if (isManualProcess && (
       output.includes('Server returned 404') || 
+      output.includes('HTTP error 404') ||
       output.includes('Server returned 403') || 
       output.includes('HTTP error 403') || 
       (isEOF && elapsed > 10)
@@ -3484,7 +3515,7 @@ app.post('/api/emit', async (req, res) => {
     // Saneo de timestamps para evitar audio repetido / saltos hacia atrás
     // y reloads del player por EXT-X-DISCONTINUITY.
     // Canal 6 URL (15) requiere el mismo saneo que los scrapeados, pero con salida 30fps.
-    const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '15', '17', '18'].includes(String(process_id));
+    const isHlsTimestampFix = ['1', '3', '4', '5', '11', '13', '14', '15', '17', '18', '24', '25'].includes(String(process_id));
     const fflags = isHlsTimestampFix
       ? '+genpts+discardcorrupt+igndts'
       : (isUnivisionLikeSource || isAkamaiSource) ? '+genpts+discardcorrupt' : '+genpts';
@@ -4360,6 +4391,10 @@ app.post('/api/emit', async (req, res) => {
 
     // Manejar cierre del proceso
     ffmpegProcess.on('close', async (code, signal) => {
+      if (ignoredLateCloseProcesses.has(ffmpegProcess)) {
+        sendLog(process_id, 'info', `ℹ️ Close tardío de FFmpeg reemplazado por watchdog (pid ${ffmpegProcess.pid}) ignorado`);
+        return;
+      }
       // Detener keep-alive de Tigo (si estaba activo) — evita fugas de timers
       stopTigoKeepAlive(process_id);
       // Si Tigo BUFFER estaba activo, matar también la ETAPA 2 (transcoder local)
@@ -4555,7 +4590,7 @@ app.post('/api/emit', async (req, res) => {
 
         // === CIRCUIT BREAKER: registrar fallo y verificar si estamos en tormenta ===
         recordFailure(process_id);
-        if (isCircuitBroken(process_id)) {
+        if (shouldCircuitBreakProcess(process_id)) {
           sendLog(process_id, 'error', `🔴 CIRCUIT BREAKER: ${CIRCUIT_BREAKER_MAX_FAILURES}+ caídas en ${CIRCUIT_BREAKER_WINDOW_MS / 60000} min. Recovery DETENIDO para evitar saturación del servidor.`);
           if (supabase) {
             await supabase.from('emission_processes').update({
