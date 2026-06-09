@@ -565,6 +565,7 @@ const autoRecoveryInProgress = new Map(); // Map<processId(string), boolean>
 const manualStopProcesses = new Set(); // Procesos detenidos manualmente (no hacer auto-recovery)
 const nightRestStoppedProcesses = new Set(); // Procesos apagados por descanso nocturno
 const detectedErrors = new Map(); // Map<processId, { type, reason }> — último error detectado por stderr
+const ignoredLateCloseProcesses = new WeakSet(); // FFmpeg viejos ya manejados por watchdog fallback
 
 // === CIRCUIT BREAKER: evita loops infinitos de recovery que saturan el servidor ===
 // Registra timestamps de cada fallo para detectar "tormenta de caídas"
@@ -591,6 +592,14 @@ const recordFailure = (processId) => {
 
 const resetCircuitBreaker = (processId) => {
   failureTimestamps.delete(String(processId));
+};
+
+const shouldCircuitBreakProcess = (processId) => {
+  // FOX URL/FOX+ URL usan tokens TDMax cortos y pueden necesitar varios re-scrapes
+  // después de un 404 real del CDN. No cortar el auto-recovery por circuito: si
+  // always_on está activo, debe seguir intentando con URL fresca.
+  if (['24', '25'].includes(String(processId))) return false;
+  return isCircuitBroken(processId);
 };
 
 // === CONCURRENCY LIMITER: máx 2 recoveries simultáneos para no saturar CPU/red ===
