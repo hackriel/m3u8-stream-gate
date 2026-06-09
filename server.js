@@ -1555,9 +1555,10 @@ const scrapeSessionCache = new Map(); // Map<processId, { cookies, accessToken, 
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
 // Canales scrapeados desde TDMax con wmsAuthSign de vida corta:
-// FUTV URL (11), Teletica URL (13) y TDMAS 1 URL (14). Si caen tras horas,
-// reusar la misma URL solo provoca 403/404. Deben ir directo a scraping fresco.
-const QUICK_RETRY_DISABLED_PROCESSES = new Set(['11', '13', '14']);
+// FUTV URL (11), Teletica URL (13), TDMAS 1 URL (14), FOX+ URL (24) y FOX URL (25).
+// Si caen tras horas, reusar la misma URL solo provoca 403/404/stall. Deben ir
+// directo a scraping fresco para obtener token + cookies nuevos.
+const QUICK_RETRY_DISABLED_PROCESSES = new Set(['11', '13', '14', '24', '25']);
 
 // Última configuración útil conocida para no depender 100% de la base en un recovery
 const lastKnownStreamState = new Map(); // Map<processId, { source_m3u8, target_rtmp, updatedAt }>
