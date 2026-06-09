@@ -2303,6 +2303,7 @@ const detectAndCategorizeError = (output, processId) => {
   
   if (output.includes('Invalid data found') || 
       output.includes('Server returned 404') ||
+      output.includes('HTTP error 404') ||
       output.includes('Server returned 403') ||
       output.includes('HTTP error 403') ||
       output.includes('Server returned 5') ||
@@ -2320,6 +2321,7 @@ const detectAndCategorizeError = (output, processId) => {
     // por si FFmpeg termina cerrando el proceso después de agotar sus reintentos internos.
     if (isManualProcess && (
       output.includes('Server returned 404') || 
+      output.includes('HTTP error 404') ||
       output.includes('Server returned 403') || 
       output.includes('HTTP error 403') || 
       (isEOF && elapsed > 10)
