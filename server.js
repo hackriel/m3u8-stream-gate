@@ -6456,6 +6456,21 @@ server.listen(PORT, () => {
                   await autoRecoverChannel('17', channelId, 'FUTV ALTERNO');
                 }
               }
+            } else if (pid === '26') {
+              // FOX+ ALTERNO: re-scrape con player_url persistido (mismo patrón que 17)
+              const playerUrl = row.player_url;
+              if (!playerUrl) {
+                sendLog('26', 'warn', `⚠️ Always-on activo pero no hay player_url guardada (volver a extraer)`);
+              } else {
+                const m = String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i);
+                const channelId = m ? m[1] : null;
+                if (!channelId) {
+                  sendLog('26', 'error', `❌ player_url inválida: ${playerUrl}`);
+                } else {
+                  sendLog('26', 'info', `🔁 Always-on: re-scrapeando FOX+ ALTERNO con player_url guardada...`);
+                  await autoRecoverChannel('26', channelId, 'FOX+ ALTERNO');
+                }
+              }
             } else {
               // Canales manuales (ej. ID 15 CANAL 6 URL): usar última URL guardada
               const sourceUrl = row.source_url || row.m3u8;
@@ -6565,6 +6580,16 @@ server.listen(PORT, () => {
               } else {
                 sendLog('17', 'info', `🔄 Refresh 3:00 CR: re-scrapeando FUTV ALTERNO con player_url guardada...`);
                 await autoRecoverChannel('17', channelId, 'FUTV ALTERNO');
+              }
+            } else if (pid === '26') {
+              const playerUrl = row.player_url;
+              const m = playerUrl ? (String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i)) : null;
+              const channelId = m ? m[1] : null;
+              if (!channelId) {
+                sendLog('26', 'error', `❌ Refresh 26: player_url inválida o ausente, omitiendo`);
+              } else {
+                sendLog('26', 'info', `🔄 Refresh 3:00 CR: re-scrapeando FOX+ ALTERNO con player_url guardada...`);
+                await autoRecoverChannel('26', channelId, 'FOX+ ALTERNO');
               }
             } else {
               const sourceUrl = row.source_url || row.m3u8;
