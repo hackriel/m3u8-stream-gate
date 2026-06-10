@@ -4811,14 +4811,72 @@ app.post('/api/emit', async (req, res) => {
               manualStopProcesses.delete(Number(process_id));
               return;
             }
-            // TELETICA URL (13): fallback unidireccional oficial → scraping.
-            // Si la fuente oficial cayó, cambiamos a scraping para el recovery
-            // y persistimos el modo. De scraping NUNCA se promueve a oficial.
+            // TELETICA URL (13): 2 reintentos en OFICIAL antes de cambiar a SCRAPING.
+            //   - Si runtime > 60s, se considera "estable" → reset del contador.
+            //   - Mientras failures < 2: re-emitir con URL oficial (Bradmax).
+            //   - Al alcanzar 2 reintentos fallidos: flip a SCRAPING para el recovery
+            //     (fallback unidireccional; de scraping NUNCA se promueve a oficial).
             if (process_id === '13' && getTeleticaSourceMode('13') === 'official') {
+              if (runtime > 60000) teleticaOfficialFailures.set('13', 0);
+              const failed = (teleticaOfficialFailures.get('13') || 0) + 1;
+              teleticaOfficialFailures.set('13', failed);
+              if (failed <= TELETICA_OFFICIAL_MAX_RETRIES) {
+                sendLog('13', 'warn', `🔁 Fuente OFICIAL Teletica falló — reintento ${failed}/${TELETICA_OFFICIAL_MAX_RETRIES} con Bradmax CDN antes de cambiar a SCRAPING...`);
+                try {
+                  let targetRtmp = 'hls-local';
+                  if (supabase) {
+                    const { data: rowTel } = await supabase
+                      .from('emission_processes').select('rtmp').eq('id', 13).maybeSingle();
+                    targetRtmp = rowTel?.rtmp || 'hls-local';
+                  }
+                  await fetch(`http://localhost:${PORT}/api/emit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      source_m3u8: TELETICA_OFFICIAL_URL,
+                      target_rtmp: targetRtmp,
+                      process_id: '13',
+                      is_recovery: true,
+                    }),
+                  });
+                } catch (e) {
+                  sendLog('13', 'error', `❌ Reintento OFICIAL falló: ${e.message}`);
+                }
+                return; // No continuar al autoRecoverChannel (scraping) este ciclo.
+              }
+              // 2 reintentos agotados → flip a scraping y continuar con recovery normal.
               setTeleticaSourceMode('13', 'scraping');
-              sendLog('13', 'warn', '⚠️ Fuente OFICIAL Teletica falló — cambiando AUTOMÁTICAMENTE a modo SCRAPING para recovery');
+              teleticaOfficialFailures.set('13', 0);
+              sendLog('13', 'warn', `⚠️ Fuente OFICIAL Teletica falló ${TELETICA_OFFICIAL_MAX_RETRIES}+1 veces consecutivas — cambiando AUTOMÁTICAMENTE a modo SCRAPING para recovery`);
             }
             await autoRecoverChannel(process_id, channelId, channelName);
+          });
+        } else if (process_id === '26' && (() => {
+          // FOX+ ALTERNO: re-scrape con player_url guardado.
+          return true;
+        })()) {
+          sendLog('26', 'warn', `🔄 FOX+ ALTERNO caído (código ${code}) - Iniciando recovery con player_url guardado...`);
+          enqueueRecovery('26', async () => {
+            await sleep(500);
+            if (manualStopProcesses.has('26') || manualStopProcesses.has(26)) {
+              sendLog('26', 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
+              manualStopProcesses.delete('26'); manualStopProcesses.delete(26);
+              return;
+            }
+            try {
+              const { data: row26 } = await supabase
+                .from('emission_processes').select('player_url').eq('id', 26).maybeSingle();
+              const playerUrl = row26?.player_url;
+              const m = playerUrl ? (String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i)) : null;
+              const channelId = m ? m[1] : null;
+              if (!channelId) {
+                sendLog('26', 'error', `❌ Recovery 26: player_url inválida o ausente, no se puede re-scrapear`);
+                return;
+              }
+              await autoRecoverChannel('26', channelId, 'FOX+ ALTERNO');
+            } catch (e) {
+              sendLog('26', 'error', `❌ Recovery FOX+ ALTERNO falló: ${e.message}`);
+            }
           });
         } else if (MANUAL_URL_PROCESSES.has(String(process_id)) || AUTO_INGEST_PROCESSES.has(String(process_id))) {
           // Procesos manuales (Disney 7, Disney 8, Canal 6): reutilizar la misma URL M3U8 guardada en DB
