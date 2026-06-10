@@ -5693,6 +5693,48 @@ app.post('/api/emit/restart', async (req, res) => {
 
     sendLog(process_id, 'info', `🎭 Arrancando con User-Agent rotativo nuevo...`);
 
+    // 5a) Si es un canal scrapeado (TDMax), la URL guardada lleva un token
+    //     wmsAuthSign con validez de 1 minuto. Reusarla siempre cuelga al
+    //     FFmpeg (no recibe primer frame). Forzar scraping fresco vía
+    //     autoRecoverChannel para obtener token nuevo.
+    const isTeleticaOfficialMode = process_id === '13' && (teleticaSourceMode.get(process_id) === 'official');
+    if (CHANNEL_MAP[process_id] && !isTeleticaOfficialMode) {
+      const { channelId, channelName } = CHANNEL_MAP[process_id];
+      sendLog(process_id, 'info', `🔄 Reinicio: forzando scraping fresco (token TDMax expira en 60s)`);
+      autoRecoveryInProgress.delete(process_id);
+      recoveryAttempts.set(process_id, 0);
+      autoRecoverChannel(process_id, channelId, channelName).catch(e => {
+        sendLog(process_id, 'error', `❌ Reinicio (scraping fresco) falló: ${e.message}`);
+      });
+      sendLog(process_id, 'success', `✅ Reinicio en caliente disparado (scraping fresco en curso)`);
+      return res.json({ success: true, message: 'Reinicio con scraping fresco en curso' });
+    }
+
+    // 5b) FUTV ALTERNO (17) / FOX+ ALTERNO (26): re-scrape con player_url guardada.
+    if ((process_id === '17' || process_id === '26') && supabase) {
+      const { data: rowAlt } = await supabase
+        .from('emission_processes')
+        .select('player_url')
+        .eq('id', numericProcessId)
+        .maybeSingle();
+      const playerUrl = rowAlt?.player_url;
+      const channelName = process_id === '17' ? 'FUTV ALTERNO' : 'FOX+ ALTERNO';
+      const m = playerUrl ? (String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i)) : null;
+      const channelId = m ? m[1] : null;
+      if (!channelId) {
+        sendLog(process_id, 'error', `❌ Reinicio ${channelName}: no hay player_url guardada válida`);
+        return res.status(400).json({ error: 'Sin player_url guardada para reiniciar' });
+      }
+      autoRecoveryInProgress.delete(process_id);
+      recoveryAttempts.set(process_id, 0);
+      sendLog(process_id, 'info', `🔄 Reinicio: re-scrapeando ${channelName} con player_url guardada`);
+      autoRecoverChannel(process_id, channelId, channelName).catch(e => {
+        sendLog(process_id, 'error', `❌ Reinicio (re-scrape) falló: ${e.message}`);
+      });
+      sendLog(process_id, 'success', `✅ Reinicio en caliente disparado (re-scrape en curso)`);
+      return res.json({ success: true, message: 'Reinicio con re-scrape en curso' });
+    }
+
     // 5) Re-disparar /api/emit internamente (mismo proceso, sin HTTP loop real).
     //    Para esto hacemos una llamada HTTP local al propio servidor.
     const port = process.env.PORT || 3000;
