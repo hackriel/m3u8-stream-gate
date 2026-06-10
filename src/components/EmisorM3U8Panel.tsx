@@ -1869,7 +1869,7 @@ export default function EmisorM3U8Panel() {
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                       {teleticaMode === 'official'
-                        ? 'URL directa de la CDN de Teletica (Referer Bradmax). Si falla, el servidor cambia automáticamente a SCRAPING.'
+                        ? 'URL directa de la CDN de Teletica (Referer Bradmax). Si falla, el servidor reintenta hasta 2 veces más con la URL oficial y, si sigue fallando, cambia automáticamente a SCRAPING.'
                         : 'Login TDMax + token de 60s. Si falla, NO promueve a oficial (solo manual).'}
                     </p>
                   </div>
