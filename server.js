@@ -4851,10 +4851,8 @@ app.post('/api/emit', async (req, res) => {
             }
             await autoRecoverChannel(process_id, channelId, channelName);
           });
-        } else if (process_id === '26' && (() => {
-          // FOX+ ALTERNO: re-scrape con player_url guardado.
-          return true;
-        })()) {
+        } else if (process_id === '26') {
+          // FOX+ ALTERNO: re-scrape con player_url guardado (mismo patrón que FUTV ALTERNO/17).
           sendLog('26', 'warn', `🔄 FOX+ ALTERNO caído (código ${code}) - Iniciando recovery con player_url guardado...`);
           enqueueRecovery('26', async () => {
             await sleep(500);
