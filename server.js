@@ -598,7 +598,8 @@ const shouldCircuitBreakProcess = (processId) => {
   // FOX URL/FOX+ URL usan tokens TDMax cortos y pueden necesitar varios re-scrapes
   // después de un 404 real del CDN. No cortar el auto-recovery por circuito: si
   // always_on está activo, debe seguir intentando con URL fresca.
-  if (['24', '25'].includes(String(processId))) return false;
+  // FOX+ ALTERNO (26) usa el mismo mecanismo (player_url eventual + scraping fresco).
+  if (['24', '25', '26'].includes(String(processId))) return false;
   return isCircuitBroken(processId);
 };
 
@@ -666,7 +667,7 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25']);
+const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 // FUTV (11), FUTV ALTERNO (17) y FUTV SRT (18) comparten slug 'futv' a propósito:
 // los 3 emiten al MISMO destino HLS local (/live/futv/playlist.m3u8) por métodos distintos
@@ -677,9 +678,9 @@ const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '
 // distintos (SRT desde OBS vs M3U passthrough). Mutuamente excluyentes.
 // CANAL 6 URL (15) y CANAL 6 SRT (20) comparten slug 'Canal6' (URL CDN vs ingest SRT desde OBS).
 // Disney 7 (ID 0) — M3U file passthrough con perfil VLC-like — también emite al slug 'Disney7'.
-// FOX+ URL (24) y FOX+ SRT (22) comparten slug 'foxmas' → mutex automático por slug HLS.
+// FOX+ URL (24), FOX+ SRT (22) y FOX+ ALTERNO (26) comparten slug 'foxmas' → mutex automático por slug HLS.
 // FOX URL (25) y FOX SRT (23) comparten slug 'fox' → mutex automático por slug HLS.
-const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox', '24': 'foxmas', '25': 'fox' };
+const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox', '24': 'foxmas', '25': 'fox', '26': 'foxmas' };
 
 // ───────────────────────────────────────────────────────────────────────
 // TELETICA URL (ID 13) — selector de fuente: 'official' | 'scraping'
@@ -697,6 +698,12 @@ const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teleti
 // ───────────────────────────────────────────────────────────────────────
 const TELETICA_OFFICIAL_URL = 'https://cdn01.teletica.com/TeleticaLiveStream/Stream/playlist_dvr.m3u8';
 const teleticaSourceMode = new Map(); // process_id (string) -> 'official' | 'scraping'
+// Contador de caídas consecutivas en modo OFICIAL Teletica (pid 13).
+// Permite reintentar 2 veces con la URL oficial antes de cambiar a SCRAPING.
+// Se resetea cuando una emisión oficial sostiene >60s o cuando se vuelve a
+// seleccionar manualmente el modo.
+const teleticaOfficialFailures = new Map(); // pid -> count
+const TELETICA_OFFICIAL_MAX_RETRIES = 2;
 const getTeleticaSourceMode = (pid) => (teleticaSourceMode.get(String(pid)) === 'official' ? 'official' : 'scraping');
 const setTeleticaSourceMode = (pid, mode) => {
   const m = mode === 'official' ? 'official' : 'scraping';
@@ -759,7 +766,7 @@ const PROXY_PROCESSES = new Set();
 // IDs que deben usar la SEGUNDA cuenta TDMax (info@media.cr, la del Raspberry)
 // en vez de la cuenta principal (arlopfa). Evita exceder el cupo de devices
 // permitidos por TDMax en una sola cuenta.
-const PI_ACCOUNT_PROCESSES = new Set(['24', '25']); // FOX+ URL, FOX URL
+const PI_ACCOUNT_PROCESSES = new Set(['24', '25', '26']); // FOX+ URL, FOX URL, FOX+ ALTERNO
 const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
 const getTdmaxCreds = (account) => {
   if (account === 'pi') {
