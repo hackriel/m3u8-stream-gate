@@ -36,6 +36,49 @@ const FOX_SRT_INDEX = 23;    // FOX SRT:  ingest SRT desde Pi5 por puerto 9006
 const FOXMAS_URL_INDEX = 24; // FOX+ URL: scraping TDMax vía edge function (mismo patrón que TELETICA URL)
 const FOX_URL_INDEX = 25;    // FOX URL: scraping TDMax vía edge function (canal FOX, mismo patrón que FOX+ URL)
 const FOXMAS_ALTERNO_INDEX = 26; // FOX+ ALTERNO: URL eventual pegada (mismo patrón que FUTV ALTERNO, slug 'foxmas')
+
+// Procesos que usan la cuenta TDMax 'pi' (info@media.cr) en vez de la principal.
+// Debe coincidir con PI_ACCOUNT_PROCESSES en server.js.
+const PI_ACCOUNT_PROCESSES = new Set<number>([24, 25, 26]);
+
+// Scraping con fallback: intenta /api/local-scrape (VPS, token con IP correcta).
+// Si no responde JSON (preview de Lovable, dev, o VPS caído), cae a la
+// edge function `scrape-channel` directamente.
+async function scrapeChannelWithFallback(
+  channelId: string,
+  processIndex: number,
+  playerUrl?: string,
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  const body: Record<string, unknown> = { channel_id: channelId, process_id: processIndex };
+  if (playerUrl) body.player_url = playerUrl;
+
+  // 1) Intento local (producción VPS)
+  try {
+    const resp = await fetch('/api/local-scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const ct = resp.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      const data = await resp.json();
+      return data;
+    }
+    // No JSON → muy probablemente estamos en la preview de Lovable y el
+    // endpoint no existe (devuelve index.html). Continuar al fallback.
+    console.warn('[scrape] /api/local-scrape no devolvió JSON, usando edge function');
+  } catch (e) {
+    console.warn('[scrape] /api/local-scrape falló, usando edge function:', e);
+  }
+
+  // 2) Fallback: edge function scrape-channel
+  const account = PI_ACCOUNT_PROCESSES.has(processIndex) ? 'pi' : 'default';
+  const { data, error } = await supabase.functions.invoke('scrape-channel', {
+    body: { channel_id: channelId, process_id: String(processIndex), account },
+  });
+  if (error) return { success: false, error: error.message };
+  return data as { success: boolean; url?: string; error?: string };
+}
 const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
 const TIGO_OBS_INGEST_URL = "srt://167.17.69.116:9000?streamid=tigo&latency=2000000";
 const DISNEY7_OBS_INGEST_URL = "srt://167.17.69.116:9001?streamid=disney7&latency=2000000";
@@ -777,12 +820,7 @@ export default function EmisorM3U8Panel() {
 
     setFetchingChannel(processIndex);
     try {
-      const resp = await fetch('/api/local-scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_id: channelId, process_id: processIndex, player_url: pasted }),
-      });
-      const data = await resp.json();
+      const data = await scrapeChannelWithFallback(channelId, processIndex, pasted);
       if (!data?.success) throw new Error(data?.error || 'Error desconocido');
       const streamUrl = data.url;
       updateProcess(processIndex, { m3u8: streamUrl, rtmp: 'hls-local' });
@@ -806,15 +844,9 @@ export default function EmisorM3U8Panel() {
     
     setFetchingChannel(processIndex);
     try {
-      // Usar scraping LOCAL del VPS (no Edge Function) para que el token
-      // se genere con la misma IP que luego usa FFmpeg → evita 403
-      const resp = await fetch('/api/local-scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_id: channelId, process_id: processIndex }),
-      });
-      const data = await resp.json();
-
+      // Usar scraping LOCAL del VPS (token con IP correcta) y caer a
+      // edge function si /api/local-scrape no está disponible (preview).
+      const data = await scrapeChannelWithFallback(channelId, processIndex);
       if (!data?.success) throw new Error(data?.error || 'Error desconocido');
 
       const streamUrl = data.url;
