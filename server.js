@@ -839,8 +839,8 @@ const startTigoKeepAlive = (process_id, playlistUrl, userAgent) => {
         method: 'GET',
         headers: {
           'User-Agent': userAgent || 'Mozilla/5.0',
-          'Referer': 'https://www.app.tdmax.com/',
-          'Origin': 'https://www.app.tdmax.com',
+          'Referer': TDMAX_APP_REFERER,
+          'Origin': TDMAX_APP_ORIGIN,
           'Accept': '*/*',
         },
         signal: AbortSignal.timeout(8000),
@@ -1829,8 +1829,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': TDMAX_WEB_USER_AGENT,
-        'Origin': 'https://www.app.tdmax.com',
-        'Referer': 'https://www.app.tdmax.com/',
+        'Origin': TDMAX_APP_ORIGIN,
+        'Referer': TDMAX_APP_REFERER,
       },
       body: JSON.stringify({
         username: email.toLowerCase(),
@@ -1874,8 +1874,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
       'User-Agent': TDMAX_WEB_USER_AGENT,
       'Accept': 'application/json, text/plain, */*',
       'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
-      'Origin': 'https://www.app.tdmax.com',
-      'Referer': 'https://www.app.tdmax.com/',
+      'Origin': TDMAX_APP_ORIGIN,
+      'Referer': TDMAX_APP_REFERER,
       'Authorization': `Bearer ${accessToken}`,
       // Headers del cliente oficial TDMax (mayo 2026). Sin ellos el
       // loadbalancer responde code 628 "redirect url is null or empty 1".
@@ -1929,8 +1929,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
       const verifyResp = await fetchWithOptionalProxy(streamUrl, {
         headers: {
           'User-Agent': TDMAX_WEB_USER_AGENT,
-          'Referer': 'https://www.app.tdmax.com/',
-          'Origin': 'https://www.app.tdmax.com',
+          'Referer': TDMAX_APP_REFERER,
+          'Origin': TDMAX_APP_ORIGIN,
           ...TDMAX_BROWSER_HEADERS,
           ...(allCookieStr ? { Cookie: allCookieStr } : {}),
         },
