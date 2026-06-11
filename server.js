@@ -1826,7 +1826,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
       signal: AbortSignal.timeout(15000),
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'User-Agent': TDMAX_WEB_USER_AGENT,
         'Origin': 'https://www.app.tdmax.com',
         'Referer': 'https://www.app.tdmax.com/',
       },
@@ -1869,7 +1869,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
     const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?${lbParams.toString()}`;
     
     const lbHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+      'User-Agent': TDMAX_WEB_USER_AGENT,
       'Accept': 'application/json, text/plain, */*',
       'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
       'Origin': 'https://www.app.tdmax.com',
@@ -1926,9 +1926,10 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
     try {
       const verifyResp = await fetchWithOptionalProxy(streamUrl, {
         headers: {
-          'User-Agent': lbHeaders['User-Agent'],
+          'User-Agent': TDMAX_WEB_USER_AGENT,
           'Referer': 'https://www.app.tdmax.com/',
           'Origin': 'https://www.app.tdmax.com',
+          ...TDMAX_BROWSER_HEADERS,
           ...(allCookieStr ? { Cookie: allCookieStr } : {}),
         },
         signal: AbortSignal.timeout(10000),
