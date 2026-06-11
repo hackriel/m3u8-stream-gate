@@ -110,10 +110,10 @@ async function getStreamUrl(channelId: string, accessToken: string, deviceId: st
     throw new Error(`TDMax devolvió placeholder/VOD en lugar de señal live: ${streamUrl.substring(0, 140)}`);
   }
 
-  // Verificación tolerante: el CDN de Teletica suele bloquear por IP/geo al
-  // edge runtime (Deno Deploy fuera de CR) devolviendo 403, mientras que el
-  // VPS sí pasa. Solo tratamos como fatal los códigos que indican URL
-  // realmente muerta (404/410) o contenido VOD/ended cuando logramos leerlo.
+  // Verificación tolerante (v2): el CDN de Teletica (cdn02/cdn12) bloquea
+  // al edge runtime por IP/geo (Deno Deploy fuera de CR) devolviendo 403
+  // aunque la URL sea válida — el VPS sí puede abrirla con FFmpeg + headers
+  // spoofed. Solo tratamos como fatal: 404/410 (URL muerta) o VOD/ended.
   try {
     const verifyResp = await fetch(streamUrl, { headers: { ...BROWSER_HEADERS } });
     if (verifyResp.status === 404 || verifyResp.status === 410) {
