@@ -110,12 +110,30 @@ async function getStreamUrl(channelId: string, accessToken: string, deviceId: st
     throw new Error(`TDMax devolvió placeholder/VOD en lugar de señal live: ${streamUrl.substring(0, 140)}`);
   }
 
-  const verifyResp = await fetch(streamUrl, {
-    headers: { ...BROWSER_HEADERS },
-  });
-  const verifyText = await verifyResp.text();
-  if (!verifyResp.ok || !verifyText.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(verifyText)) {
-    throw new Error(`TDMax devolvió URL no-live/no válida: HTTP ${verifyResp.status}`);
+  // Verificación tolerante: el CDN de Teletica suele bloquear por IP/geo al
+  // edge runtime (Deno Deploy fuera de CR) devolviendo 403, mientras que el
+  // VPS sí pasa. Solo tratamos como fatal los códigos que indican URL
+  // realmente muerta (404/410) o contenido VOD/ended cuando logramos leerlo.
+  try {
+    const verifyResp = await fetch(streamUrl, { headers: { ...BROWSER_HEADERS } });
+    if (verifyResp.status === 404 || verifyResp.status === 410) {
+      throw new Error(`TDMax devolvió URL muerta: HTTP ${verifyResp.status}`);
+    }
+    if (verifyResp.ok) {
+      const verifyText = await verifyResp.text();
+      if (!verifyText.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(verifyText)) {
+        throw new Error(`TDMax devolvió URL no-live (VOD/ended)`);
+      }
+    } else {
+      // 403/401/5xx desde edge: probablemente geo-block del CDN. Confiamos
+      // en que FFmpeg desde el VPS sí podrá leerla. Solo loggeamos.
+      console.log(`[scrape-channel] verify devolvió HTTP ${verifyResp.status} — asumiendo geo-block del edge, devolviendo URL al VPS.`);
+    }
+  } catch (e) {
+    if (e instanceof Error && /URL muerta|URL no-live/.test(e.message)) {
+      throw e;
+    }
+    console.log(`[scrape-channel] verify falló (${e instanceof Error ? e.message : e}), devolviendo URL igual.`);
   }
 
   return streamUrl;
