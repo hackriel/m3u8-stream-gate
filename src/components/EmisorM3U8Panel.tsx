@@ -564,12 +564,23 @@ export default function EmisorM3U8Panel() {
   }, [teleticaMode]);
   // Poll del modo en el server (refleja fallbacks automáticos oficial→scraping).
   useEffect(() => {
+    let lastServerMode: 'official' | 'scraping' | null = null;
     const interval = setInterval(async () => {
       try {
         const r = await fetch('/api/teletica/source-mode');
         if (!r.ok) return;
         const { mode } = await r.json();
-        if (mode === 'official' || mode === 'scraping') {
+        if (mode !== 'official' && mode !== 'scraping') return;
+        // Primera lectura: solo memorizar el valor del server, NO sobrescribir
+        // la selección local del usuario (que vive en localStorage).
+        if (lastServerMode === null) {
+          lastServerMode = mode;
+          return;
+        }
+        // Aplicar solo si el server cambió de valor desde la última lectura
+        // (ej: fallback automático oficial→scraping durante recovery).
+        if (mode !== lastServerMode) {
+          lastServerMode = mode;
           setTeleticaMode(prev => (prev !== mode ? mode : prev));
         }
       } catch {}
