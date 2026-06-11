@@ -4513,6 +4513,81 @@ app.post('/api/emit', async (req, res) => {
         : `Cierre inesperado (code=${code}${signal ? `, signal=${signal}` : ''}, runtime=${Math.floor(runtime/1000)}s)`;
       saveLogSnapshot(process_id, snapshotReason).catch(()=>{});
 
+      // ─────────────────────────────────────────────────────────────────
+      // PI5 SRT INGEST — MODO LISTENER PERMANENTE (IDs 21/22/23)
+      // ─────────────────────────────────────────────────────────────────
+      // Cuando el FFmpeg listener cae por desconexión del Pi5, glitch de
+      // red del VPS, o EOF del caller, NO debemos:
+      //   • marcar is_emitting=false (el switch del tab se apagaría)
+      //   • contar la caída contra el circuit breaker
+      //   • esperar 2 min al watchdog always-on
+      // En su lugar, respawneamos el listener en 2s vía /api/emit interno
+      // (mismo payload que usa el watchdog always-on) manteniendo el
+      // estado "encendido" para que el Pi5 reconecte solo cuando vuelva.
+      if (!isManualStop && PI_SRT_INGEST_PROCESSES.has(String(process_id))) {
+        const cfgPi5 = getSrtConfig(String(process_id));
+        const labelPi5 = cfgPi5?.label || `SRT ${process_id}`;
+        sendLog(process_id, 'warn', `🛰️ ${labelPi5}: listener cayó (code=${code ?? '-'}${signal ? `, signal=${signal}` : ''}, runtime=${Math.floor(runtime/1000)}s) — respawn persistente en 2s. El Pi5 reconectará solo.`);
+
+        // Limpiar handles del proceso muerto sin tocar is_emitting
+        emissionStatuses.set(process_id, 'starting');
+        ffmpegProcesses.delete(process_id);
+        lastFrameTime.delete(process_id);
+        ignoredLateCloseProcesses.delete(ffmpegProcess);
+        try { resetTigoSrtMetric(process_id); } catch (_) {}
+
+        // Resetear contadores para que el circuit breaker no se acumule
+        try { failureTimestamps.delete(String(process_id)); } catch (_) {}
+        try { recoveryAttempts.set(String(process_id), 0); } catch (_) {}
+        try { quickRetryState.delete(process_id); } catch (_) {}
+        autoRecoveryInProgress.set(String(process_id), false);
+
+        // Mantener is_emitting=true en BD para que el switch siga ON
+        if (supabase) {
+          try {
+            await supabase.from('emission_processes').update({
+              is_active: true,
+              is_emitting: true,
+              emit_status: 'starting',
+              failure_reason: null,
+              failure_details: null,
+              start_time: 0,
+              ffmpeg_pid: null,
+            }).eq('id', parseInt(process_id));
+          } catch (e) {
+            sendLog(process_id, 'warn', `⚠️ No se pudo mantener is_emitting=true: ${e.message}`);
+          }
+        }
+
+        // Respawn vía /api/emit interno (con guard anti-doble-arranque)
+        setTimeout(async () => {
+          if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+            sendLog(process_id, 'info', `🛑 Respawn cancelado: parada manual detectada`);
+            return;
+          }
+          if (ffmpegProcesses.has(process_id) || ffmpegProcesses.has(String(process_id))) {
+            sendLog(process_id, 'info', `ℹ️ Respawn omitido: listener ya levantado`);
+            return;
+          }
+          try {
+            await fetch(`http://localhost:${PORT}/api/emit`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                source_m3u8: 'srt://obs',
+                target_rtmp: 'hls-local',
+                process_id: String(process_id),
+                is_recovery: true,
+              }),
+            });
+          } catch (e) {
+            sendLog(process_id, 'error', `❌ Respawn SRT listener falló: ${e.message} — watchdog always-on lo levantará en ≤2 min`);
+          }
+        }, 2000);
+
+        return;
+      }
+
       const rawDiagnosticLines = stderrBuffer
         .filter(l => !l.includes('frame=') && !l.includes('fps='))
         .slice(-8);
