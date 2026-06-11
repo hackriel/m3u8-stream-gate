@@ -3325,10 +3325,12 @@ app.post('/api/emit', async (req, res) => {
     // Si viene un User-Agent custom desde el M3U, tiene prioridad absoluta.
     const sessionUserAgent = customUserAgent
       ? customUserAgent
-      : (isCanal6UrlProcess
+          : (isCanal6UrlProcess
           ? 'VLC/3.0.20 LibVLC/3.0.20'
           : isProxyScrapedSource
           ? pickRandomUserAgent()
+          : isTeleticaSource
+          ? TDMAX_WEB_USER_AGENT
           : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
     if (customUserAgent) {
       sendLog(process_id, 'info', `🧾 User-Agent custom (M3U): ${customUserAgent.substring(0, 60)}...`);
@@ -3336,6 +3338,9 @@ app.post('/api/emit', async (req, res) => {
     if (isProxyScrapedSource) {
       sendLog(process_id, 'info', `🎭 UA rotativo: ${sessionUserAgent.substring(0, 60)}...`);
     }
+      if (isTeleticaSource && !isProxyScrapedSource) {
+        sendLog(process_id, 'info', `🧭 Teletica CDN: identidad web TDMax unificada (UA + headers navegador)`);
+      }
 
     const inputArgs = isRtmpInputSource
       ? [...effectiveResilienceArgs]
@@ -3464,10 +3469,11 @@ app.post('/api/emit', async (req, res) => {
             'User-Agent': sessionUserAgent,
             Referer: refererDomain,
             Origin: originDomain,
+            ...(isTeleticaSource ? TDMAX_BROWSER_HEADERS : {}),
             ...(authorizationValue ? { Authorization: authorizationValue } : {}),
             ...(sessionCookies ? { Cookie: sessionCookies } : {}),
           },
-        }, true);
+        }, isProxyScrapedSource);
         if (masterResp.ok) {
           const body = await masterResp.text();
           if (body.includes('#EXT-X-STREAM-INF')) {
