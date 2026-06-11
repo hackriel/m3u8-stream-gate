@@ -1910,17 +1910,37 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
     }
 
     // Validación desde el mismo VPS antes de entregar la URL: si TDMax/Teletica
-    // responde HTML/Forbidden o una playlist VOD terminada, no la aceptamos.
-    const verifyResp = await fetchWithOptionalProxy(streamUrl, {
-      headers: {
-        'User-Agent': lbHeaders['User-Agent'],
-        ...(allCookieStr ? { Cookie: allCookieStr } : {}),
-      },
-      signal: AbortSignal.timeout(10000),
-    }, useProxy);
-    const verifyText = await verifyResp.text();
-    if (!verifyResp.ok || !verifyText.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(verifyText)) {
-      return { url: null, error: `TDMax devolvió URL no-live/no válida para ${channelName}: HTTP ${verifyResp.status}` };
+    // responde URL realmente muerta (404/410) o playlist VOD terminada, no la
+    // aceptamos. 403 NO es fatal: los CDNs de TDMax (cdn02/cdn12.teletica.com)
+    // suelen devolver 403 a HEAD/GET sin Referer correcto aunque FFmpeg
+    // luego sí pueda abrir el stream con los headers spoofed. Verificar con
+    // los mismos headers que usará FFmpeg (Referer/Origin app.tdmax.com).
+    try {
+      const verifyResp = await fetchWithOptionalProxy(streamUrl, {
+        headers: {
+          'User-Agent': lbHeaders['User-Agent'],
+          'Referer': 'https://www.app.tdmax.com/',
+          'Origin': 'https://www.app.tdmax.com',
+          ...(allCookieStr ? { Cookie: allCookieStr } : {}),
+        },
+        signal: AbortSignal.timeout(10000),
+      }, useProxy);
+      if (verifyResp.status === 404 || verifyResp.status === 410) {
+        return { url: null, error: `TDMax devolvió URL muerta para ${channelName}: HTTP ${verifyResp.status}` };
+      }
+      if (verifyResp.ok) {
+        const verifyText = await verifyResp.text();
+        if (!verifyText.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(verifyText)) {
+          return { url: null, error: `TDMax devolvió URL no-live (VOD/ended) para ${channelName}` };
+        }
+      } else {
+        // 403/401/5xx con headers correctos: probablemente el CDN exige cookie
+        // de sesión que FFmpeg recibirá en runtime. Confiamos en FFmpeg y
+        // dejamos pasar la URL — sólo loggeamos.
+        sendLog('system', 'info', `ℹ️ Verify ${channelName}: HTTP ${verifyResp.status} (no fatal, FFmpeg reintentará con headers).`);
+      }
+    } catch (verr) {
+      sendLog('system', 'info', `ℹ️ Verify ${channelName} falló (${verr.message}), entregando URL igual.`);
     }
     
     const cookieCount = allCookieParts.filter(Boolean).length;
