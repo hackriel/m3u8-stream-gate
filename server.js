@@ -3175,10 +3175,15 @@ app.post('/api/emit', async (req, res) => {
     if (cachedSession) {
       const sessionAge = Date.now() - cachedSession.timestamp;
       if (sessionAge < 600000) { // 10 minutos de TTL para cubrir recoveries lentos
-        if (cachedSession.cookies) {
+        // Igual que Authorization: las cookies pertenecen a TDMax/API, no al CDN
+        // cdn12/cdn02.teletica.com. Para FOX/FOX+/Teletica URL, el acceso válido
+        // es la firma wmsAuthSign + Referer/Origin; cookies extra pueden disparar 403.
+        if (cachedSession.cookies && !isTeleticaSource) {
           sessionCookies = cachedSession.cookies;
           extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
           sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
+        } else if (cachedSession.cookies && isTeleticaSource) {
+          sendLog(process_id, 'info', `🍪 Teletica CDN: cookies TDMax NO se envían a FFmpeg; se usa URL firmada limpia`);
         }
         // El accessToken de TDMax solo sirve contra el API/loadbalancer. En el CDN
         // Teletica (cdn12/cdn02 con wmsAuthSign) FFmpeg debe comportarse como VLC:
