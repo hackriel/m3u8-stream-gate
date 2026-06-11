@@ -3175,15 +3175,26 @@ app.post('/api/emit', async (req, res) => {
     if (cachedSession) {
       const sessionAge = Date.now() - cachedSession.timestamp;
       if (sessionAge < 600000) { // 10 minutos de TTL para cubrir recoveries lentos
-        if (cachedSession.cookies) {
+        // Igual que Authorization: las cookies pertenecen a TDMax/API, no al CDN
+        // cdn12/cdn02.teletica.com. Para FOX/FOX+/Teletica URL, el acceso válido
+        // es la firma wmsAuthSign + Referer/Origin; cookies extra pueden disparar 403.
+        if (cachedSession.cookies && !isTeleticaSource) {
           sessionCookies = cachedSession.cookies;
           extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
           sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
+        } else if (cachedSession.cookies && isTeleticaSource) {
+          sendLog(process_id, 'info', `🍪 Teletica CDN: cookies TDMax NO se envían a FFmpeg; se usa URL firmada limpia`);
         }
-        if (cachedSession.accessToken) {
+        // El accessToken de TDMax solo sirve contra el API/loadbalancer. En el CDN
+        // Teletica (cdn12/cdn02 con wmsAuthSign) FFmpeg debe comportarse como VLC:
+        // URL firmada + Referer/Origin, SIN Authorization. Enviar Bearer al CDN puede
+        // provocar 403 inmediato aunque el wmsAuthSign sea fresco.
+        if (cachedSession.accessToken && !isTeleticaSource) {
           authorizationValue = `Bearer ${cachedSession.accessToken}`;
           authorizationHeader = `Authorization: ${authorizationValue}`;
           sendLog(process_id, 'info', `🔑 Inyectando accessToken a FFmpeg`);
+        } else if (cachedSession.accessToken && isTeleticaSource) {
+          sendLog(process_id, 'info', `🔑 Teletica CDN: accessToken NO se envía a FFmpeg; se usa wmsAuthSign + Referer/Origin`);
         }
       } else {
         sendLog(process_id, 'warn', `⚠️ Sesión cacheada expirada (${Math.round(sessionAge/1000)}s), no se inyectan cookies`);
