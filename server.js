@@ -3039,14 +3039,14 @@ app.post('/api/emit', async (req, res) => {
         //   • /TeleticaLiveStream/...  → fuente "oficial" pública vía Bradmax player.
         //     Solo valida Referer https://bradmax.com/  (sin token, sin wmsAuthSign).
         //   • /StreamTeletica/... (cdn02/cdn12) → ruta TDMax con wmsAuthSign de 60s.
-        //     Valida Referer/Origin contra https://www.app.tdmax.com/. Si se manda
+        //     Valida Referer/Origin contra https://app.tdmax.com/. Si se manda
         //     teletica.com como Origin, CDN responde 200 OK pero con chunks vacíos.
         if (sourceUrl.pathname.toLowerCase().includes('/teleticalivestream/')) {
           refererDomain = 'https://bradmax.com/';
           originDomain = 'https://bradmax.com';
         } else {
-          refererDomain = 'https://www.app.tdmax.com/';
-          originDomain = 'https://www.app.tdmax.com';
+          refererDomain = TDMAX_APP_REFERER;
+          originDomain = TDMAX_APP_ORIGIN;
         }
       } else if (hostname.includes('cloudfront.net') || hostname.includes('repretel.com') || hostname.includes('mediatiquestream.com')) {
         isMediatiqueSource = true;
