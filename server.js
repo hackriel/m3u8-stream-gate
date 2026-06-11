@@ -60,6 +60,14 @@ const server = createServer(app);
 const PORT = process.env.PORT || 3001;
 const APP_BUILD_MARKER = 'tdmax-app-headers-2026-05-24b';
 const TDMAX_LB_PARAM_MODE = 'device-id/access_token/country_code/device-name/device-type';
+const TDMAX_WEB_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const TDMAX_BROWSER_HEADERS = {
+  'Accept': '*/*',
+  'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'cross-site',
+};
 
 // WebSocket server para logs en tiempo real
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -1818,7 +1826,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
       signal: AbortSignal.timeout(15000),
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'User-Agent': TDMAX_WEB_USER_AGENT,
         'Origin': 'https://www.app.tdmax.com',
         'Referer': 'https://www.app.tdmax.com/',
       },
@@ -1861,7 +1869,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
     const lbUrl = `${STREANN_BASE_URL}/loadbalancer/services/v1/channels-secure/${channelId}/playlist.m3u8?${lbParams.toString()}`;
     
     const lbHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+      'User-Agent': TDMAX_WEB_USER_AGENT,
       'Accept': 'application/json, text/plain, */*',
       'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
       'Origin': 'https://www.app.tdmax.com',
@@ -1918,9 +1926,10 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
     try {
       const verifyResp = await fetchWithOptionalProxy(streamUrl, {
         headers: {
-          'User-Agent': lbHeaders['User-Agent'],
+          'User-Agent': TDMAX_WEB_USER_AGENT,
           'Referer': 'https://www.app.tdmax.com/',
           'Origin': 'https://www.app.tdmax.com',
+          ...TDMAX_BROWSER_HEADERS,
           ...(allCookieStr ? { Cookie: allCookieStr } : {}),
         },
         signal: AbortSignal.timeout(10000),
@@ -3304,10 +3313,15 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
+    const teleticaBrowserHeaderLines = isTeleticaSource
+      ? Object.entries(TDMAX_BROWSER_HEADERS).map(([key, value]) => `${key}: ${value}`)
+      : [];
+
     const combinedHeaders = [
       authorizationHeader,
       `Referer: ${refererDomain}`,
       `Origin: ${originDomain}`,
+      ...teleticaBrowserHeaderLines,
       ...customHeaderLines,
     ].filter(Boolean).join('\r\n') + '\r\n' + univisionExtraHeaders;
 
@@ -3316,10 +3330,12 @@ app.post('/api/emit', async (req, res) => {
     // Si viene un User-Agent custom desde el M3U, tiene prioridad absoluta.
     const sessionUserAgent = customUserAgent
       ? customUserAgent
-      : (isCanal6UrlProcess
+          : (isCanal6UrlProcess
           ? 'VLC/3.0.20 LibVLC/3.0.20'
           : isProxyScrapedSource
           ? pickRandomUserAgent()
+          : isTeleticaSource
+          ? TDMAX_WEB_USER_AGENT
           : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
     if (customUserAgent) {
       sendLog(process_id, 'info', `🧾 User-Agent custom (M3U): ${customUserAgent.substring(0, 60)}...`);
@@ -3327,6 +3343,9 @@ app.post('/api/emit', async (req, res) => {
     if (isProxyScrapedSource) {
       sendLog(process_id, 'info', `🎭 UA rotativo: ${sessionUserAgent.substring(0, 60)}...`);
     }
+      if (isTeleticaSource && !isProxyScrapedSource) {
+        sendLog(process_id, 'info', `🧭 Teletica CDN: identidad web TDMax unificada (UA + headers navegador)`);
+      }
 
     const inputArgs = isRtmpInputSource
       ? [...effectiveResilienceArgs]
@@ -3455,10 +3474,11 @@ app.post('/api/emit', async (req, res) => {
             'User-Agent': sessionUserAgent,
             Referer: refererDomain,
             Origin: originDomain,
+            ...(isTeleticaSource ? TDMAX_BROWSER_HEADERS : {}),
             ...(authorizationValue ? { Authorization: authorizationValue } : {}),
             ...(sessionCookies ? { Cookie: sessionCookies } : {}),
           },
-        }, true);
+        }, isProxyScrapedSource);
         if (masterResp.ok) {
           const body = await masterResp.text();
           if (body.includes('#EXT-X-STREAM-INF')) {
