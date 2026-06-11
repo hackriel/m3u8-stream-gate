@@ -6682,7 +6682,7 @@ server.listen(PORT, () => {
     }
   }, 60 * 1000);
 
-  // ====== WATCHDOG ALWAYS-ON (IDs 15, 21, 22, 23) ======
+  // ====== WATCHDOG ALWAYS-ON (IDs 15, 21, 22, 23, 24, 25, 26) ======
   // Si el switch "Encendido siempre" está activo y el proceso está caído (no emitiendo)
   // SIN parada manual ni descanso nocturno, lo relanzamos automáticamente.
   // Cubre el caso donde el recovery se rinde (cdn_unavailable / circuit_breaker) o el
@@ -6693,7 +6693,11 @@ server.listen(PORT, () => {
   //   • IDs 21/22/23 (TELETICA / FOX+ / FOX SRT desde Pi5): relanza listener SRT
   //     con payload fijo srt://obs + hls-local. Mientras always_on=true, el VPS
   //     siempre estará receptivo a la señal que el Pi5 envía 24/7.
-  const ALWAYS_ON_WATCHDOG_IDS = ['15', '21', '22', '23'];
+  //   • IDs 24/25 (FOX+ URL / FOX URL): si TDMax estuvo intermitente y el
+  //     autoRecoverChannel se rindió (sin fallback URL), aquí lo re-disparamos
+  //     con scrape fresco para no quedar muerto hasta intervención manual.
+  //   • ID 26 (FOX+ ALTERNO): mismo patrón usando player_url persistida.
+  const ALWAYS_ON_WATCHDOG_IDS = ['15', '21', '22', '23', '24', '25', '26'];
 
   const tryRelaunchAlwaysOnChannel = async (PID) => {
     if (!supabase) return;
@@ -6731,6 +6735,56 @@ server.listen(PORT, () => {
         process_id: PID,
         is_recovery: true,
       };
+    } else if (CHANNEL_MAP[PID]) {
+      // Canales scrapeados (24/25 — y futuros): re-disparar scrape fresco vía
+      // autoRecoverChannel. NO usar /api/emit con la URL vieja porque el
+      // wmsAuthSign ya está expirado (es lo que rompió el ciclo original).
+      const { channelId, channelName } = CHANNEL_MAP[PID];
+      sendLog(PID, 'warn', `🔁 Watchdog always-on: ${channelName} caído con switch activo. Re-scrapeando URL fresca...`);
+      try { failureTimestamps.delete(PID); } catch (_) {}
+      recoveryAttempts.set(String(PID), 0);
+      await supabase.from('emission_processes').update({
+        emit_status: 'starting',
+        is_emitting: true,
+        is_active: true,
+        failure_reason: null,
+        failure_details: null,
+      }).eq('id', PID_NUM);
+      try {
+        await autoRecoverChannel(String(PID), channelId, channelName);
+      } catch (e) {
+        sendLog(PID, 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
+      }
+      return;
+    } else if (String(PID) === '26') {
+      // FOX+ ALTERNO: re-scrape con player_url persistida
+      const playerUrl = row.player_url;
+      if (!playerUrl) {
+        sendLog('26', 'warn', `⚠️ Watchdog always-on: sin player_url guardada, no se puede relanzar`);
+        return;
+      }
+      const m = String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i);
+      const channelId = m ? m[1] : null;
+      if (!channelId) {
+        sendLog('26', 'error', `❌ Watchdog always-on: player_url inválida: ${playerUrl}`);
+        return;
+      }
+      sendLog('26', 'warn', `🔁 Watchdog always-on: FOX+ ALTERNO caído. Re-scrapeando con player_url...`);
+      try { failureTimestamps.delete(PID); } catch (_) {}
+      recoveryAttempts.set(String(PID), 0);
+      await supabase.from('emission_processes').update({
+        emit_status: 'starting',
+        is_emitting: true,
+        is_active: true,
+        failure_reason: null,
+        failure_details: null,
+      }).eq('id', PID_NUM);
+      try {
+        await autoRecoverChannel('26', channelId, 'FOX+ ALTERNO');
+      } catch (e) {
+        sendLog('26', 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
+      }
+      return;
     } else {
       // ID 15 (CANAL 6 URL) y similares: requieren URL guardada
       const sourceUrl = row.source_url || row.m3u8;
