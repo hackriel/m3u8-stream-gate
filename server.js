@@ -3180,10 +3180,16 @@ app.post('/api/emit', async (req, res) => {
           extraFfmpegInputArgs.push('-cookies', cachedSession.cookies + '\n');
           sendLog(process_id, 'info', `🍪 Inyectando cookies de sesión a FFmpeg`);
         }
-        if (cachedSession.accessToken) {
+        // El accessToken de TDMax solo sirve contra el API/loadbalancer. En el CDN
+        // Teletica (cdn12/cdn02 con wmsAuthSign) FFmpeg debe comportarse como VLC:
+        // URL firmada + Referer/Origin, SIN Authorization. Enviar Bearer al CDN puede
+        // provocar 403 inmediato aunque el wmsAuthSign sea fresco.
+        if (cachedSession.accessToken && !isTeleticaSource) {
           authorizationValue = `Bearer ${cachedSession.accessToken}`;
           authorizationHeader = `Authorization: ${authorizationValue}`;
           sendLog(process_id, 'info', `🔑 Inyectando accessToken a FFmpeg`);
+        } else if (cachedSession.accessToken && isTeleticaSource) {
+          sendLog(process_id, 'info', `🔑 Teletica CDN: accessToken NO se envía a FFmpeg; se usa wmsAuthSign + Referer/Origin`);
         }
       } else {
         sendLog(process_id, 'warn', `⚠️ Sesión cacheada expirada (${Math.round(sessionAge/1000)}s), no se inyectan cookies`);
