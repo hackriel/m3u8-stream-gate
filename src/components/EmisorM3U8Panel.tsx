@@ -777,12 +777,7 @@ export default function EmisorM3U8Panel() {
 
     setFetchingChannel(processIndex);
     try {
-      const resp = await fetch('/api/local-scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_id: channelId, process_id: processIndex, player_url: pasted }),
-      });
-      const data = await resp.json();
+      const data = await scrapeChannelWithFallback(channelId, processIndex, pasted);
       if (!data?.success) throw new Error(data?.error || 'Error desconocido');
       const streamUrl = data.url;
       updateProcess(processIndex, { m3u8: streamUrl, rtmp: 'hls-local' });
@@ -806,15 +801,9 @@ export default function EmisorM3U8Panel() {
     
     setFetchingChannel(processIndex);
     try {
-      // Usar scraping LOCAL del VPS (no Edge Function) para que el token
-      // se genere con la misma IP que luego usa FFmpeg → evita 403
-      const resp = await fetch('/api/local-scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_id: channelId, process_id: processIndex }),
-      });
-      const data = await resp.json();
-
+      // Usar scraping LOCAL del VPS (token con IP correcta) y caer a
+      // edge function si /api/local-scrape no está disponible (preview).
+      const data = await scrapeChannelWithFallback(channelId, processIndex);
       if (!data?.success) throw new Error(data?.error || 'Error desconocido');
 
       const streamUrl = data.url;
