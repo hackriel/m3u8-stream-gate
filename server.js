@@ -3313,10 +3313,15 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
+    const teleticaBrowserHeaderLines = isTeleticaSource
+      ? Object.entries(TDMAX_BROWSER_HEADERS).map(([key, value]) => `${key}: ${value}`)
+      : [];
+
     const combinedHeaders = [
       authorizationHeader,
       `Referer: ${refererDomain}`,
       `Origin: ${originDomain}`,
+      ...teleticaBrowserHeaderLines,
       ...customHeaderLines,
     ].filter(Boolean).join('\r\n') + '\r\n' + univisionExtraHeaders;
 
