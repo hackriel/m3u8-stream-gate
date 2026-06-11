@@ -1921,6 +1921,14 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
       return { url: null, error: `TDMax devolvió placeholder/VOD en lugar de señal live: ${streamUrl.substring(0, 140)}` };
     }
 
+    const isTeleticaCdnStream = (() => {
+      try {
+        return new URL(streamUrl).hostname.toLowerCase().includes('teletica.com');
+      } catch {
+        return false;
+      }
+    })();
+
     // Validación desde el mismo VPS antes de entregar la URL: si TDMax/Teletica
     // responde URL realmente muerta (404/410) o playlist VOD terminada, no la
     // aceptamos. 403 NO es fatal: los CDNs de TDMax (cdn02/cdn12.teletica.com)
@@ -1934,7 +1942,7 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
           'Referer': TDMAX_APP_REFERER,
           'Origin': TDMAX_APP_ORIGIN,
           ...TDMAX_BROWSER_HEADERS,
-          ...(allCookieStr ? { Cookie: allCookieStr } : {}),
+          ...(!isTeleticaCdnStream && allCookieStr ? { Cookie: allCookieStr } : {}),
         },
         signal: AbortSignal.timeout(10000),
       }, useProxy);
@@ -1946,6 +1954,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
         if (!verifyText.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(verifyText)) {
           return { url: null, error: `TDMax devolvió URL no-live (VOD/ended) para ${channelName}` };
         }
+      } else if (TDMAX_CDN_BLOCKED_PROCESSES.has(String(processId)) && [401, 403].includes(verifyResp.status)) {
+        return { url: null, error: `CDN rechazó la URL firmada para ${channelName}: HTTP ${verifyResp.status} desde el VPS (bloqueo de origen/cuenta/firma, no se lanza FFmpeg)` };
       } else {
         // 403/401/5xx con headers correctos: probablemente el CDN exige cookie
         // de sesión que FFmpeg recibirá en runtime. Confiamos en FFmpeg y
