@@ -1561,7 +1561,9 @@ const CHANNEL_FALLBACK_URLS = {
   '15': 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8', // Canal 6 oficial Repretel
 };
 
-// Track de intentos de recovery para saber cuándo usar fallback
+    const TDMAX_CDN_BLOCKED_PROCESSES = new Set(['24', '25', '26']);
+
+    // Track de intentos de recovery para saber cuándo usar fallback
 const recoveryAttempts = new Map(); // Map<processId, number>
 
 
