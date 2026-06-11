@@ -60,6 +60,8 @@ const server = createServer(app);
 const PORT = process.env.PORT || 3001;
 const APP_BUILD_MARKER = 'tdmax-app-headers-2026-05-24b';
 const TDMAX_LB_PARAM_MODE = 'device-id/access_token/country_code/device-name/device-type';
+const TDMAX_APP_ORIGIN = 'https://app.tdmax.com';
+const TDMAX_APP_REFERER = `${TDMAX_APP_ORIGIN}/`;
 const TDMAX_WEB_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const TDMAX_BROWSER_HEADERS = {
   'Accept': '*/*',
@@ -837,8 +839,8 @@ const startTigoKeepAlive = (process_id, playlistUrl, userAgent) => {
         method: 'GET',
         headers: {
           'User-Agent': userAgent || 'Mozilla/5.0',
-          'Referer': 'https://www.app.tdmax.com/',
-          'Origin': 'https://www.app.tdmax.com',
+          'Referer': TDMAX_APP_REFERER,
+          'Origin': TDMAX_APP_ORIGIN,
           'Accept': '*/*',
         },
         signal: AbortSignal.timeout(8000),
@@ -1559,7 +1561,9 @@ const CHANNEL_FALLBACK_URLS = {
   '15': 'https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8', // Canal 6 oficial Repretel
 };
 
-// Track de intentos de recovery para saber cuándo usar fallback
+    const TDMAX_CDN_BLOCKED_PROCESSES = new Set(['24', '25', '26']);
+
+    // Track de intentos de recovery para saber cuándo usar fallback
 const recoveryAttempts = new Map(); // Map<processId, number>
 
 
@@ -1827,8 +1831,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': TDMAX_WEB_USER_AGENT,
-        'Origin': 'https://www.app.tdmax.com',
-        'Referer': 'https://www.app.tdmax.com/',
+        'Origin': TDMAX_APP_ORIGIN,
+        'Referer': TDMAX_APP_REFERER,
       },
       body: JSON.stringify({
         username: email.toLowerCase(),
@@ -1872,8 +1876,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
       'User-Agent': TDMAX_WEB_USER_AGENT,
       'Accept': 'application/json, text/plain, */*',
       'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
-      'Origin': 'https://www.app.tdmax.com',
-      'Referer': 'https://www.app.tdmax.com/',
+      'Origin': TDMAX_APP_ORIGIN,
+      'Referer': TDMAX_APP_REFERER,
       'Authorization': `Bearer ${accessToken}`,
       // Headers del cliente oficial TDMax (mayo 2026). Sin ellos el
       // loadbalancer responde code 628 "redirect url is null or empty 1".
@@ -1917,6 +1921,14 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
       return { url: null, error: `TDMax devolvió placeholder/VOD en lugar de señal live: ${streamUrl.substring(0, 140)}` };
     }
 
+    const isTeleticaCdnStream = (() => {
+      try {
+        return new URL(streamUrl).hostname.toLowerCase().includes('teletica.com');
+      } catch {
+        return false;
+      }
+    })();
+
     // Validación desde el mismo VPS antes de entregar la URL: si TDMax/Teletica
     // responde URL realmente muerta (404/410) o playlist VOD terminada, no la
     // aceptamos. 403 NO es fatal: los CDNs de TDMax (cdn02/cdn12.teletica.com)
@@ -1927,10 +1939,10 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
       const verifyResp = await fetchWithOptionalProxy(streamUrl, {
         headers: {
           'User-Agent': TDMAX_WEB_USER_AGENT,
-          'Referer': 'https://www.app.tdmax.com/',
-          'Origin': 'https://www.app.tdmax.com',
+          'Referer': TDMAX_APP_REFERER,
+          'Origin': TDMAX_APP_ORIGIN,
           ...TDMAX_BROWSER_HEADERS,
-          ...(allCookieStr ? { Cookie: allCookieStr } : {}),
+          ...(!isTeleticaCdnStream && allCookieStr ? { Cookie: allCookieStr } : {}),
         },
         signal: AbortSignal.timeout(10000),
       }, useProxy);
@@ -1942,6 +1954,8 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
         if (!verifyText.trimStart().startsWith('#EXTM3U') || /#EXT-X-ENDLIST/i.test(verifyText)) {
           return { url: null, error: `TDMax devolvió URL no-live (VOD/ended) para ${channelName}` };
         }
+      } else if (TDMAX_CDN_BLOCKED_PROCESSES.has(String(processId)) && [401, 403].includes(verifyResp.status)) {
+        return { url: null, error: `CDN rechazó la URL firmada para ${channelName}: HTTP ${verifyResp.status} desde el VPS (bloqueo de origen/cuenta/firma, no se lanza FFmpeg)` };
       } else {
         // 403/401/5xx con headers correctos: probablemente el CDN exige cookie
         // de sesión que FFmpeg recibirá en runtime. Confiamos en FFmpeg y
@@ -3035,14 +3049,14 @@ app.post('/api/emit', async (req, res) => {
         //   • /TeleticaLiveStream/...  → fuente "oficial" pública vía Bradmax player.
         //     Solo valida Referer https://bradmax.com/  (sin token, sin wmsAuthSign).
         //   • /StreamTeletica/... (cdn02/cdn12) → ruta TDMax con wmsAuthSign de 60s.
-        //     Valida Referer/Origin contra https://www.app.tdmax.com/. Si se manda
+        //     Valida Referer/Origin contra https://app.tdmax.com/. Si se manda
         //     teletica.com como Origin, CDN responde 200 OK pero con chunks vacíos.
         if (sourceUrl.pathname.toLowerCase().includes('/teleticalivestream/')) {
           refererDomain = 'https://bradmax.com/';
           originDomain = 'https://bradmax.com';
         } else {
-          refererDomain = 'https://www.app.tdmax.com/';
-          originDomain = 'https://www.app.tdmax.com';
+          refererDomain = TDMAX_APP_REFERER;
+          originDomain = TDMAX_APP_ORIGIN;
         }
       } else if (hostname.includes('cloudfront.net') || hostname.includes('repretel.com') || hostname.includes('mediatiquestream.com')) {
         isMediatiqueSource = true;
