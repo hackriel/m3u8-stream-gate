@@ -60,6 +60,14 @@ const server = createServer(app);
 const PORT = process.env.PORT || 3001;
 const APP_BUILD_MARKER = 'tdmax-app-headers-2026-05-24b';
 const TDMAX_LB_PARAM_MODE = 'device-id/access_token/country_code/device-name/device-type';
+const TDMAX_WEB_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const TDMAX_BROWSER_HEADERS = {
+  'Accept': '*/*',
+  'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'cross-site',
+};
 
 // WebSocket server para logs en tiempo real
 const wss = new WebSocketServer({ server, path: '/ws' });
