@@ -60,6 +60,8 @@ const server = createServer(app);
 const PORT = process.env.PORT || 3001;
 const APP_BUILD_MARKER = 'tdmax-app-headers-2026-05-24b';
 const TDMAX_LB_PARAM_MODE = 'device-id/access_token/country_code/device-name/device-type';
+const TDMAX_APP_ORIGIN = 'https://app.tdmax.com';
+const TDMAX_APP_REFERER = `${TDMAX_APP_ORIGIN}/`;
 const TDMAX_WEB_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const TDMAX_BROWSER_HEADERS = {
   'Accept': '*/*',
