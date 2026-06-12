@@ -1103,7 +1103,10 @@ const waitForSrtBufferReady = async (cfg, timeoutMs) => {
 const srtListenerProcesses = new Map();
 
 const buildSrtListenerUrl = (cfg) => {
-  let url = `srt://:${cfg.port}?mode=listener&latency=${cfg.latencyMs}&pkt_size=1316`;
+  // srt-live-transmit URI: `latency` es en MILISEGUNDOS (no μs).
+  // Buffers grandes (rcvbuf 64MB) + fc amplio para tolerar picos de jitter
+  // de internet residencial (medidos hasta 250ms en pings de 1316 bytes).
+  let url = `srt://:${cfg.port}?mode=listener&latency=${cfg.latencyMs}&rcvbuf=67108864&fc=52428&pkt_size=1316`;
   if (cfg.passphrase && cfg.passphrase.length >= 10) {
     url += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
   }
