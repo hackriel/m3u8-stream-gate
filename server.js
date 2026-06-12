@@ -1225,7 +1225,12 @@ const startSrtIngest = (process_id) => {
   const srtGop = '60';
 
   // SRT listener: latency configurable por canal (default 2000ms).
-  let srtInput = `srt://0.0.0.0:${cfg.port}?mode=listener&latency=${cfg.latencyMs}&pkt_size=1316`;
+  // ⚠️ FFmpeg `srt://` interpreta `latency` en MICROSEGUNDOS — antes mandábamos
+  // cfg.latencyMs (2000) y FFmpeg lo leía como 2ms (¡no 2 segundos!), por eso
+  // cualquier jitter >2ms causaba pausas. Ahora usamos latencyUs (= ms*1000).
+  // Sumamos rcvbuf 64MB y fc 52428 para absorber ráfagas de retransmisión SRT
+  // en redes residenciales con picos de jitter (hasta 250ms medidos).
+  let srtInput = `srt://0.0.0.0:${cfg.port}?mode=listener&latency=${cfg.latencyUs}&rcvbuf=67108864&fc=52428&pkt_size=1316`;
   if (cfg.passphrase && cfg.passphrase.length >= 10) {
     srtInput += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
   }
