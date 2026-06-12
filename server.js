@@ -888,7 +888,7 @@ const stopTigoKeepAlive = (process_id) => {
 const TIGO_USE_BUFFER = (process.env.TIGO_USE_BUFFER || 'true').toLowerCase() !== 'false';
 const TIGO_USE_HDMI = false; // Descartado definitivamente
 const TIGO_SRT_PORT = parseInt(process.env.TIGO_SRT_PORT || '9000', 10);
-const TIGO_SRT_LATENCY_MS = parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10);
+const TIGO_SRT_LATENCY_MS = parseInt(process.env.TIGO_SRT_LATENCY_MS || '4000', 10);
 const TIGO_SRT_LATENCY_US = TIGO_SRT_LATENCY_MS * 1000;
 const TIGO_BUFFER_DIR = '/tmp/tigo-buffer-12';
 const TIGO_BUFFER_PLAYLIST = path.join(TIGO_BUFFER_DIR, 'buf.m3u8');
@@ -908,7 +908,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'TIGO SRT',
     slug: 'Tigo',
     port: parseInt(process.env.TIGO_SRT_PORT || '9000', 10),
-    latencyMs: parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.TIGO_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.TIGO_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/tigo-srt-buffer-12',
   },
@@ -924,7 +924,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'FUTV SRT',
     slug: 'FutvSrt',
     port: parseInt(process.env.FUTV_SRT_PORT || '9002', 10),
-    latencyMs: parseInt(process.env.FUTV_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.FUTV_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.FUTV_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/futv-srt-buffer-18',
   },
@@ -940,7 +940,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'TELETICA SRT',
     slug: 'Teletica',
     port: parseInt(process.env.TELETICA_SRT_PORT || '9004', 10),
-    latencyMs: parseInt(process.env.TELETICA_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.TELETICA_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.TELETICA_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/teletica-srt-buffer-21',
   },
@@ -948,7 +948,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'FOX+ SRT',
     slug: 'foxmas',
     port: parseInt(process.env.FOXMAS_SRT_PORT || '9005', 10),
-    latencyMs: parseInt(process.env.FOXMAS_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.FOXMAS_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.FOXMAS_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/foxmas-srt-buffer-22',
   },
@@ -956,7 +956,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'FOX SRT',
     slug: 'fox',
     port: parseInt(process.env.FOX_SRT_PORT || '9006', 10),
-    latencyMs: parseInt(process.env.FOX_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.FOX_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.FOX_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/fox-srt-buffer-23',
   },
