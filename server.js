@@ -888,7 +888,7 @@ const stopTigoKeepAlive = (process_id) => {
 const TIGO_USE_BUFFER = (process.env.TIGO_USE_BUFFER || 'true').toLowerCase() !== 'false';
 const TIGO_USE_HDMI = false; // Descartado definitivamente
 const TIGO_SRT_PORT = parseInt(process.env.TIGO_SRT_PORT || '9000', 10);
-const TIGO_SRT_LATENCY_MS = parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10);
+const TIGO_SRT_LATENCY_MS = parseInt(process.env.TIGO_SRT_LATENCY_MS || '4000', 10);
 const TIGO_SRT_LATENCY_US = TIGO_SRT_LATENCY_MS * 1000;
 const TIGO_BUFFER_DIR = '/tmp/tigo-buffer-12';
 const TIGO_BUFFER_PLAYLIST = path.join(TIGO_BUFFER_DIR, 'buf.m3u8');
@@ -908,7 +908,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'TIGO SRT',
     slug: 'Tigo',
     port: parseInt(process.env.TIGO_SRT_PORT || '9000', 10),
-    latencyMs: parseInt(process.env.TIGO_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.TIGO_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.TIGO_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/tigo-srt-buffer-12',
   },
@@ -916,7 +916,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'DISNEY 7 SRT',
     slug: 'Disney7',
     port: parseInt(process.env.DISNEY7_SRT_PORT || '9001', 10),
-    latencyMs: parseInt(process.env.DISNEY7_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.DISNEY7_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.DISNEY7_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/disney7-buffer-16',
   },
@@ -924,7 +924,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'FUTV SRT',
     slug: 'FutvSrt',
     port: parseInt(process.env.FUTV_SRT_PORT || '9002', 10),
-    latencyMs: parseInt(process.env.FUTV_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.FUTV_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.FUTV_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/futv-srt-buffer-18',
   },
@@ -932,7 +932,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'CANAL 6 SRT',
     slug: 'Canal6',
     port: parseInt(process.env.CANAL6_SRT_PORT || '9003', 10),
-    latencyMs: parseInt(process.env.CANAL6_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.CANAL6_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.CANAL6_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/canal6-srt-buffer-20',
   },
@@ -940,7 +940,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'TELETICA SRT',
     slug: 'Teletica',
     port: parseInt(process.env.TELETICA_SRT_PORT || '9004', 10),
-    latencyMs: parseInt(process.env.TELETICA_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.TELETICA_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.TELETICA_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/teletica-srt-buffer-21',
   },
@@ -948,7 +948,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'FOX+ SRT',
     slug: 'foxmas',
     port: parseInt(process.env.FOXMAS_SRT_PORT || '9005', 10),
-    latencyMs: parseInt(process.env.FOXMAS_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.FOXMAS_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.FOXMAS_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/foxmas-srt-buffer-22',
   },
@@ -956,7 +956,7 @@ const SRT_INGEST_CONFIGS = {
     label: 'FOX SRT',
     slug: 'fox',
     port: parseInt(process.env.FOX_SRT_PORT || '9006', 10),
-    latencyMs: parseInt(process.env.FOX_SRT_LATENCY_MS || '2000', 10),
+    latencyMs: parseInt(process.env.FOX_SRT_LATENCY_MS || '4000', 10),
     passphrase: process.env.FOX_SRT_PASSPHRASE || '',
     bufferDir: '/tmp/fox-srt-buffer-23',
   },
@@ -1103,7 +1103,10 @@ const waitForSrtBufferReady = async (cfg, timeoutMs) => {
 const srtListenerProcesses = new Map();
 
 const buildSrtListenerUrl = (cfg) => {
-  let url = `srt://:${cfg.port}?mode=listener&latency=${cfg.latencyMs}&pkt_size=1316`;
+  // srt-live-transmit URI: `latency` es en MILISEGUNDOS (no μs).
+  // Buffers grandes (rcvbuf 64MB) + fc amplio para tolerar picos de jitter
+  // de internet residencial (medidos hasta 250ms en pings de 1316 bytes).
+  let url = `srt://:${cfg.port}?mode=listener&latency=${cfg.latencyMs}&rcvbuf=67108864&fc=52428&pkt_size=1316`;
   if (cfg.passphrase && cfg.passphrase.length >= 10) {
     url += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
   }
@@ -1222,7 +1225,12 @@ const startSrtIngest = (process_id) => {
   const srtGop = '60';
 
   // SRT listener: latency configurable por canal (default 2000ms).
-  let srtInput = `srt://0.0.0.0:${cfg.port}?mode=listener&latency=${cfg.latencyMs}&pkt_size=1316`;
+  // ⚠️ FFmpeg `srt://` interpreta `latency` en MICROSEGUNDOS — antes mandábamos
+  // cfg.latencyMs (2000) y FFmpeg lo leía como 2ms (¡no 2 segundos!), por eso
+  // cualquier jitter >2ms causaba pausas. Ahora usamos latencyUs (= ms*1000).
+  // Sumamos rcvbuf 64MB y fc 52428 para absorber ráfagas de retransmisión SRT
+  // en redes residenciales con picos de jitter (hasta 250ms medidos).
+  let srtInput = `srt://0.0.0.0:${cfg.port}?mode=listener&latency=${cfg.latencyUs}&rcvbuf=67108864&fc=52428&pkt_size=1316`;
   if (cfg.passphrase && cfg.passphrase.length >= 10) {
     srtInput += `&pbkeylen=16&passphrase=${encodeURIComponent(cfg.passphrase)}`;
   }
