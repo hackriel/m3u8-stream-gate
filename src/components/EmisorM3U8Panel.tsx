@@ -669,7 +669,8 @@ export default function EmisorM3U8Panel() {
     sessionStorage.setItem("emisor-output-profiles", JSON.stringify(outputProfiles));
   }, [outputProfiles]);
 
-  const getOutputProfile = (processIndex: number): OutputProfile => outputProfiles[processIndex] || DEFAULT_OUTPUT_PROFILE;
+  const getOutputProfile = (processIndex: number): OutputProfile =>
+    outputProfiles[processIndex] || getDefaultOutputProfile(processIndex);
 
   const setOutputProfile = (processIndex: number, profile: OutputProfile) => {
     setOutputProfiles((prev) => ({ ...prev, [processIndex]: profile }));
