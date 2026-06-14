@@ -4040,6 +4040,7 @@ app.post('/api/emit', async (req, res) => {
         for (const line of text.split('\n')) {
           const trimmed = line.trim();
           if (!trimmed) continue;
+          updateLiveStats(process_id, trimmed);
           // Diagnóstico: loguear líneas relevantes (no spam de "frame=")
           if (!/^frame=|^size=/.test(trimmed)) {
             sendLog(process_id, 'info', `[ETAPA1-SRT] ${trimmed.substring(0, 220)}`);
@@ -4073,6 +4074,7 @@ app.post('/api/emit', async (req, res) => {
         for (const line of text.split('\n')) {
           const trimmed = line.trim();
           if (!trimmed) continue;
+          updateLiveStats(process_id, trimmed);
           if (!/^frame=|^size=/.test(trimmed)) {
             sendLog(process_id, 'info', `[ETAPA1-SRT] ${trimmed.substring(0, 220)}`);
           }
