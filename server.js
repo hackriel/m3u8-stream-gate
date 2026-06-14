@@ -1185,6 +1185,11 @@ const ensureSrtListener = (process_id) => {
 
   proc.stderr?.on('data', (buf) => {
     const txt = buf.toString();
+    // Parsear métricas del enlace SRT (RTT, BW, lost) hacia liveStats.
+    // srt-live-transmit imprime cada ~5s con -stats-report-frequency:5000.
+    for (const l of txt.split('\n')) {
+      if (/RTT|BW|bw|lost/i.test(l)) updateLiveStats(process_id, l);
+    }
     // Solo logueamos handshakes/errores reales para no saturar.
     // Filtramos métricas periódicas SRT (RcvQ/SndQ/SRT.cn/etc) que sólo ruidean.
     if (/SRT:RcvQ|SRT:SndQ|SRT\.cn|RTT=|BW=/i.test(txt)) return;
