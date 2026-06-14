@@ -1010,6 +1010,47 @@ const parseFfmpegProgress = (line) => {
   return result;
 };
 
+// ─────────────────────────────────────────────────────────────────────
+// LIVE STATS (telemetría en tiempo real por proceso, expuesta en /api/status)
+// Parsea progress de FFmpeg (frame/fps/bitrate/speed/drop/dup/q) y, cuando
+// la línea viene de srt-live-transmit, también RTT/BW/lost del enlace SRT.
+// Sirve para el tab "Uptime" del dashboard: ver cómo está llegando la señal
+// de OBS/Pearl en vivo, detectar degradación inmediata.
+// ─────────────────────────────────────────────────────────────────────
+const liveStats = new Map(); // Map<process_id, { bitrateKbps, fps, frame, speed, drop, dup, q, srtRttMs, srtBwMbps, srtPktsLost, updatedAt }>
+
+const updateLiveStats = (process_id, line) => {
+  if (!line) return;
+  const key = String(process_id);
+  const prev = liveStats.get(key) || {};
+  const patch = {};
+  let m;
+  if ((m = line.match(/\bbitrate=\s*([\d.]+)kbits\/s/))) patch.bitrateKbps = Math.round(parseFloat(m[1]));
+  if ((m = line.match(/\bfps=\s*([\d.]+)/))) patch.fps = parseFloat(m[1]);
+  if ((m = line.match(/\bframe=\s*(\d+)/))) patch.frame = parseInt(m[1], 10);
+  if ((m = line.match(/\bspeed=\s*([\d.]+)x/))) patch.speed = parseFloat(m[1]);
+  if ((m = line.match(/\bdrop=\s*(\d+)/))) patch.drop = parseInt(m[1], 10);
+  if ((m = line.match(/\bdup=\s*(\d+)/))) patch.dup = parseInt(m[1], 10);
+  if ((m = line.match(/\bq=\s*(-?[\d.]+)/))) patch.q = parseFloat(m[1]);
+  // Métricas del enlace SRT (srt-live-transmit imprime tipo "SRT.cn:RTT: 95ms", "bw: 5.2Mbps", "lost: 3")
+  if ((m = line.match(/RTT[\s:=]+([\d.]+)/i))) patch.srtRttMs = parseFloat(m[1]);
+  if ((m = line.match(/\bbw[\s:=]+([\d.]+)\s*Mbps/i))) patch.srtBwMbps = parseFloat(m[1]);
+  else if ((m = line.match(/\bBW[\s:=]+([\d.]+)/))) patch.srtBwMbps = parseFloat(m[1]);
+  if ((m = line.match(/\blost[\s:=]+(\d+)/i))) patch.srtPktsLost = (prev.srtPktsLost || 0) + parseInt(m[1], 10);
+  if (Object.keys(patch).length === 0) return;
+  liveStats.set(key, { ...prev, ...patch, updatedAt: Date.now() });
+};
+
+const clearLiveStats = (process_id) => liveStats.delete(String(process_id));
+
+const getLiveStats = (process_id) => {
+  const s = liveStats.get(String(process_id));
+  if (!s) return null;
+  // Considerar stale si no se actualiza en >30s (proceso terminado o congelado)
+  if (Date.now() - (s.updatedAt || 0) > 30000) return null;
+  return s;
+};
+
 // Map<process_id, ChildProcess> para FFmpeg #2 (output transcoder)
 const tigoOutputProcesses = new Map();
 // Map<process_id, intervalId> para watchdog que reinicia #2 si muere mientras #1 vive
