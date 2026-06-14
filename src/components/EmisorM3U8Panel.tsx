@@ -168,6 +168,20 @@ type EmissionProcessRow = Tables<"emission_processes">;
 
 type EmitStatus = EmissionProcess["emitStatus"];
 
+interface LiveStats {
+  bitrateKbps?: number;
+  fps?: number;
+  frame?: number;
+  speed?: number;
+  drop?: number;
+  dup?: number;
+  q?: number;
+  srtRttMs?: number;
+  srtBwMbps?: number;
+  srtPktsLost?: number;
+  updatedAt?: number;
+}
+
 interface LocalScrapeResponse {
   success?: boolean;
   error?: string;
