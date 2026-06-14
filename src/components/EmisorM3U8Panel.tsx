@@ -89,13 +89,18 @@ const FOXMAS_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9005?streamid=foxmas&late
 const FOX_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9006?streamid=fox&latency=2000000";
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
-type OutputProfile = "normal" | "balanced" | "optimized";
+type OutputProfile = "passthrough" | "normal" | "balanced" | "optimized";
 const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
 const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
+  passthrough: "Passthrough · tal cual lo manda OBS (sin re-encode)",
   normal: "Normal · 720p CBR 2000k + AAC 128k",
   balanced: "Balanceada · 540p CBR 1500k + AAC 128k (faster)",
   optimized: "Optimizada · 480p CBR 1200k + AAC 128k (faster)",
 };
+// IDs SRT ingest: arrancan por defecto en Passthrough (sin re-encode).
+const SRT_INGEST_INDEXES = new Set<number>([16, 18, 20, 21, 22, 23]);
+const getDefaultOutputProfile = (processIndex: number): OutputProfile =>
+  SRT_INGEST_INDEXES.has(processIndex) ? "passthrough" : DEFAULT_OUTPUT_PROFILE;
 
 // Procesos ocultos legacy
 // 2, 8, 9: Tigo legacy (descartados)
