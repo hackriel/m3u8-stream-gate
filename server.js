@@ -1010,6 +1010,47 @@ const parseFfmpegProgress = (line) => {
   return result;
 };
 
+// ─────────────────────────────────────────────────────────────────────
+// LIVE STATS (telemetría en tiempo real por proceso, expuesta en /api/status)
+// Parsea progress de FFmpeg (frame/fps/bitrate/speed/drop/dup/q) y, cuando
+// la línea viene de srt-live-transmit, también RTT/BW/lost del enlace SRT.
+// Sirve para el tab "Uptime" del dashboard: ver cómo está llegando la señal
+// de OBS/Pearl en vivo, detectar degradación inmediata.
+// ─────────────────────────────────────────────────────────────────────
+const liveStats = new Map(); // Map<process_id, { bitrateKbps, fps, frame, speed, drop, dup, q, srtRttMs, srtBwMbps, srtPktsLost, updatedAt }>
+
+const updateLiveStats = (process_id, line) => {
+  if (!line) return;
+  const key = String(process_id);
+  const prev = liveStats.get(key) || {};
+  const patch = {};
+  let m;
+  if ((m = line.match(/\bbitrate=\s*([\d.]+)kbits\/s/))) patch.bitrateKbps = Math.round(parseFloat(m[1]));
+  if ((m = line.match(/\bfps=\s*([\d.]+)/))) patch.fps = parseFloat(m[1]);
+  if ((m = line.match(/\bframe=\s*(\d+)/))) patch.frame = parseInt(m[1], 10);
+  if ((m = line.match(/\bspeed=\s*([\d.]+)x/))) patch.speed = parseFloat(m[1]);
+  if ((m = line.match(/\bdrop=\s*(\d+)/))) patch.drop = parseInt(m[1], 10);
+  if ((m = line.match(/\bdup=\s*(\d+)/))) patch.dup = parseInt(m[1], 10);
+  if ((m = line.match(/\bq=\s*(-?[\d.]+)/))) patch.q = parseFloat(m[1]);
+  // Métricas del enlace SRT (srt-live-transmit imprime tipo "SRT.cn:RTT: 95ms", "bw: 5.2Mbps", "lost: 3")
+  if ((m = line.match(/RTT[\s:=]+([\d.]+)/i))) patch.srtRttMs = parseFloat(m[1]);
+  if ((m = line.match(/\bbw[\s:=]+([\d.]+)\s*Mbps/i))) patch.srtBwMbps = parseFloat(m[1]);
+  else if ((m = line.match(/\bBW[\s:=]+([\d.]+)/))) patch.srtBwMbps = parseFloat(m[1]);
+  if ((m = line.match(/\blost[\s:=]+(\d+)/i))) patch.srtPktsLost = (prev.srtPktsLost || 0) + parseInt(m[1], 10);
+  if (Object.keys(patch).length === 0) return;
+  liveStats.set(key, { ...prev, ...patch, updatedAt: Date.now() });
+};
+
+const clearLiveStats = (process_id) => liveStats.delete(String(process_id));
+
+const getLiveStats = (process_id) => {
+  const s = liveStats.get(String(process_id));
+  if (!s) return null;
+  // Considerar stale si no se actualiza en >30s (proceso terminado o congelado)
+  if (Date.now() - (s.updatedAt || 0) > 30000) return null;
+  return s;
+};
+
 // Map<process_id, ChildProcess> para FFmpeg #2 (output transcoder)
 const tigoOutputProcesses = new Map();
 // Map<process_id, intervalId> para watchdog que reinicia #2 si muere mientras #1 vive
@@ -1144,6 +1185,11 @@ const ensureSrtListener = (process_id) => {
 
   proc.stderr?.on('data', (buf) => {
     const txt = buf.toString();
+    // Parsear métricas del enlace SRT (RTT, BW, lost) hacia liveStats.
+    // srt-live-transmit imprime cada ~5s con -stats-report-frequency:5000.
+    for (const l of txt.split('\n')) {
+      if (/RTT|BW|bw|lost/i.test(l)) updateLiveStats(process_id, l);
+    }
     // Solo logueamos handshakes/errores reales para no saturar.
     // Filtramos métricas periódicas SRT (RcvQ/SndQ/SRT.cn/etc) que sólo ruidean.
     if (/SRT:RcvQ|SRT:SndQ|SRT\.cn|RTT=|BW=/i.test(txt)) return;
@@ -3994,6 +4040,7 @@ app.post('/api/emit', async (req, res) => {
         for (const line of text.split('\n')) {
           const trimmed = line.trim();
           if (!trimmed) continue;
+          updateLiveStats(process_id, trimmed);
           // Diagnóstico: loguear líneas relevantes (no spam de "frame=")
           if (!/^frame=|^size=/.test(trimmed)) {
             sendLog(process_id, 'info', `[ETAPA1-SRT] ${trimmed.substring(0, 220)}`);
@@ -4027,6 +4074,7 @@ app.post('/api/emit', async (req, res) => {
         for (const line of text.split('\n')) {
           const trimmed = line.trim();
           if (!trimmed) continue;
+          updateLiveStats(process_id, trimmed);
           if (!/^frame=|^size=/.test(trimmed)) {
             sendLog(process_id, 'info', `[ETAPA1-SRT] ${trimmed.substring(0, 220)}`);
           }
@@ -4343,6 +4391,7 @@ app.post('/api/emit', async (req, res) => {
       for (const line of lines) {
         stderrBuffer.push(line.trim());
         if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
+        updateLiveStats(process_id, line);
       }
 
       // ── Canal 6: detector de 404 storm de playlist ──
@@ -5510,6 +5559,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       const output = data.toString();
       
       if (output.includes('frame=') || output.includes('fps=')) {
+        updateLiveStats(process_id, output);
         const currentStatus = emissionStatuses.get(process_id);
         if (currentStatus === 'starting') {
           emissionStatuses.set(process_id, 'running');
@@ -6089,6 +6139,7 @@ app.get('/api/status', (req, res) => {
       process_id,
       status,
       process_running: processData && processData.process && !processData.process.killed,
+      live: getLiveStats(process_id),
       timestamp: new Date().toISOString()
     });
   } else {
@@ -6096,12 +6147,13 @@ app.get('/api/status', (req, res) => {
     // (usado por el frontend para sincronizar el toggle tras un fallback automático).
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i <= 20; i++) {
+    for (let i = 0; i <= 26; i++) {
       const id = i.toString();
       const processData = ffmpegProcesses.get(id) ?? ffmpegProcesses.get(String(id));
       allStatuses[id] = {
         status: emissionStatuses.get(id) || 'idle',
-        process_running: processData && processData.process && !processData.process.killed
+        process_running: processData && processData.process && !processData.process.killed,
+        live: getLiveStats(id)
       };
     }
     res.json({
