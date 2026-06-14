@@ -15,9 +15,18 @@ export interface MetricsDataPoint {
 
 export interface ServerMetrics {
   timestamp: number;
-  cpu: { usage: number; cores: number };
+  cpu: { usage: number; cores: number; loadRatio?: number };
   memory: { total: number; used: number; free: number; percent: number };
-  network: { rxMbps: number; txMbps: number };
+  network: {
+    rxMbps: number;
+    txMbps: number;
+    linkMbps?: number;
+    rxPercent?: number;
+    txPercent?: number;
+  };
+  disk?: { totalGB: number; usedGB: number; freeGB: number; percent: number };
+  swap?: { totalMB: number; usedMB: number; percent: number };
+  ffmpegCount?: number;
   uptime: number;
   loadAvg: number[];
 }
