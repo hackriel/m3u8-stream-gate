@@ -5559,6 +5559,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       const output = data.toString();
       
       if (output.includes('frame=') || output.includes('fps=')) {
+        updateLiveStats(process_id, output);
         const currentStatus = emissionStatuses.get(process_id);
         if (currentStatus === 'starting') {
           emissionStatuses.set(process_id, 'running');
