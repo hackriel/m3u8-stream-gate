@@ -89,13 +89,18 @@ const FOXMAS_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9005?streamid=foxmas&late
 const FOX_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9006?streamid=fox&latency=2000000";
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
-type OutputProfile = "normal" | "balanced" | "optimized";
+type OutputProfile = "passthrough" | "normal" | "balanced" | "optimized";
 const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
 const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
+  passthrough: "Passthrough · tal cual lo manda OBS (sin re-encode)",
   normal: "Normal · 720p CBR 2000k + AAC 128k",
   balanced: "Balanceada · 540p CBR 1500k + AAC 128k (faster)",
   optimized: "Optimizada · 480p CBR 1200k + AAC 128k (faster)",
 };
+// IDs SRT ingest: arrancan por defecto en Passthrough (sin re-encode).
+const SRT_INGEST_INDEXES = new Set<number>([16, 18, 20, 21, 22, 23]);
+const getDefaultOutputProfile = (processIndex: number): OutputProfile =>
+  SRT_INGEST_INDEXES.has(processIndex) ? "passthrough" : DEFAULT_OUTPUT_PROFILE;
 
 // Procesos ocultos legacy
 // 2, 8, 9: Tigo legacy (descartados)
@@ -461,7 +466,7 @@ export default function EmisorM3U8Panel() {
           const profilesFromDb: Record<number, OutputProfile> = {};
           for (const row of data) {
             const raw = (row as unknown as { output_profile?: string }).output_profile;
-            if (raw === 'normal' || raw === 'balanced' || raw === 'optimized') {
+            if (raw === 'normal' || raw === 'balanced' || raw === 'optimized' || raw === 'passthrough') {
               profilesFromDb[row.id] = raw;
             }
           }
@@ -509,7 +514,7 @@ export default function EmisorM3U8Panel() {
             // en tiempo real (cuando se cambia desde otro dispositivo).
             const rawProfile = (row as unknown as { output_profile?: string }).output_profile;
             if (
-              (rawProfile === 'normal' || rawProfile === 'balanced' || rawProfile === 'optimized') &&
+              (rawProfile === 'normal' || rawProfile === 'balanced' || rawProfile === 'optimized' || rawProfile === 'passthrough') &&
               row.id >= 0 && row.id < NUM_PROCESSES
             ) {
               setOutputProfiles((prev) =>
@@ -664,7 +669,8 @@ export default function EmisorM3U8Panel() {
     sessionStorage.setItem("emisor-output-profiles", JSON.stringify(outputProfiles));
   }, [outputProfiles]);
 
-  const getOutputProfile = (processIndex: number): OutputProfile => outputProfiles[processIndex] || DEFAULT_OUTPUT_PROFILE;
+  const getOutputProfile = (processIndex: number): OutputProfile =>
+    outputProfiles[processIndex] || getDefaultOutputProfile(processIndex);
 
   const setOutputProfile = (processIndex: number, profile: OutputProfile) => {
     setOutputProfiles((prev) => ({ ...prev, [processIndex]: profile }));
@@ -2000,12 +2006,17 @@ export default function EmisorM3U8Panel() {
                 disabled={process.isEmitiendo || process.emitStatus === 'starting'}
                 className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60 disabled:cursor-not-allowed"
               >
+                {SRT_INGEST_INDEXES.has(processIndex) && (
+                  <option value="passthrough">{OUTPUT_PROFILE_LABELS.passthrough}</option>
+                )}
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
                 <option value="balanced">{OUTPUT_PROFILE_LABELS.balanced}</option>
                 <option value="optimized">{OUTPUT_PROFILE_LABELS.optimized}</option>
               </select>
               <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-                {outputProfile === 'optimized'
+                {outputProfile === 'passthrough'
+                  ? 'La señal sale del VPS EXACTAMENTE como la manda OBS (resolución/bitrate/codec). Cero re-encode, cero pérdida de calidad, CPU ~3%. Recomendado para SRT: configurá OBS en 720p · 2000-3000 kbps CBR · H264 main · keyframe 2s · AAC 128k 48 kHz.'
+                  : outputProfile === 'optimized'
                   ? 'Máximo ahorro de ancho de banda (480p · 1200k). Ideal para eventos masivos donde el LB suele caer. Calidad buena en celular/tablet.'
                   : outputProfile === 'balanced'
                   ? 'Sweet spot calidad/ancho de banda (540p · 1500k · preset faster). Recomendado para eventos grandes sin sacrificar nitidez visible.'

@@ -739,6 +739,7 @@ const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 //   - x264Params:  ajustes finos de compresión (rc-lookahead/ref/bframes) — solo donde aporta.
 //   - audioBitrate: 128k es el "sweet spot"; bajar a 96k apenas ahorra ancho de banda total.
 const OUTPUT_PROFILES = {
+  passthrough:{ key: 'passthrough',label: 'Passthrough (sin re-encode)', width: '', videoBitrate: '', bufsize: '', audioBitrate: '', preset: '', x264Params: '', passthrough: true },
   normal:     { key: 'normal',     label: 'Normal',     width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'veryfast', x264Params: '' },
   balanced:   { key: 'balanced',   label: 'Balanceada', width: '540', videoBitrate: '1500k', bufsize: '3000k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
   optimized:  { key: 'optimized',  label: 'Optimizada', width: '480', videoBitrate: '1200k', bufsize: '2400k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
@@ -752,11 +753,19 @@ try {
   console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
 }
 const normalizeOutputProfile = (profile) => {
-  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal') return profile;
+  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough') return profile;
   return 'normal';
 };
 const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
-const getStoredOutputProfile = (processId) => normalizeOutputProfile(outputProfileState[String(processId)] || 'normal');
+// IDs SRT ingest (16/18/20/21/22/23): default Passthrough (sin re-encode)
+// para preservar la calidad exacta de OBS y eliminar CPU/generation-loss.
+const SRT_INGEST_DEFAULT_PASSTHROUGH_IDS = new Set(['16','18','20','21','22','23']);
+const getStoredOutputProfile = (processId) => {
+  const stored = outputProfileState[String(processId)];
+  if (stored) return normalizeOutputProfile(stored);
+  if (SRT_INGEST_DEFAULT_PASSTHROUGH_IDS.has(String(processId))) return 'passthrough';
+  return 'normal';
+};
 const saveOutputProfileForProcess = (processId, profile) => {
   const normalized = normalizeOutputProfile(profile);
   outputProfileState[String(processId)] = normalized;
@@ -1214,6 +1223,7 @@ const startSrtIngest = (process_id) => {
 
   // Perfil de encoding (mismo helper que el resto del sistema usa).
   const stageProfile = getOutputProfileConfig(getStoredOutputProfile(process_id));
+  const isPassthrough = !!stageProfile.passthrough;
   const vBitrate = stageProfile.videoBitrate;
   const vBufsize = stageProfile.bufsize;
   const vHeight = stageProfile.width;
@@ -1236,7 +1246,7 @@ const startSrtIngest = (process_id) => {
   }
 
   const outPlaylist = path.join(outDir, 'playlist.m3u8');
-  const args = [
+  const encodeArgs = [
     '-hide_banner',
     '-loglevel', 'verbose',
     '-stats',
@@ -1275,10 +1285,43 @@ const startSrtIngest = (process_id) => {
     '-hls_start_number_source', 'epoch',
     outPlaylist,
   ];
+  // PASSTHROUGH: sólo remux SRT → HLS, sin tocar codec/bitrate/resolución.
+  // Lo que manda OBS llega idéntico al cliente. CPU ~3% por canal y cero
+  // generation loss. Requiere que OBS mande H264+AAC (caso estándar).
+  // hls_time=6 para alinear con keyframes de OBS (típico 2s) — segmento
+  // arranca en keyframe natural sin -force_key_frames.
+  const passthroughArgs = [
+    '-hide_banner',
+    '-loglevel', 'verbose',
+    '-stats',
+    '-fflags', '+genpts+discardcorrupt+nobuffer',
+    '-analyzeduration', '3000000',
+    '-probesize', '2000000',
+    '-i', srtInput,
+    '-map', '0:v:0?',
+    '-map', '0:a:0?',
+    '-c:v', 'copy',
+    '-c:a', 'copy',
+    '-bsf:v', 'h264_mp4toannexb',
+    '-max_muxing_queue_size', '1024',
+    '-reset_timestamps', '1',
+    '-f', 'hls',
+    '-hls_time', '6',
+    '-hls_list_size', '6',
+    '-hls_flags', 'delete_segments+independent_segments',
+    '-hls_segment_type', 'mpegts',
+    '-hls_segment_filename', path.join(outDir, 'seg_%05d.ts'),
+    '-hls_allow_cache', '1',
+    '-hls_start_number_source', 'epoch',
+    outPlaylist,
+  ];
+  const args = isPassthrough ? passthroughArgs : encodeArgs;
 
   const proc = spawn('ffmpeg', args);
   updateTigoSrtMetric(process_id, { connected: false, since: Date.now() });
-  cfg._lastProfile = `${vHeight}p CBR ${vBitrate} @ ${srtFps}fps preset=${vPreset}`;
+  cfg._lastProfile = isPassthrough
+    ? 'PASSTHROUGH (copy v+a, sin re-encode)'
+    : `${vHeight}p CBR ${vBitrate} @ ${srtFps}fps preset=${vPreset}`;
   return { process: proc, args, command: `ffmpeg ${args.join(' ')}`, cfg };
 };
 
