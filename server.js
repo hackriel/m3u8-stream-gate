@@ -4391,6 +4391,7 @@ app.post('/api/emit', async (req, res) => {
       for (const line of lines) {
         stderrBuffer.push(line.trim());
         if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
+        updateLiveStats(process_id, line);
       }
 
       // ── Canal 6: detector de 404 storm de playlist ──
