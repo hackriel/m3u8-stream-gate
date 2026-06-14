@@ -2006,12 +2006,17 @@ export default function EmisorM3U8Panel() {
                 disabled={process.isEmitiendo || process.emitStatus === 'starting'}
                 className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60 disabled:cursor-not-allowed"
               >
+                {SRT_INGEST_INDEXES.has(processIndex) && (
+                  <option value="passthrough">{OUTPUT_PROFILE_LABELS.passthrough}</option>
+                )}
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
                 <option value="balanced">{OUTPUT_PROFILE_LABELS.balanced}</option>
                 <option value="optimized">{OUTPUT_PROFILE_LABELS.optimized}</option>
               </select>
               <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-                {outputProfile === 'optimized'
+                {outputProfile === 'passthrough'
+                  ? 'La señal sale del VPS EXACTAMENTE como la manda OBS (resolución/bitrate/codec). Cero re-encode, cero pérdida de calidad, CPU ~3%. Recomendado para SRT: configurá OBS en 720p · 2000-3000 kbps CBR · H264 main · keyframe 2s · AAC 128k 48 kHz.'
+                  : outputProfile === 'optimized'
                   ? 'Máximo ahorro de ancho de banda (480p · 1200k). Ideal para eventos masivos donde el LB suele caer. Calidad buena en celular/tablet.'
                   : outputProfile === 'balanced'
                   ? 'Sweet spot calidad/ancho de banda (540p · 1500k · preset faster). Recomendado para eventos grandes sin sacrificar nitidez visible.'
