@@ -2945,17 +2945,78 @@ export default function EmisorM3U8Panel() {
                 </div>
                 <div className="bg-card/50 rounded-xl p-4 border border-border">
                   <p className="text-xs text-muted-foreground mb-1">↓ Red (Rx)</p>
-                  <p className="text-2xl font-bold font-mono text-primary">
-                    {latestMetrics?.network.rxMbps?.toFixed(2) || '0.00'}
+                  <p className={`text-2xl font-bold font-mono ${
+                    (latestMetrics?.network.rxPercent || 0) > 80 ? 'text-destructive' :
+                    (latestMetrics?.network.rxPercent || 0) > 50 ? 'text-warning' : 'text-primary'
+                  }`}>
+                    {latestMetrics?.network.rxMbps?.toFixed(1) || '0.0'} <span className="text-sm">Mbps</span>
                   </p>
-                  <p className="text-xs text-muted-foreground">MB/s</p>
+                  <p className="text-xs text-muted-foreground">
+                    {latestMetrics?.network.linkMbps
+                      ? `${latestMetrics.network.rxPercent?.toFixed(1) ?? '0.0'}% de ${latestMetrics.network.linkMbps} Mbps`
+                      : 'NIC desconocido'}
+                  </p>
                 </div>
                 <div className="bg-card/50 rounded-xl p-4 border border-border">
                   <p className="text-xs text-muted-foreground mb-1">↑ Red (Tx)</p>
-                  <p className="text-2xl font-bold font-mono text-primary">
-                    {latestMetrics?.network.txMbps?.toFixed(2) || '0.00'}
+                  <p className={`text-2xl font-bold font-mono ${
+                    (latestMetrics?.network.txPercent || 0) > 80 ? 'text-destructive' :
+                    (latestMetrics?.network.txPercent || 0) > 50 ? 'text-warning' : 'text-primary'
+                  }`}>
+                    {latestMetrics?.network.txMbps?.toFixed(1) || '0.0'} <span className="text-sm">Mbps</span>
                   </p>
-                  <p className="text-xs text-muted-foreground">MB/s</p>
+                  <p className="text-xs text-muted-foreground">
+                    {latestMetrics?.network.linkMbps
+                      ? `${latestMetrics.network.txPercent?.toFixed(1) ?? '0.0'}% de ${latestMetrics.network.linkMbps} Mbps`
+                      : 'NIC desconocido'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Indicadores extra: disco, swap, load, ffmpeg */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <p className="text-xs text-muted-foreground mb-1">💽 Disco</p>
+                  <p className={`text-2xl font-bold font-mono ${
+                    (latestMetrics?.disk?.percent || 0) > 85 ? 'text-destructive' :
+                    (latestMetrics?.disk?.percent || 0) > 70 ? 'text-warning' : 'text-primary'
+                  }`}>
+                    {latestMetrics?.disk?.percent?.toFixed(1) ?? '0.0'}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {latestMetrics?.disk?.usedGB ?? 0} / {latestMetrics?.disk?.totalGB ?? 0} GB
+                  </p>
+                </div>
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <p className="text-xs text-muted-foreground mb-1" title="Si > 0, la RAM está saturada">🔁 Swap</p>
+                  <p className={`text-2xl font-bold font-mono ${
+                    (latestMetrics?.swap?.percent || 0) > 10 ? 'text-destructive' :
+                    (latestMetrics?.swap?.percent || 0) > 0 ? 'text-warning' : 'text-primary'
+                  }`}>
+                    {latestMetrics?.swap?.percent?.toFixed(1) ?? '0.0'}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {latestMetrics?.swap?.usedMB ?? 0} / {latestMetrics?.swap?.totalMB ?? 0} MB
+                  </p>
+                </div>
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <p className="text-xs text-muted-foreground mb-1" title="loadAvg 1min ÷ cores. >1 = saturado">⚖️ Load ratio</p>
+                  <p className={`text-2xl font-bold font-mono ${
+                    (latestMetrics?.cpu.loadRatio || 0) > 1 ? 'text-destructive' :
+                    (latestMetrics?.cpu.loadRatio || 0) > 0.7 ? 'text-warning' : 'text-primary'
+                  }`}>
+                    {latestMetrics?.cpu.loadRatio?.toFixed(2) ?? '0.00'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    load {latestMetrics?.loadAvg?.[0]?.toFixed(2) ?? '0.00'} / {latestMetrics?.cpu.cores ?? 0} cores
+                  </p>
+                </div>
+                <div className="bg-card/50 rounded-xl p-4 border border-border">
+                  <p className="text-xs text-muted-foreground mb-1">🎬 FFmpeg</p>
+                  <p className="text-2xl font-bold font-mono text-primary">
+                    {latestMetrics?.ffmpegCount ?? 0}
+                  </p>
+                  <p className="text-xs text-muted-foreground">procesos activos</p>
                 </div>
               </div>
 
@@ -2997,7 +3058,9 @@ export default function EmisorM3U8Panel() {
 
                 {/* Red */}
                 <div className="bg-card/50 rounded-xl p-4 border border-border">
-                  <h3 className="text-sm font-medium text-muted-foreground mb-3">🌐 Red (MB/s)</h3>
+                  <h3 className="text-sm font-medium text-muted-foreground mb-3">
+                    🌐 Red (Mbps){latestMetrics?.network.linkMbps ? ` · NIC ${latestMetrics.network.linkMbps} Mbps` : ''}
+                  </h3>
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={metricsHistory}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -3007,8 +3070,8 @@ export default function EmisorM3U8Panel() {
                         contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
                         labelStyle={{ color: 'hsl(var(--foreground))' }}
                       />
-                      <Line type="monotone" dataKey="rxMbps" stroke="#22c55e" strokeWidth={2} dot={false} name="↓ Rx MB/s" />
-                      <Line type="monotone" dataKey="txMbps" stroke="#f97316" strokeWidth={2} dot={false} name="↑ Tx MB/s" />
+                      <Line type="monotone" dataKey="rxMbps" stroke="#22c55e" strokeWidth={2} dot={false} name="↓ Rx Mbps" />
+                      <Line type="monotone" dataKey="txMbps" stroke="#f97316" strokeWidth={2} dot={false} name="↑ Tx Mbps" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
