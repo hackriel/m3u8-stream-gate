@@ -2603,6 +2603,9 @@ export default function EmisorM3U8Panel() {
                       const fpsHealthy = live?.fps == null ? true : live.fps >= 25;
                       const speedHealthy = live?.speed == null ? true : live.speed >= 0.95;
                       const dropAlert = (live?.drop ?? 0) > 0;
+                      const dupAlert = (live?.dup ?? 0) > 0;
+                      const qValue = live?.q;
+                      const qHealthy = qValue == null ? true : qValue <= 30;
                       return (
                         <div
                           key={i}
@@ -2610,8 +2613,8 @@ export default function EmisorM3U8Panel() {
                         >
                           <div className="flex items-start justify-between gap-2 mb-3">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className={`inline-block h-2.5 w-2.5 rounded-full ${color.bg} animate-pulse flex-shrink-0`}></span>
-                              <h3 className={`text-sm font-bold truncate ${color.text}`} title={color.name}>
+                              <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-400 animate-pulse flex-shrink-0"></span>
+                              <h3 className="text-sm font-bold truncate text-green-400" title={color.name}>
                                 {color.name}
                               </h3>
                             </div>
@@ -2627,7 +2630,7 @@ export default function EmisorM3U8Panel() {
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="grid grid-cols-3 gap-2 text-xs">
                             <div className="bg-background/40 rounded-lg p-2 border border-border/40">
                               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Bitrate</div>
                               <div className="font-mono font-semibold text-foreground">
@@ -2650,6 +2653,18 @@ export default function EmisorM3U8Panel() {
                               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Drops</div>
                               <div className={`font-mono font-semibold ${dropAlert ? 'text-red-400' : 'text-foreground'}`}>
                                 {live?.drop ?? 0}
+                              </div>
+                            </div>
+                            <div className={`bg-background/40 rounded-lg p-2 border ${dupAlert ? 'border-amber-500/50' : 'border-border/40'}`}>
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground" title="Frames duplicados — timing irregular del origen">Dup</div>
+                              <div className={`font-mono font-semibold ${dupAlert ? 'text-amber-400' : 'text-foreground'}`}>
+                                {live?.dup ?? 0}
+                              </div>
+                            </div>
+                            <div className={`bg-background/40 rounded-lg p-2 border ${qHealthy ? 'border-border/40' : 'border-amber-500/50'}`}>
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground" title="Quantizer — calidad de compresión (≤30 ideal, >30 = bitrate/CPU insuficiente)">Q</div>
+                              <div className={`font-mono font-semibold ${qHealthy ? 'text-foreground' : 'text-amber-400'}`}>
+                                {qValue != null ? qValue.toFixed(1) : '—'}
                               </div>
                             </div>
                           </div>
