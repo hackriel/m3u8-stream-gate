@@ -739,6 +739,7 @@ const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 //   - x264Params:  ajustes finos de compresión (rc-lookahead/ref/bframes) — solo donde aporta.
 //   - audioBitrate: 128k es el "sweet spot"; bajar a 96k apenas ahorra ancho de banda total.
 const OUTPUT_PROFILES = {
+  passthrough:{ key: 'passthrough',label: 'Passthrough (sin re-encode)', width: '', videoBitrate: '', bufsize: '', audioBitrate: '', preset: '', x264Params: '', passthrough: true },
   normal:     { key: 'normal',     label: 'Normal',     width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'veryfast', x264Params: '' },
   balanced:   { key: 'balanced',   label: 'Balanceada', width: '540', videoBitrate: '1500k', bufsize: '3000k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
   optimized:  { key: 'optimized',  label: 'Optimizada', width: '480', videoBitrate: '1200k', bufsize: '2400k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
@@ -752,11 +753,19 @@ try {
   console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
 }
 const normalizeOutputProfile = (profile) => {
-  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal') return profile;
+  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough') return profile;
   return 'normal';
 };
 const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
-const getStoredOutputProfile = (processId) => normalizeOutputProfile(outputProfileState[String(processId)] || 'normal');
+// IDs SRT ingest (16/18/20/21/22/23): default Passthrough (sin re-encode)
+// para preservar la calidad exacta de OBS y eliminar CPU/generation-loss.
+const SRT_INGEST_DEFAULT_PASSTHROUGH_IDS = new Set(['16','18','20','21','22','23']);
+const getStoredOutputProfile = (processId) => {
+  const stored = outputProfileState[String(processId)];
+  if (stored) return normalizeOutputProfile(stored);
+  if (SRT_INGEST_DEFAULT_PASSTHROUGH_IDS.has(String(processId))) return 'passthrough';
+  return 'normal';
+};
 const saveOutputProfileForProcess = (processId, profile) => {
   const normalized = normalizeOutputProfile(profile);
   outputProfileState[String(processId)] = normalized;
