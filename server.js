@@ -6139,6 +6139,7 @@ app.get('/api/status', (req, res) => {
       process_id,
       status,
       process_running: processData && processData.process && !processData.process.killed,
+      live: getLiveStats(process_id),
       timestamp: new Date().toISOString()
     });
   } else {
@@ -6151,7 +6152,8 @@ app.get('/api/status', (req, res) => {
       const processData = ffmpegProcesses.get(id) ?? ffmpegProcesses.get(String(id));
       allStatuses[id] = {
         status: emissionStatuses.get(id) || 'idle',
-        process_running: processData && processData.process && !processData.process.killed
+        process_running: processData && processData.process && !processData.process.killed,
+        live: getLiveStats(id)
       };
     }
     res.json({
