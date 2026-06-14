@@ -6272,8 +6272,10 @@ const getNetworkStats = () => {
       
       if (prevNetStats) {
         const elapsed = (current.time - prevNetStats.time) / 1000;
-        const rxRate = elapsed > 0 ? ((current.rx - prevNetStats.rx) / elapsed / 1024 / 1024) : 0; // MB/s
-        const txRate = elapsed > 0 ? ((current.tx - prevNetStats.tx) / elapsed / 1024 / 1024) : 0; // MB/s
+        // Convertir bytes/s → megabits/s (Mbps reales, lo que usan los proveedores)
+        // bytes * 8 = bits; / 1_000_000 = Mbps (base 10, no Mebibits)
+        const rxRate = elapsed > 0 ? ((current.rx - prevNetStats.rx) * 8 / elapsed / 1_000_000) : 0;
+        const txRate = elapsed > 0 ? ((current.tx - prevNetStats.tx) * 8 / elapsed / 1_000_000) : 0;
         prevNetStats = current;
         return {
           rxMbps: Math.round(rxRate * 100) / 100,
@@ -6291,6 +6293,88 @@ const getNetworkStats = () => {
   }
 };
 
+// Velocidad nominal del NIC físico (Mbps). Lee /sys/class/net/<iface>/speed.
+// Se cachea: el link speed no cambia en runtime.
+let cachedLinkMbps = null;
+const getNicLinkMbps = () => {
+  if (cachedLinkMbps !== null) return cachedLinkMbps;
+  try {
+    const base = '/sys/class/net';
+    if (!fs.existsSync(base)) { cachedLinkMbps = 0; return 0; }
+    const ifaces = fs.readdirSync(base).filter(n => n !== 'lo' && !n.startsWith('docker') && !n.startsWith('veth') && !n.startsWith('br-'));
+    let best = 0;
+    for (const name of ifaces) {
+      try {
+        const speedFile = `${base}/${name}/speed`;
+        if (!fs.existsSync(speedFile)) continue;
+        const v = parseInt(fs.readFileSync(speedFile, 'utf8').trim(), 10);
+        if (Number.isFinite(v) && v > best) best = v;
+      } catch {}
+    }
+    cachedLinkMbps = best > 0 ? best : 0;
+    return cachedLinkMbps;
+  } catch {
+    cachedLinkMbps = 0;
+    return 0;
+  }
+};
+
+// Uso de disco del volumen raíz (donde viven HLS/logs)
+const getDiskStats = () => {
+  try {
+    if (typeof fs.statfsSync !== 'function') return { totalGB: 0, usedGB: 0, freeGB: 0, percent: 0 };
+    const s = fs.statfsSync('/');
+    const total = s.blocks * s.bsize;
+    const free = s.bavail * s.bsize;
+    const used = total - free;
+    return {
+      totalGB: Math.round(total / 1024 / 1024 / 1024 * 10) / 10,
+      usedGB: Math.round(used / 1024 / 1024 / 1024 * 10) / 10,
+      freeGB: Math.round(free / 1024 / 1024 / 1024 * 10) / 10,
+      percent: total > 0 ? Math.round((used / total) * 1000) / 10 : 0,
+    };
+  } catch {
+    return { totalGB: 0, usedGB: 0, freeGB: 0, percent: 0 };
+  }
+};
+
+// Swap desde /proc/meminfo (alerta temprana: si empieza a usarse, RAM saturada)
+const getSwapStats = () => {
+  try {
+    if (!fs.existsSync('/proc/meminfo')) return { totalMB: 0, usedMB: 0, percent: 0 };
+    const txt = fs.readFileSync('/proc/meminfo', 'utf8');
+    const tot = parseInt((txt.match(/SwapTotal:\s+(\d+)/) || [])[1] || '0', 10); // kB
+    const free = parseInt((txt.match(/SwapFree:\s+(\d+)/) || [])[1] || '0', 10);
+    const used = Math.max(0, tot - free);
+    return {
+      totalMB: Math.round(tot / 1024),
+      usedMB: Math.round(used / 1024),
+      percent: tot > 0 ? Math.round((used / tot) * 1000) / 10 : 0,
+    };
+  } catch {
+    return { totalMB: 0, usedMB: 0, percent: 0 };
+  }
+};
+
+// Cuenta procesos FFmpeg activos en el sistema (escaneo barato de /proc)
+const getFfmpegCount = () => {
+  try {
+    if (!fs.existsSync('/proc')) return 0;
+    const entries = fs.readdirSync('/proc');
+    let n = 0;
+    for (const e of entries) {
+      if (!/^\d+$/.test(e)) continue;
+      try {
+        const comm = fs.readFileSync(`/proc/${e}/comm`, 'utf8').trim();
+        if (comm === 'ffmpeg') n++;
+      } catch {}
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+};
+
 app.get('/api/metrics', (req, res) => {
   try {
     const totalMem = os.totalmem();
@@ -6299,12 +6383,19 @@ app.get('/api/metrics', (req, res) => {
     
     const cpuUsage = getCpuUsage();
     const network = getNetworkStats();
+    const linkMbps = getNicLinkMbps();
+    const disk = getDiskStats();
+    const swap = getSwapStats();
+    const ffmpegCount = getFfmpegCount();
+    const cores = os.cpus().length;
+    const load = os.loadavg();
     
     res.json({
       timestamp: Date.now(),
       cpu: {
         usage: cpuUsage,
-        cores: os.cpus().length
+        cores,
+        loadRatio: cores > 0 ? Math.round((load[0] / cores) * 100) / 100 : 0, // >1 = saturado
       },
       memory: {
         total: Math.round(totalMem / 1024 / 1024), // MB
@@ -6314,18 +6405,27 @@ app.get('/api/metrics', (req, res) => {
       },
       network: {
         rxMbps: network.rxMbps,
-        txMbps: network.txMbps
+        txMbps: network.txMbps,
+        linkMbps,
+        rxPercent: linkMbps > 0 ? Math.round((network.rxMbps / linkMbps) * 1000) / 10 : 0,
+        txPercent: linkMbps > 0 ? Math.round((network.txMbps / linkMbps) * 1000) / 10 : 0,
       },
+      disk,
+      swap,
+      ffmpegCount,
       uptime: os.uptime(),
-      loadAvg: os.loadavg()
+      loadAvg: load,
     });
   } catch (error) {
     // Nunca devolver 500 al dashboard de métricas
     res.status(200).json({
       timestamp: Date.now(),
-      cpu: { usage: 0, cores: 0 },
+      cpu: { usage: 0, cores: 0, loadRatio: 0 },
       memory: { total: 0, used: 0, free: 0, percent: 0 },
-      network: { rxMbps: 0, txMbps: 0 },
+      network: { rxMbps: 0, txMbps: 0, linkMbps: 0, rxPercent: 0, txPercent: 0 },
+      disk: { totalGB: 0, usedGB: 0, freeGB: 0, percent: 0 },
+      swap: { totalMB: 0, usedMB: 0, percent: 0 },
+      ffmpegCount: 0,
       uptime: 0,
       loadAvg: [0, 0, 0],
       degraded: true,
