@@ -3082,6 +3082,7 @@ app.post('/api/emit', async (req, res) => {
         m3u8: effectiveSourceM3u8,
         rtmp: isHlsOutput ? 'hls-local' : target_rtmp,
         source_url: effectiveSourceM3u8,
+        output_profile: outputProfileKey,
         is_active: true,
         is_emitting: true,
         emit_status: 'starting',
