@@ -466,7 +466,7 @@ export default function EmisorM3U8Panel() {
           const profilesFromDb: Record<number, OutputProfile> = {};
           for (const row of data) {
             const raw = (row as unknown as { output_profile?: string }).output_profile;
-            if (raw === 'normal' || raw === 'balanced' || raw === 'optimized') {
+            if (raw === 'normal' || raw === 'balanced' || raw === 'optimized' || raw === 'passthrough') {
               profilesFromDb[row.id] = raw;
             }
           }
@@ -514,7 +514,7 @@ export default function EmisorM3U8Panel() {
             // en tiempo real (cuando se cambia desde otro dispositivo).
             const rawProfile = (row as unknown as { output_profile?: string }).output_profile;
             if (
-              (rawProfile === 'normal' || rawProfile === 'balanced' || rawProfile === 'optimized') &&
+              (rawProfile === 'normal' || rawProfile === 'balanced' || rawProfile === 'optimized' || rawProfile === 'passthrough') &&
               row.id >= 0 && row.id < NUM_PROCESSES
             ) {
               setOutputProfiles((prev) =>
