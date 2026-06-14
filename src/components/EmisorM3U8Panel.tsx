@@ -2481,6 +2481,30 @@ export default function EmisorM3U8Panel() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="mb-6 px-1 overflow-x-auto scrollbar-hide md:flex md:justify-center">
             <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border inline-flex flex-nowrap gap-1 min-w-max md:flex-wrap md:min-w-0">
+              {/* Tab UPTIME — vista resumen de señales activas con cronómetro y telemetría */}
+              {(() => {
+                const activeCount = VISIBLE_PROCESSES.filter(i => processes[i]?.isEmitiendo).length;
+                return (
+                  <TabsTrigger
+                    key="uptime"
+                    value="uptime"
+                    className={`px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl transition-all duration-200 relative flex-shrink-0 ${
+                      activeTab === 'uptime'
+                        ? 'bg-primary text-primary-foreground shadow-lg'
+                        : 'hover:bg-muted/50'
+                    }`}
+                  >
+                    <span className="relative flex items-center justify-center gap-1 sm:gap-1.5 text-xs sm:text-sm whitespace-nowrap font-semibold">
+                      📊 UPTIME
+                      {activeCount > 0 && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold">
+                          {activeCount}
+                        </span>
+                      )}
+                    </span>
+                  </TabsTrigger>
+                );
+              })()}
               {VISIBLE_PROCESSES.map((i) => {
                 const color = getProcessColor(i);
                 const process = processes[i];
