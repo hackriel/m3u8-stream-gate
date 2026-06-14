@@ -401,8 +401,15 @@ export default function EmisorM3U8Panel() {
       if (!resp.ok) return;
 
       const data = await resp.json();
-      const serverProcesses = data?.processes as Record<string, { status?: string; process_running?: boolean }> | undefined;
+      const serverProcesses = data?.processes as Record<string, { status?: string; process_running?: boolean; live?: LiveStats | null }> | undefined;
       if (!serverProcesses) return;
+
+      // Sincronizar live stats (telemetría en vivo) — usado por el tab Uptime
+      const nextLive: Record<string, LiveStats> = {};
+      for (const [id, st] of Object.entries(serverProcesses)) {
+        if (st && st.live) nextLive[id] = st.live;
+      }
+      setLiveStats(nextLive);
 
       setProcesses(prev => prev.map((process, index) => {
         const serverState = serverProcesses[index.toString()];
