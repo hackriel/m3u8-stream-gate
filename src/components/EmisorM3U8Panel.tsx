@@ -392,6 +392,9 @@ export default function EmisorM3U8Panel() {
     Array.from({ length: NUM_PROCESSES }, defaultProcess)
   );
 
+  // Live stats por proceso (bitrate, fps, drops, RTT SRT...) — alimentado por /api/status
+  const [liveStats, setLiveStats] = useState<Record<string, LiveStats>>({});
+
   const reconcileWithServerStatus = useCallback(async () => {
     try {
       const resp = await fetch('/api/status');
