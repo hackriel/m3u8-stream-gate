@@ -2562,6 +2562,142 @@ export default function EmisorM3U8Panel() {
             </TabsContent>
           ))}
 
+          {/* Contenido tab UPTIME — grid responsive de señales activas */}
+          <TabsContent key="uptime" value="uptime">
+            {(() => {
+              const activeIndexes = VISIBLE_PROCESSES.filter(i => processes[i]?.isEmitiendo);
+              if (activeIndexes.length === 0) {
+                return (
+                  <div className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-12 shadow-lg border border-broadcast-border/50 text-center">
+                    <div className="text-5xl mb-3">💤</div>
+                    <h2 className="text-xl font-semibold text-muted-foreground mb-1">No hay señales activas</h2>
+                    <p className="text-sm text-muted-foreground">Cuando arranques una emisión aparecerá aquí con su cronómetro y telemetría en vivo.</p>
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-4">
+                  <header className="flex flex-wrap items-center justify-between gap-3 px-1">
+                    <div>
+                      <h2 className="text-2xl font-bold text-accent flex items-center gap-2">
+                        📊 Señales activas
+                        <span className="text-xs font-normal px-2 py-1 rounded-md bg-green-500/15 text-green-400 border border-green-500/30">
+                          {activeIndexes.length} en vivo
+                        </span>
+                      </h2>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Telemetría refrescada cada 5s · cronómetro cada 1s
+                      </p>
+                    </div>
+                  </header>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {activeIndexes.map((i) => {
+                      const p = processes[i];
+                      const color = getProcessColor(i);
+                      const live = liveStats[i.toString()];
+                      const elapsed = p.startTime > 0
+                        ? Math.max(0, Math.floor((clockNow - p.startTime) / 1000))
+                        : p.elapsed;
+                      const isSrt = SRT_INGEST_INDEXES.has(i);
+                      const fpsHealthy = live?.fps == null ? true : live.fps >= 25;
+                      const speedHealthy = live?.speed == null ? true : live.speed >= 0.95;
+                      const dropAlert = (live?.drop ?? 0) > 0;
+                      return (
+                        <div
+                          key={i}
+                          className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-4 shadow-lg border border-broadcast-border/50 hover:border-green-500/40 transition-all duration-200"
+                        >
+                          <div className="flex items-start justify-between gap-2 mb-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className={`inline-block h-2.5 w-2.5 rounded-full ${color.bg} animate-pulse flex-shrink-0`}></span>
+                              <h3 className={`text-sm font-bold truncate ${color.text}`} title={color.name}>
+                                {color.name}
+                              </h3>
+                            </div>
+                            <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30 flex-shrink-0">
+                              LIVE
+                            </span>
+                          </div>
+
+                          <div className="mb-3">
+                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Uptime</div>
+                            <div className="font-mono text-2xl font-bold text-primary tabular-nums">
+                              {formatSeconds(elapsed)}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="bg-background/40 rounded-lg p-2 border border-border/40">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Bitrate</div>
+                              <div className="font-mono font-semibold text-foreground">
+                                {live?.bitrateKbps != null ? `${live.bitrateKbps} kbps` : '—'}
+                              </div>
+                            </div>
+                            <div className={`bg-background/40 rounded-lg p-2 border ${fpsHealthy ? 'border-border/40' : 'border-red-500/50'}`}>
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">FPS</div>
+                              <div className={`font-mono font-semibold ${fpsHealthy ? 'text-foreground' : 'text-red-400'}`}>
+                                {live?.fps != null ? live.fps.toFixed(1) : '—'}
+                              </div>
+                            </div>
+                            <div className={`bg-background/40 rounded-lg p-2 border ${speedHealthy ? 'border-border/40' : 'border-amber-500/50'}`}>
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Speed</div>
+                              <div className={`font-mono font-semibold ${speedHealthy ? 'text-foreground' : 'text-amber-400'}`}>
+                                {live?.speed != null ? `${live.speed.toFixed(2)}x` : '—'}
+                              </div>
+                            </div>
+                            <div className={`bg-background/40 rounded-lg p-2 border ${dropAlert ? 'border-red-500/50' : 'border-border/40'}`}>
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Drops</div>
+                              <div className={`font-mono font-semibold ${dropAlert ? 'text-red-400' : 'text-foreground'}`}>
+                                {live?.drop ?? 0}
+                              </div>
+                            </div>
+                          </div>
+
+                          {isSrt && (live?.srtRttMs != null || live?.srtBwMbps != null || live?.srtPktsLost != null) && (
+                            <div className="mt-3 pt-3 border-t border-border/40">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
+                                🛰️ Enlace SRT
+                              </div>
+                              <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+                                <div className="bg-background/40 rounded p-1.5 border border-border/40">
+                                  <div className="text-[9px] uppercase text-muted-foreground">RTT</div>
+                                  <div className="font-mono font-semibold">
+                                    {live?.srtRttMs != null ? `${live.srtRttMs.toFixed(0)}ms` : '—'}
+                                  </div>
+                                </div>
+                                <div className="bg-background/40 rounded p-1.5 border border-border/40">
+                                  <div className="text-[9px] uppercase text-muted-foreground">BW</div>
+                                  <div className="font-mono font-semibold">
+                                    {live?.srtBwMbps != null ? `${live.srtBwMbps.toFixed(1)}M` : '—'}
+                                  </div>
+                                </div>
+                                <div className="bg-background/40 rounded p-1.5 border border-border/40">
+                                  <div className="text-[9px] uppercase text-muted-foreground">Lost</div>
+                                  <div className={`font-mono font-semibold ${(live?.srtPktsLost ?? 0) > 0 ? 'text-red-400' : ''}`}>
+                                    {live?.srtPktsLost ?? 0}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab(i.toString())}
+                            className="mt-3 w-full text-[11px] font-medium px-2 py-1.5 rounded-lg bg-muted/40 hover:bg-muted/70 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Abrir tab →
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+          </TabsContent>
+
           {/* Contenido tab Canal 6 TS */}
           <TabsContent key="canal6-ts" value="canal6-ts">
             {(() => {
