@@ -13,9 +13,13 @@
 //   720p · 29.97fps · libx264 main · CBR 2000k · AAC 128k · 44.1kHz stereo
 // ─────────────────────────────────────────────────────────────────────────────
 
-const { spawn } = require('child_process');
-const path = require('path');
-const fs = require('fs');
+import { spawn } from 'child_process';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const FILLER_MP4 = path.join(__dirname, 'assets', 'filler-fox.mp4');
 const HLS_OUTPUT_DIR = path.join(__dirname, 'live');
@@ -128,7 +132,7 @@ async function stopFillerAndWait(processId, sendLog) {
   });
 }
 
-module.exports = {
+export {
   startFiller,
   stopFillerAndWait,
   isFillerActive,
