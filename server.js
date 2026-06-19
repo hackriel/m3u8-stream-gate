@@ -4397,6 +4397,22 @@ app.post('/api/emit', async (req, res) => {
     const PLAYLIST_404_THRESHOLD = 6;
     const isCanal6Stream = process_id === '5';
 
+    // ── FOX URL (25) / FOX+ URL (24): kill ULTRA-rápido en 404 de playlist ──
+    // Estos canales usan URL de TDMax (cdn12.teletica.com). Cuando el token o
+    // la sesión expira, el playlist responde 404 inmediato. Esperar al watchdog
+    // (75s) o al detector Canal 6 (6 fails / 8s) deja a los clientes con
+    // pantalla negra muchos segundos. Aquí cortamos al 2º "Failed to reload
+    // playlist" dentro de 5s → mata FFmpeg, invalida cache, fuerza scrape
+    // fresco vía la auto-recovery existente (Quick Retry + full re-scrape).
+    const foxUrlFast404State = {
+      count: 0,
+      windowStart: Date.now(),
+      restartTriggered: false,
+    };
+    const FOX_URL_404_WINDOW_MS = 5_000;
+    const FOX_URL_404_THRESHOLD = 2;
+    const isFoxUrlScrapedStream = process_id === '24' || process_id === '25';
+
     // Manejar errores con análisis mejorado
     ffmpegProcess.stderr.on('data', (data) => {
       const output = data.toString();
@@ -4432,6 +4448,39 @@ app.post('/api/emit', async (req, res) => {
               }
             } catch (e) {
               console.error('Error en 404-storm restart:', e);
+            }
+            return;
+          }
+        }
+      }
+
+      // ── FOX URL / FOX+ URL: fast-kill en 404 de playlist ──
+      if (isFoxUrlScrapedStream && !foxUrlFast404State.restartTriggered) {
+        const reloadFails = (output.match(/Failed to reload playlist/g) || []).length;
+        if (reloadFails > 0) {
+          const now = Date.now();
+          if (now - foxUrlFast404State.windowStart > FOX_URL_404_WINDOW_MS) {
+            foxUrlFast404State.windowStart = now;
+            foxUrlFast404State.count = 0;
+          }
+          foxUrlFast404State.count += reloadFails;
+          if (foxUrlFast404State.count >= FOX_URL_404_THRESHOLD) {
+            foxUrlFast404State.restartTriggered = true;
+            sendLog(process_id, 'error', `⚡ FOX URL: 404 de playlist (${foxUrlFast404State.count} fails en ${Math.round((now - foxUrlFast404State.windowStart)/1000)}s) → fast-kill para scrape inmediato`);
+            try {
+              scrapeSessionCache.delete(process_id);
+              // Invalidar lastKnownStreamState para que la recovery NO use Quick
+              // Retry con la URL muerta — debe ir directo a scrape fresco.
+              try { lastKnownStreamState.delete(String(process_id)); } catch (_) {}
+              try { quickRetryState.set(process_id, Date.now()); } catch (_) {}
+              if (typeof ffmpegProcess.kill === 'function') {
+                ffmpegProcess.kill('SIGTERM');
+                setTimeout(() => {
+                  try { ffmpegProcess.kill('SIGKILL'); } catch (_) {}
+                }, 2000);
+              }
+            } catch (e) {
+              console.error('Error en FOX URL fast-kill:', e);
             }
             return;
           }
