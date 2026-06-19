@@ -2056,7 +2056,11 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
           return { url: null, error: `TDMax devolvió URL no-live (VOD/ended) para ${channelName}` };
         }
       } else if (TDMAX_CDN_BLOCKED_PROCESSES.has(String(processId)) && [401, 403].includes(verifyResp.status)) {
-        return { url: null, error: `CDN rechazó la URL firmada para ${channelName}: HTTP ${verifyResp.status} desde el VPS (bloqueo de origen/cuenta/firma, no se lanza FFmpeg)` };
+        // FOX/FOX+ en cdn12.teletica.com puede devolver 403 en el GET de
+        // verificación aunque el wmsAuthSign sea válido para FFmpeg. No debemos
+        // abortar aquí: el edge function ya trata este 403 como no fatal y el
+        // VPS debe hacer lo mismo para no caer antes de probar con FFmpeg.
+        sendLog('system', 'warn', `⚠️ Verify ${channelName}: HTTP ${verifyResp.status} en pre-check; no fatal, lanzando FFmpeg con URL firmada + headers TDMax.`);
       } else {
         // 403/401/5xx con headers correctos: probablemente el CDN exige cookie
         // de sesión que FFmpeg recibirá en runtime. Confiamos en FFmpeg y
