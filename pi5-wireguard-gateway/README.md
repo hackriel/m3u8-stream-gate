@@ -29,12 +29,11 @@ gracias a `ipset + iptables mangle + ip rule`. FFmpeg no se entera.
 
 ### 1. En el Pi 5 — comando único
 
-Reemplazá `REEMPLAZAR-USER/REEMPLAZAR-REPO` por tu repo GitHub conectado a Lovable
-(ej. `juanperez/m3u8-stream-gate`). Una sola línea, hace **reset + install**:
+Una sola línea, hace **reset + install**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/REEMPLAZAR-USER/REEMPLAZAR-REPO/main/pi5-wireguard-gateway/bootstrap.sh \
-  | sudo REPO_RAW=https://raw.githubusercontent.com/REEMPLAZAR-USER/REEMPLAZAR-REPO bash
+curl -fsSL https://raw.githubusercontent.com/hackriel/m3u8-stream-gate/main/pi5-wireguard-gateway/bootstrap.sh \
+  | sudo bash
 ```
 
 Cada vez que actualicemos algo en el repo (cambios desde Lovable), corrés

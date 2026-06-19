@@ -20,7 +20,7 @@ fail() { echo -e "${RED}❌ $1${NC}"; exit 1; }
 
 [ "$EUID" -eq 0 ] || fail "Ejecuta como root: curl ... | sudo bash"
 
-REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/REEMPLAZAR-USER/REEMPLAZAR-REPO}"
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/hackriel/m3u8-stream-gate}"
 BRANCH="${BRANCH:-main}"
 BASE_URL="${REPO_RAW}/${BRANCH}/pi5-wireguard-gateway"
 
