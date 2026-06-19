@@ -27,11 +27,23 @@ gracias a `ipset + iptables mangle + ip rule`. FFmpeg no se entera.
 
 ## Instalación
 
-### 1. En el Pi 5
+### 1. En el Pi 5 — comando único
+
+Reemplazá `REEMPLAZAR-USER/REEMPLAZAR-REPO` por tu repo GitHub conectado a Lovable
+(ej. `juanperez/m3u8-stream-gate`). Una sola línea, hace **reset + install**:
 
 ```bash
-sudo bash pi5-wireguard-gateway/install.sh
+curl -fsSL https://raw.githubusercontent.com/REEMPLAZAR-USER/REEMPLAZAR-REPO/main/pi5-wireguard-gateway/bootstrap.sh \
+  | sudo REPO_RAW=https://raw.githubusercontent.com/REEMPLAZAR-USER/REEMPLAZAR-REPO bash
 ```
+
+Cada vez que actualicemos algo en el repo (cambios desde Lovable), corrés
+**la misma línea** y el Pi queda al día. No hay que clonar nada ni copiar
+archivos a mano.
+
+Variables opcionales:
+- `BRANCH=otra-rama` (default `main`)
+- `SKIP_RESET=1` para no limpiar estado previo
 
 Te imprime al final:
 - IP pública detectada
