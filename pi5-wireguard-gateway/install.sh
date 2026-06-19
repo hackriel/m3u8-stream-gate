@@ -158,5 +158,4 @@ echo ""
 echo "  Verificar handshake (desde el Pi):"
 echo "       sudo wg show"
 echo ""
-EOF
 exit 0
