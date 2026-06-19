@@ -14,6 +14,9 @@ import https from 'https';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
+// FOX/FOX+ URL filler (pantalla "RECONECTANDO" mientras se re-scrape)
+import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
+
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
 const tigoProxies = new Map();
 const stopTigoProxy = async (_process_id) => {};
@@ -3904,6 +3907,17 @@ app.post('/api/emit', async (req, res) => {
     } else if (isHlsOutput) {
       const hlsSlug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
       const hlsDir = path.join(HLS_OUTPUT_DIR, hlsSlug);
+      // ── EMPALME SIN CORTE desde FILLER (sólo FOX/FOX+ URL 24/25) ──
+      // Si el filler "RECONECTANDO" está activo, lo detenemos y NO wipeamos
+      // la carpeta: dejamos que el nuevo FFmpeg LIVE haga append al mismo
+      // playlist (epoch + append_list garantizan numeración monotónica).
+      // Así los clientes pasan de pantalla filler → señal en vivo sin tener
+      // que reabrir el manifest.
+      const fillerWasActive = foxIsFillerSupported(process_id) && foxIsFillerActive(process_id);
+      if (fillerWasActive) {
+        try { await foxStopFillerAndWait(process_id, sendLog); } catch (_) {}
+        sendLog(process_id, 'info', `🎞️ FILLER → LIVE: empalme sin wipe (clientes mantienen sesión HLS)`);
+      }
       // ── WIPE AGRESIVO de la carpeta HLS antes de arrancar FFmpeg ──
       // CRÍTICO: en este punto el FFmpeg viejo (si existía) ya fue matado y
       // esperado en líneas 2041-2042 (waitForProcessDeath escala a SIGKILL),
@@ -3911,17 +3925,21 @@ app.post('/api/emit', async (req, res) => {
       // Borramos TODA la carpeta de raíz (recursive) en vez de unlink por
       // archivo: evita que XUI pull un manifest con segmentos viejos
       // mezclados con timestamps nuevos (causa raíz del "loop" tras caídas).
-      try {
-        if (fs.existsSync(hlsDir)) {
-          fs.rmSync(hlsDir, { recursive: true, force: true });
+      if (!fillerWasActive) {
+        try {
+          if (fs.existsSync(hlsDir)) {
+            fs.rmSync(hlsDir, { recursive: true, force: true });
+          }
+        } catch (e) {
+          sendLog(process_id, 'warn', `⚠️ No se pudo borrar ${hlsDir}: ${e.message} (FFmpeg sobreescribirá igual)`);
         }
-      } catch (e) {
-        sendLog(process_id, 'warn', `⚠️ No se pudo borrar ${hlsDir}: ${e.message} (FFmpeg sobreescribirá igual)`);
       }
       try {
         fs.mkdirSync(hlsDir, { recursive: true });
       } catch (_) {}
-      sendLog(process_id, 'info', `🧹 Carpeta HLS limpiada: ${hlsDir} (sin segmentos viejos)`);
+      if (!fillerWasActive) {
+        sendLog(process_id, 'info', `🧹 Carpeta HLS limpiada: ${hlsDir} (sin segmentos viejos)`);
+      }
 
       const hlsPlaylistPath = path.join(hlsDir, 'playlist.m3u8');
       ffmpegArgs.push(
@@ -4861,7 +4879,21 @@ app.post('/api/emit', async (req, res) => {
       stopTigoProxy(process_id).catch(() => {});
 
       lastFrameTime.delete(process_id); // Limpiar watchdog
-      
+
+      // ──────────────────────────────────────────────────────────────────
+      // FOX / FOX+ URL (24/25): arrancar FILLER inmediatamente
+      // ──────────────────────────────────────────────────────────────────
+      // Mostramos la pantalla "RECONECTANDO · Media TV" durante la
+      // ventana de re-scrape. El playlist HLS sigue creciendo en la misma
+      // carpeta /live/<slug>/, así los clientes (XUI/players) NO ven
+      // "señal perdida". Cuando el nuevo FFmpeg LIVE arranque, se
+      // empalma sin wipe (ver bloque isHlsOutput arriba).
+      if (!isManualStop && foxIsFillerSupported(process_id)) {
+        foxStartFiller(process_id, sendLog);
+      } else if (isManualStop && foxIsFillerSupported(process_id) && foxIsFillerActive(process_id)) {
+        foxStopFillerAndWait(process_id, sendLog).catch(()=>{});
+      }
+
       // AUTO-RECOVERY: Para canales con scraping (usa CHANNEL_MAP global)
 
       if (isManualStop) {
@@ -5851,6 +5883,10 @@ app.post('/api/emit/stop', async (req, res) => {
       await stopTigoProxy(process_id);
       // Cerrar listener srt-live-transmit persistente (solo en parada manual)
       if (isSrtIngestProcess(process_id)) stopSrtListener(process_id);
+      // Apagar FILLER FOX/FOX+ si estuviera corriendo (sólo parada manual)
+      if (foxIsFillerSupported(process_id) && foxIsFillerActive(process_id)) {
+        await foxStopFillerAndWait(process_id, sendLog);
+      }
 
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
@@ -5872,6 +5908,10 @@ app.post('/api/emit/stop', async (req, res) => {
       // para cancelar cualquier recovery programado (setTimeout pendiente)
       manualStopProcesses.add(process_id);
       manualStopProcesses.add(Number(process_id));
+      // Apagar FILLER FOX/FOX+ si quedó huérfano sin LIVE
+      if (foxIsFillerSupported(process_id) && foxIsFillerActive(process_id)) {
+        await foxStopFillerAndWait(process_id, sendLog);
+      }
 
       if (persistedPid) {
         emissionStatuses.set(process_id, 'stopping');
