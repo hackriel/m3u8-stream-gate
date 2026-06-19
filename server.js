@@ -5883,6 +5883,10 @@ app.post('/api/emit/stop', async (req, res) => {
       await stopTigoProxy(process_id);
       // Cerrar listener srt-live-transmit persistente (solo en parada manual)
       if (isSrtIngestProcess(process_id)) stopSrtListener(process_id);
+      // Apagar FILLER FOX/FOX+ si estuviera corriendo (sólo parada manual)
+      if (foxIsFillerSupported(process_id) && foxIsFillerActive(process_id)) {
+        await foxStopFillerAndWait(process_id, sendLog);
+      }
 
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
@@ -5904,6 +5908,10 @@ app.post('/api/emit/stop', async (req, res) => {
       // para cancelar cualquier recovery programado (setTimeout pendiente)
       manualStopProcesses.add(process_id);
       manualStopProcesses.add(Number(process_id));
+      // Apagar FILLER FOX/FOX+ si quedó huérfano sin LIVE
+      if (foxIsFillerSupported(process_id) && foxIsFillerActive(process_id)) {
+        await foxStopFillerAndWait(process_id, sendLog);
+      }
 
       if (persistedPid) {
         emissionStatuses.set(process_id, 'stopping');
