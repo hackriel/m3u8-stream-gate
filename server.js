@@ -73,6 +73,9 @@ const TDMAX_BROWSER_HEADERS = {
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'cross-site',
+  'x-app-name': 'TDMAX',
+  'x-app-platform': 'web',
+  'x-app-version': '3.1.1',
 };
 
 // WebSocket server para logs en tiempo real
