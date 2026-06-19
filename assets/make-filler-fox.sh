@@ -8,7 +8,7 @@ OUT=/tmp/filler-fox.mp4
 ffmpeg -y \
   -f lavfi -t 30 -i "color=c=0x07070f:s=1280x720:r=30000/1001" \
   -loop 1 -t 30 -i "$LOGO" \
-  -f lavfi -t 30 -i "anullsrc=channel_layout=stereo:sample_rate=48000" \
+  -f lavfi -t 30 -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
   -filter_complex "
     [0:v]format=yuv420p,
       drawbox=x=0:y=0:w=1280:h=720:color=0x0b0b18@1:t=fill,
@@ -47,6 +47,6 @@ ffmpeg -y \
   -b:v 2000k -minrate 2000k -maxrate 2000k -bufsize 4000k \
   -g 60 -keyint_min 60 -sc_threshold 0 -x264-params "nal-hrd=cbr" \
   -pix_fmt yuv420p -r 30000/1001 \
-  -c:a aac -b:a 128k -ar 48000 -ac 2 \
+  -c:a aac -b:a 128k -ar 44100 -ac 2 \
   -movflags +faststart \
   "$OUT"
