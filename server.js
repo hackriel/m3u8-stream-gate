@@ -4879,7 +4879,21 @@ app.post('/api/emit', async (req, res) => {
       stopTigoProxy(process_id).catch(() => {});
 
       lastFrameTime.delete(process_id); // Limpiar watchdog
-      
+
+      // ──────────────────────────────────────────────────────────────────
+      // FOX / FOX+ URL (24/25): arrancar FILLER inmediatamente
+      // ──────────────────────────────────────────────────────────────────
+      // Mostramos la pantalla "RECONECTANDO · Media TV" durante la
+      // ventana de re-scrape. El playlist HLS sigue creciendo en la misma
+      // carpeta /live/<slug>/, así los clientes (XUI/players) NO ven
+      // "señal perdida". Cuando el nuevo FFmpeg LIVE arranque, se
+      // empalma sin wipe (ver bloque isHlsOutput arriba).
+      if (!isManualStop && foxIsFillerSupported(process_id)) {
+        foxStartFiller(process_id, sendLog);
+      } else if (isManualStop && foxIsFillerSupported(process_id) && foxIsFillerActive(process_id)) {
+        foxStopFillerAndWait(process_id, sendLog).catch(()=>{});
+      }
+
       // AUTO-RECOVERY: Para canales con scraping (usa CHANNEL_MAP global)
 
       if (isManualStop) {
