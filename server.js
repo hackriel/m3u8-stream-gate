@@ -14,6 +14,9 @@ import https from 'https';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
+// FOX/FOX+ URL filler (pantalla "RECONECTANDO" mientras se re-scrape)
+import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
+
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
 const tigoProxies = new Map();
 const stopTigoProxy = async (_process_id) => {};
