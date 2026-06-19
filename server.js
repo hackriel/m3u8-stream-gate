@@ -3635,6 +3635,9 @@ app.post('/api/emit', async (req, res) => {
           } else {
             sendLog(process_id, 'info', `📺 URL ya es sub-playlist directa (sin master)`);
           }
+        } else {
+          const pinLabel = isTeleticaSource && !isProxyScrapedSource ? 'Teletica' : 'Tigo';
+          sendLog(process_id, 'warn', `⚠️ ${pinLabel} Variant Pinning: master respondió HTTP ${masterResp.status}; FFmpeg probará URL original con headers TDMax.`);
         }
       } catch (err) {
         sendLog(process_id, 'warn', `⚠️ Variant Pinning falló (${err.message}) — usando URL master original`);
