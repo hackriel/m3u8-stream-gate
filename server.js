@@ -3907,6 +3907,17 @@ app.post('/api/emit', async (req, res) => {
     } else if (isHlsOutput) {
       const hlsSlug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
       const hlsDir = path.join(HLS_OUTPUT_DIR, hlsSlug);
+      // ── EMPALME SIN CORTE desde FILLER (sólo FOX/FOX+ URL 24/25) ──
+      // Si el filler "RECONECTANDO" está activo, lo detenemos y NO wipeamos
+      // la carpeta: dejamos que el nuevo FFmpeg LIVE haga append al mismo
+      // playlist (epoch + append_list garantizan numeración monotónica).
+      // Así los clientes pasan de pantalla filler → señal en vivo sin tener
+      // que reabrir el manifest.
+      const fillerWasActive = foxIsFillerSupported(process_id) && foxIsFillerActive(process_id);
+      if (fillerWasActive) {
+        try { await foxStopFillerAndWait(process_id, sendLog); } catch (_) {}
+        sendLog(process_id, 'info', `🎞️ FILLER → LIVE: empalme sin wipe (clientes mantienen sesión HLS)`);
+      }
       // ── WIPE AGRESIVO de la carpeta HLS antes de arrancar FFmpeg ──
       // CRÍTICO: en este punto el FFmpeg viejo (si existía) ya fue matado y
       // esperado en líneas 2041-2042 (waitForProcessDeath escala a SIGKILL),
@@ -3914,17 +3925,21 @@ app.post('/api/emit', async (req, res) => {
       // Borramos TODA la carpeta de raíz (recursive) en vez de unlink por
       // archivo: evita que XUI pull un manifest con segmentos viejos
       // mezclados con timestamps nuevos (causa raíz del "loop" tras caídas).
-      try {
-        if (fs.existsSync(hlsDir)) {
-          fs.rmSync(hlsDir, { recursive: true, force: true });
+      if (!fillerWasActive) {
+        try {
+          if (fs.existsSync(hlsDir)) {
+            fs.rmSync(hlsDir, { recursive: true, force: true });
+          }
+        } catch (e) {
+          sendLog(process_id, 'warn', `⚠️ No se pudo borrar ${hlsDir}: ${e.message} (FFmpeg sobreescribirá igual)`);
         }
-      } catch (e) {
-        sendLog(process_id, 'warn', `⚠️ No se pudo borrar ${hlsDir}: ${e.message} (FFmpeg sobreescribirá igual)`);
       }
       try {
         fs.mkdirSync(hlsDir, { recursive: true });
       } catch (_) {}
-      sendLog(process_id, 'info', `🧹 Carpeta HLS limpiada: ${hlsDir} (sin segmentos viejos)`);
+      if (!fillerWasActive) {
+        sendLog(process_id, 'info', `🧹 Carpeta HLS limpiada: ${hlsDir} (sin segmentos viejos)`);
+      }
 
       const hlsPlaylistPath = path.join(hlsDir, 'playlist.m3u8');
       ffmpegArgs.push(
