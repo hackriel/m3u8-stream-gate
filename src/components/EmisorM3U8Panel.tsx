@@ -39,7 +39,7 @@ const FOXMAS_ALTERNO_INDEX = 26; // FOX+ ALTERNO: URL eventual pegada (mismo pat
 
 // Procesos que usan la cuenta TDMax 'pi' (info@media.cr) en vez de la principal.
 // Debe coincidir con PI_ACCOUNT_PROCESSES en server.js.
-const PI_ACCOUNT_PROCESSES = new Set<number>([24, 25, 26]);
+const PI_ACCOUNT_PROCESSES = new Set<number>([15, 24, 25, 26]);
 
 // Scraping con fallback: intenta /api/local-scrape (VPS, token con IP correcta).
 // Si no responde JSON (preview de Lovable, dev, o VPS caído), cae a la
