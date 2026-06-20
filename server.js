@@ -533,32 +533,14 @@ const PROXY_PROCESSES = new Set();
 // IDs que deben usar la SEGUNDA cuenta TDMax (info@media.cr, la del Raspberry)
 // en vez de la cuenta principal (arlopfa). Evita exceder el cupo de devices
 // permitidos por TDMax en una sola cuenta.
-const PI_ACCOUNT_PROCESSES = new Set(['15', '24', '25', '26']); // CANAL 6 URL, FOX+ URL, FOX URL, FOX+ ALTERNO
+const PI_ACCOUNT_PROCESSES = new Set(['15', '24', '25', '26']); // segunda cuenta TDMax: CANAL 6 URL, FOX+ URL, FOX URL, FOX+ ALTERNO
 const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
-
-// ── Ruteo por proceso vía túnel WireGuard CR (Pi 5) ───────────────────
-// SOLO estos IDs deben pegar a los CDN geo-bloqueados con IP de CR.
-// El resto (FUTV URL 11, TELETICA URL 13, TDMAS URL 14, SRT, etc.) salen
-// por la IP del VPS y NO dependen del Pi. Si el Pi se cae solo se afectan
-// estos 4 procesos, los demás siguen funcionando intactos.
-//
-// Cómo funciona: FFmpeg se ejecuta como usuario 'croute' vía `runuser`.
-// iptables marca todo paquete de ese UID con fwmark 0x77, y `ip rule fwmark
-// 0x77` lo manda por la tabla cr_routed (default vía wg0 → Pi 5 CR).
-// El resto de procesos node/ffmpeg corren como root y salen por la IP del VPS.
-const CR_TUNNEL_PROCESSES = new Set(['15', '24', '25', '26']);
-const CR_TUNNEL_USER = 'croute';
-const wrapFfmpegForCrTunnel = (pid, cmd, args) => {
-  if (!CR_TUNNEL_PROCESSES.has(String(pid))) return { cmd, args, wrapped: false };
-  // runuser corre como root → no pide password.
-  return { cmd: 'runuser', args: ['-u', CR_TUNNEL_USER, '--', cmd, ...args], wrapped: true };
-};
 const getTdmaxCreds = (account) => {
   if (account === 'pi') {
     return {
       email: process.env.TDMAX_EMAIL_PI,
       password: process.env.TDMAX_PASSWORD_PI,
-      label: 'PI (info@media.cr)',
+      label: 'SECUNDARIA (info@media.cr)',
     };
   }
   return {
@@ -1436,6 +1418,28 @@ const scrapeSessionCache = new Map(); // Map<processId, { cookies, accessToken, 
 
 // Control de retry rápido para evitar loops cuando la misma URL vuelve a caer enseguida
 const quickRetryState = new Map(); // Map<processId, lastQuickRetryTimestampMs>
+const isProcessManuallyStopped = (processId) => {
+  const key = String(processId);
+  const numeric = Number(key);
+  return manualStopProcesses.has(key) || (Number.isFinite(numeric) && manualStopProcesses.has(numeric));
+};
+const markProcessManuallyStopped = (processId) => {
+  const key = String(processId);
+  const numeric = Number(key);
+  manualStopProcesses.add(key);
+  if (Number.isFinite(numeric)) manualStopProcesses.add(numeric);
+  autoRecoveryInProgress.set(key, false);
+  for (let i = recoveryQueue.length - 1; i >= 0; i--) {
+    if (recoveryQueue[i]?.processId === key) recoveryQueue.splice(i, 1);
+  }
+  quickRetryState.delete(key);
+  if (Number.isFinite(numeric)) quickRetryState.delete(numeric);
+  recoveryAttempts.delete(key);
+  scrapeSessionCache.delete(key);
+  if (Number.isFinite(numeric)) scrapeSessionCache.delete(numeric);
+  detectedErrors.delete(key);
+  resetCircuitBreaker(key);
+};
 // Canales scrapeados desde TDMax con wmsAuthSign de vida corta:
 // FUTV URL (11), Teletica URL (13), TDMAS 1 URL (14), FOX+ URL (24) y FOX URL (25).
 // Si caen tras horas, reusar la misma URL solo provoca 403/404/stall. Deben ir
@@ -2009,10 +2013,8 @@ const killPidIfAlive = async (pid) => {
 
 const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') => {
   // Verificar si hubo parada manual mientras se esperaba
-  if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+  if (isProcessManuallyStopped(process_id)) {
     sendLog(process_id, 'info', `🛑 AUTO-RECOVERY cancelado: parada manual detectada para ${channelName}`);
-    manualStopProcesses.delete(String(process_id));
-    manualStopProcesses.delete(Number(process_id));
     return;
   }
   
@@ -3797,11 +3799,7 @@ app.post('/api/emit', async (req, res) => {
 
     // Si no es modo HDMI, spawneamos aquí. En modo HDMI ya quedó spawneado arriba.
     if (!ffmpegProcess) {
-      const wrapped = wrapFfmpegForCrTunnel(process_id, spawnCmd, spawnArgs);
-      if (wrapped.wrapped) {
-        sendLog(process_id, 'info', `🇨🇷 FFmpeg vía usuario '${CR_TUNNEL_USER}' → ruteo por túnel WireGuard CR (Pi 5)`);
-      }
-      ffmpegProcess = spawn(wrapped.cmd, wrapped.args);
+      ffmpegProcess = spawn(spawnCmd, spawnArgs);
     }
     const processInfo = {
       process: ffmpegProcess,
@@ -4667,9 +4665,6 @@ app.post('/api/emit', async (req, res) => {
 
       if (isManualStop) {
         sendLog(process_id, 'info', '🛑 Parada manual detectada - Auto-recovery desactivado');
-        manualStopProcesses.delete(process_id);
-        manualStopProcesses.delete(String(process_id));
-        manualStopProcesses.delete(Number(process_id));
         quickRetryState.delete(process_id);
       } else if (String(process_id) === '17' && (code !== null || signal)) {
         // ───────────────────────────────────────────────────────────────
@@ -4779,8 +4774,6 @@ app.post('/api/emit', async (req, res) => {
               // Verificar si el usuario detuvo manualmente mientras esperábamos
               if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
                 sendLog(process_id, 'info', `🛑 Retry rápido cancelado: parada manual detectada durante espera`);
-                manualStopProcesses.delete(String(process_id));
-                manualStopProcesses.delete(Number(process_id));
                 return;
               }
 
@@ -4912,8 +4905,6 @@ app.post('/api/emit', async (req, res) => {
             // Verificar si el usuario detuvo manualmente mientras esperábamos
             if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
               sendLog(process_id, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
-              manualStopProcesses.delete(String(process_id));
-              manualStopProcesses.delete(Number(process_id));
               return;
             }
             // TELETICA URL (13): 2 reintentos en OFICIAL antes de cambiar a SCRAPING.
@@ -4963,7 +4954,6 @@ app.post('/api/emit', async (req, res) => {
             await sleep(500);
             if (manualStopProcesses.has('26') || manualStopProcesses.has(26)) {
               sendLog('26', 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
-              manualStopProcesses.delete('26'); manualStopProcesses.delete(26);
               return;
             }
             try {
@@ -5006,8 +4996,6 @@ app.post('/api/emit', async (req, res) => {
             try {
               if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
                 sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual detectada`);
-                manualStopProcesses.delete(String(process_id));
-                manualStopProcesses.delete(Number(process_id));
                 return;
               }
               if (!supabase) {
@@ -5083,8 +5071,6 @@ app.post('/api/emit', async (req, res) => {
                 
                 if (primaryResult.cancelled) {
                   sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual durante health-check`);
-                  manualStopProcesses.delete(String(process_id));
-                  manualStopProcesses.delete(Number(process_id));
                   autoRecoveryInProgress.set(String(process_id), false);
                   return;
                 }
@@ -5105,8 +5091,6 @@ app.post('/api/emit', async (req, res) => {
               // Verificar parada manual una última vez
               if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
                 sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual justo antes de lanzar FFmpeg`);
-                manualStopProcesses.delete(String(process_id));
-                manualStopProcesses.delete(Number(process_id));
                 autoRecoveryInProgress.set(String(process_id), false);
                 return;
               }
@@ -5574,6 +5558,7 @@ app.post('/api/emit/stop', async (req, res) => {
     const process_id = String(rawProcessId);
     const numericProcessId = parseInt(process_id);
     sendLog(process_id, 'info', internal_refresh ? `Detención interna (refresh 10h)` : `Solicitada detención de emisión`);
+    markProcessManuallyStopped(process_id);
 
 
     // NOTA: NO tocamos always_on aquí. El switch "Encendido siempre" es
@@ -5598,8 +5583,6 @@ app.post('/api/emit/stop', async (req, res) => {
 
     if (processData && processData.process && !processData.process.killed) {
       emissionStatuses.set(process_id, 'stopping');
-      manualStopProcesses.add(process_id); // Marcar como parada manual para evitar auto-recovery
-      manualStopProcesses.add(Number(process_id));
       
       
       // Actualizar base de datos antes de detener (solo si Supabase está disponible)
@@ -5674,10 +5657,8 @@ app.post('/api/emit/stop', async (req, res) => {
         message: `Emisión ${process_id} detenida correctamente` 
       });
     } else {
-      // IMPORTANTE: Marcar como parada manual incluso sin proceso activo,
-      // para cancelar cualquier recovery programado (setTimeout pendiente)
-      manualStopProcesses.add(process_id);
-      manualStopProcesses.add(Number(process_id));
+      // IMPORTANTE: la parada manual ya quedó marcada arriba para cancelar
+      // cualquier recovery programado (setTimeout pendiente).
       // Apagar FILLER FOX/FOX+ si quedó huérfano sin LIVE
       if (foxIsFillerSupported(process_id) && foxIsFillerActive(process_id)) {
         await foxStopFillerAndWait(process_id, sendLog);
@@ -5819,6 +5800,7 @@ app.post('/api/emit/restart', async (req, res) => {
     // 3) Resetear contadores y flags transitorios. NO tocar always_on.
     recoveryAttempts.set(process_id, 0);
     manualStopProcesses.delete(process_id);
+    manualStopProcesses.delete(String(process_id));
     manualStopProcesses.delete(Number(process_id));
     resetCircuitBreaker(process_id);
     emissionStatuses.set(process_id, 'idle');
@@ -5922,14 +5904,14 @@ app.delete('/api/emit/:process_id', async (req, res) => {
   try {
     const { process_id } = req.params;
     sendLog(process_id, 'info', `Solicitada eliminación del proceso ${process_id}`);
+    markProcessManuallyStopped(process_id);
     
     // Primero detener el proceso si está corriendo
     const processData = ffmpegProcesses.get(process_id) ?? ffmpegProcesses.get(Number(process_id));
     if (processData && processData.process && !processData.process.killed) {
-      manualStopProcesses.add(process_id); // Marcar como manual para evitar auto-recovery
-      manualStopProcesses.add(Number(process_id));
       const procRef = processData.process;
       procRef.kill('SIGKILL');
+      await waitForProcessDeath(procRef, 2000);
       ffmpegProcesses.delete(process_id);
       stopTigoProxy(process_id).catch(() => {});
       emissionStatuses.set(process_id, 'idle');
