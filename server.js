@@ -3797,7 +3797,11 @@ app.post('/api/emit', async (req, res) => {
 
     // Si no es modo HDMI, spawneamos aquí. En modo HDMI ya quedó spawneado arriba.
     if (!ffmpegProcess) {
-      ffmpegProcess = spawn(spawnCmd, spawnArgs);
+      const wrapped = wrapFfmpegForCrTunnel(process_id, spawnCmd, spawnArgs);
+      if (wrapped.wrapped) {
+        sendLog(process_id, 'info', `🇨🇷 FFmpeg vía usuario '${CR_TUNNEL_USER}' → ruteo por túnel WireGuard CR (Pi 5)`);
+      }
+      ffmpegProcess = spawn(wrapped.cmd, wrapped.args);
     }
     const processInfo = {
       process: ffmpegProcess,
