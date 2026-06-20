@@ -529,7 +529,28 @@ const saveOutputProfileForProcess = (processId, profile) => {
 // ───────────────────────────────────────────────────────────────────────
 const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080';
 // IDs de proceso que deben enrutar TODO su tráfico (scraping + FFmpeg) por el proxy
-const PROXY_PROCESSES = new Set();
+// Ahora "proxy" = bind del socket de scraping al source-IP del túnel WireGuard
+// (10.77.0.2). El VPS tiene una `ip rule from 10.77.0.2 table cr_routed` que
+// rutea esos sockets vía wg0 → Pi5 CR. Ver setup-vps-cr-wireguard.sh.
+// Solo los 3 canales geo-bloqueados deben scrapear vía CR.
+const PROXY_PROCESSES = new Set(['15', '24', '25']);
+
+// ───────────────────────────────────────────────────────────────────────
+// CR WireGuard Gateway — lista blanca de canales cuyo FFmpeg debe salir
+// por el túnel hacia el Pi5 (IP residencial CR). Implementado vía
+// `runuser -u croute -- ffmpeg ...`: los paquetes del UID croute reciben
+// fwmark 0x77 → tabla cr_routed → wg0. Si el túnel se cae, SOLO estos
+// canales fallan; el resto sigue saliendo por la IP del VPS.
+// ───────────────────────────────────────────────────────────────────────
+const CHANNELS_VIA_PI_WG = new Set(['15', '24', '25']); // CANAL 6 URL, FOX+ URL, FOX URL
+const CR_TUNNEL_USER = 'croute';
+const isViaCrTunnel = (pid) => CHANNELS_VIA_PI_WG.has(String(pid));
+// Wrappea un spawn de ffmpeg cuando el pid debe salir por el túnel CR.
+// Devuelve [command, args] para pasar tal cual a child_process.spawn.
+const wrapFfmpegSpawn = (pid, ffmpegArgs) => {
+  if (!isViaCrTunnel(pid)) return ['ffmpeg', ffmpegArgs];
+  return ['runuser', ['-u', CR_TUNNEL_USER, '--', 'ffmpeg', ...ffmpegArgs]];
+};
 // IDs que deben usar la SEGUNDA cuenta TDMax (info@media.cr, la del Raspberry)
 // en vez de la cuenta principal (arlopfa). Evita exceder el cupo de devices
 // permitidos por TDMax en una sola cuenta.
@@ -1219,6 +1240,13 @@ const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
       method: options.method || 'GET',
       headers: options.headers || {},
       agent: getProxyAgent(),
+      // Bindea el socket saliente a la IP WG del VPS (10.77.0.2). El sistema
+      // tiene una `ip rule from 10.77.0.2 table cr_routed` que rutea por
+      // wg0 → Pi5. Así el scraping TDMax sale con IP CR sin necesidad de
+      // SOCKS5/proxychains. Si wg0 no existe, el bind falla y el fetch
+      // termina en error claro (manejado arriba por los recovery).
+      localAddress: '10.77.0.2',
+      family: 4,
       timeout: 15000,
     }, (response) => {
       const chunks = [];
