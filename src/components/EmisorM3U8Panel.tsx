@@ -313,6 +313,8 @@ export default function EmisorM3U8Panel() {
   const [canal6TsBusy, setCanal6TsBusy] = useState(false);
   // Sub-tab dentro del panel Canal 6 TS: 'manual' (URL pegada) | 'scrape' (TDMax pi vía WireGuard CR)
   const [canal6TsSubTab, setCanal6TsSubTab] = useState<'manual' | 'scrape'>('manual');
+  // Solo en el PRIMER fetch alineamos el sub-tab al modo persistido; después el usuario manda.
+  const canal6TsSubTabInitedRef = useRef(false);
 
   // Polling estado Canal 6 TS
   useEffect(() => {
@@ -336,8 +338,11 @@ export default function EmisorM3U8Panel() {
           scrapeInFlight: !!j.scrapeInFlight,
         });
         setCanal6TsInput((prev) => (prev ? prev : (j.sourceUrl || '')));
-        // NO sincronizar sub-tab desde el polling: el usuario controla el tab localmente.
-        // (Antes esto re-pisaba la selección 'manual' cada 5s si el modo persistido era 'scrape'.)
+        // Alinear sub-tab al modo persistido SOLO en el primer fetch (evita re-pisar la selección del usuario).
+        if (!canal6TsSubTabInitedRef.current) {
+          canal6TsSubTabInitedRef.current = true;
+          if (j.mode === 'scrape') setCanal6TsSubTab('scrape');
+        }
       } catch (_) { /* offline */ }
     };
     fetchStatus();
