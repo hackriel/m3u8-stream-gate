@@ -336,8 +336,8 @@ export default function EmisorM3U8Panel() {
           scrapeInFlight: !!j.scrapeInFlight,
         });
         setCanal6TsInput((prev) => (prev ? prev : (j.sourceUrl || '')));
-        // Alinear sub-tab al modo persistido (solo en el primer fetch)
-        setCanal6TsSubTab((prev) => (j.mode === 'scrape' ? 'scrape' : prev));
+        // NO sincronizar sub-tab desde el polling: el usuario controla el tab localmente.
+        // (Antes esto re-pisaba la selección 'manual' cada 5s si el modo persistido era 'scrape'.)
       } catch (_) { /* offline */ }
     };
     fetchStatus();
