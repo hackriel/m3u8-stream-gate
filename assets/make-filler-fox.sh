@@ -36,7 +36,7 @@ ffmpeg -y \
         enable='gte(mod(t-0.4,1.2),0.4)',
       drawbox=x=40:y=680:w=1200:h=2:color=0x222238@1:t=fill,
       drawbox=x='40+mod(t*420,1360)-160':y=679:w=160:h=4:color=0xff3355@0.9:t=fill,
-      drawtext=fontfile=${MONO}:text='MEDIA TV   LIVE':fontcolor=0x6e6e8a:fontsize=12:
+      drawtext=fontfile=${MONO}:text='FIFA WORLD CUP 2026':fontcolor=0x6e6e8a:fontsize=12:
         x=40:y=40,
       drawtext=fontfile=${MONO}:text='AUTO-RECOVERY':fontcolor=0x6e6e8a:fontsize=12:
         x=w-text_w-40:y=40,
