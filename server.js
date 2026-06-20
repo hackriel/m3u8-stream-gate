@@ -2013,10 +2013,8 @@ const killPidIfAlive = async (pid) => {
 
 const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') => {
   // Verificar si hubo parada manual mientras se esperaba
-  if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+  if (isProcessManuallyStopped(process_id)) {
     sendLog(process_id, 'info', `🛑 AUTO-RECOVERY cancelado: parada manual detectada para ${channelName}`);
-    manualStopProcesses.delete(String(process_id));
-    manualStopProcesses.delete(Number(process_id));
     return;
   }
   
@@ -5574,6 +5572,7 @@ app.post('/api/emit/stop', async (req, res) => {
     const process_id = String(rawProcessId);
     const numericProcessId = parseInt(process_id);
     sendLog(process_id, 'info', internal_refresh ? `Detención interna (refresh 10h)` : `Solicitada detención de emisión`);
+    markProcessManuallyStopped(process_id);
 
 
     // NOTA: NO tocamos always_on aquí. El switch "Encendido siempre" es
@@ -5598,8 +5597,6 @@ app.post('/api/emit/stop', async (req, res) => {
 
     if (processData && processData.process && !processData.process.killed) {
       emissionStatuses.set(process_id, 'stopping');
-      manualStopProcesses.add(process_id); // Marcar como parada manual para evitar auto-recovery
-      manualStopProcesses.add(Number(process_id));
       
       
       // Actualizar base de datos antes de detener (solo si Supabase está disponible)
@@ -5674,10 +5671,8 @@ app.post('/api/emit/stop', async (req, res) => {
         message: `Emisión ${process_id} detenida correctamente` 
       });
     } else {
-      // IMPORTANTE: Marcar como parada manual incluso sin proceso activo,
-      // para cancelar cualquier recovery programado (setTimeout pendiente)
-      manualStopProcesses.add(process_id);
-      manualStopProcesses.add(Number(process_id));
+      // IMPORTANTE: la parada manual ya quedó marcada arriba para cancelar
+      // cualquier recovery programado (setTimeout pendiente).
       // Apagar FILLER FOX/FOX+ si quedó huérfano sin LIVE
       if (foxIsFillerSupported(process_id) && foxIsFillerActive(process_id)) {
         await foxStopFillerAndWait(process_id, sendLog);
