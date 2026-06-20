@@ -5806,6 +5806,7 @@ app.post('/api/emit/stop', async (req, res) => {
     const numericProcessId = parseInt(process_id);
     sendLog(process_id, 'info', internal_refresh ? `Detención interna (refresh 10h)` : `Solicitada detención de emisión`);
 
+
     // NOTA: NO tocamos always_on aquí. El switch "Encendido siempre" es
     // controlado EXCLUSIVAMENTE por el usuario desde el endpoint /api/always-on.
     // Apagarlo en cada stop causaba que el switch se reseteara solo tras
@@ -5965,6 +5966,43 @@ app.post('/api/emit/stop', async (req, res) => {
 
 
 // ── Endpoint /api/emit/restart ────────────────────────────────────────
+// ── Endpoint /api/emit/drop ──────────────────────────────────────────
+// TEST manual: mata el FFmpeg LIVE de FOX URL (25) o FOX+ URL (24)
+// SIN marcar como parada manual. El close-handler dispara entonces el
+// filler "RECONECTANDO" y el auto-recovery (re-scrape TDMax). Permite
+// validar visualmente el ciclo: caída → filler → nueva señal.
+app.post('/api/emit/drop', async (req, res) => {
+  try {
+    const { process_id: rawProcessId } = req.body || {};
+    const process_id = String(rawProcessId);
+    const ALLOWED = new Set(['24', '25']);
+    if (!ALLOWED.has(process_id)) {
+      return res.status(400).json({ error: 'Drop solo permitido para FOX URL (25) y FOX+ URL (24)' });
+    }
+
+    const processData = ffmpegProcesses.get(process_id) ?? ffmpegProcesses.get(Number(process_id));
+    if (!processData || !processData.process || processData.process.killed) {
+      return res.status(409).json({ error: 'No hay FFmpeg activo para este proceso' });
+    }
+
+    // CLAVE: NO añadir a manualStopProcesses → el close-handler tratará
+    // esto como caída real y disparará filler + autoRecoverChannel.
+    sendLog(process_id, 'warn', '💣 BOTAR (test): matando FFmpeg para simular caída — filler debería activarse');
+
+    try { processData.process.kill('SIGKILL'); } catch (e) {
+      return res.status(500).json({ error: `No se pudo matar FFmpeg: ${e.message}` });
+    }
+    if (processData.process.pid) {
+      try { execSync(`kill -9 ${processData.process.pid}`, { stdio: 'ignore' }); } catch (_) {}
+    }
+
+    return res.json({ ok: true, message: 'FFmpeg matado. Filler + auto-recovery deberían activarse.' });
+  } catch (error) {
+    console.error('Error en /api/emit/drop:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 // Reinicio MANUAL en caliente: detiene FFmpeg actual, invalida la cache de
 // sesión de scraping (cookies/token) para forzar un re-login completo, y
 // vuelve a arrancar la emisión. El nuevo arranque elige automáticamente un
