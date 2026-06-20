@@ -240,6 +240,55 @@ app.use('/live', (req, res, next) => {
 }, express.static(HLS_OUTPUT_DIR));
 
 
+// ===== MPEG-TS PASSTHROUGH OUTPUT =====
+// Permite consumir cualquier canal HLS local como stream .ts continuo.
+// Ej: http://host:3001/canal6.ts → remuxea /live/Canal6/playlist.m3u8 a MPEG-TS.
+// El cliente (VLC / IPTV) recibe un único flujo TS infinito por chunked transfer.
+app.get('/:name.ts', (req, res) => {
+  const requested = String(req.params.name || '').toLowerCase();
+  if (!requested) return res.status(404).end();
+  let slug = null;
+  try {
+    const dirs = fs.readdirSync(HLS_OUTPUT_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name);
+    slug = dirs.find(d => d.toLowerCase() === requested) || null;
+  } catch (_) {}
+  if (!slug) return res.status(404).type('text/plain').send(`No hay stream activo para "${requested}"`);
+  const playlist = path.join(HLS_OUTPUT_DIR, slug, 'playlist.m3u8');
+  if (!fs.existsSync(playlist)) return res.status(404).type('text/plain').send(`Playlist no encontrado: ${slug}`);
+
+  res.setHeader('Content-Type', 'video/MP2T');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Connection', 'keep-alive');
+
+  const args = [
+    '-loglevel', 'error',
+    '-fflags', '+nobuffer+genpts',
+    '-i', playlist,
+    '-c', 'copy',
+    '-copyts',
+    '-f', 'mpegts',
+    'pipe:1'
+  ];
+  const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stderrBuf = '';
+  ff.stderr.on('data', (d) => { stderrBuf += d.toString(); if (stderrBuf.length > 4000) stderrBuf = stderrBuf.slice(-4000); });
+  ff.stdout.pipe(res);
+  const cleanup = () => { try { ff.kill('SIGKILL'); } catch (_) {} };
+  req.on('close', cleanup);
+  res.on('close', cleanup);
+  ff.on('error', (err) => { try { res.end(); } catch (_) {} console.error(`[/${requested}.ts] ffmpeg error:`, err.message); });
+  ff.on('exit', (code) => {
+    if (code && code !== 0 && code !== 255) {
+      console.error(`[/${requested}.ts] ffmpeg exit ${code}: ${stderrBuf.split('\n').slice(-3).join(' | ')}`);
+    }
+    try { res.end(); } catch (_) {}
+  });
+});
+
+
 // ───────────────────────────────────────────────────────────────────
 // EXT-X-START PATCHER (reduce latencia de arranque ~15s)
 // Cada 1s revisa TODOS los playlist.m3u8 activos y, si no tienen el tag
