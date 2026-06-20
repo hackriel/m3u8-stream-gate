@@ -1730,6 +1730,26 @@ export default function EmisorM3U8Panel() {
             <h2 className="text-lg font-medium mb-4 text-accent">
               {processIndex === FILE_UPLOAD_INDEX ? "Archivos Locales" : "Fuente y Cabeceras"} - {channelConfig.name}
             </h2>
+            {CR_TUNNEL_CHANNELS.has(processIndex) && (
+              <div className="mb-4 -mt-2">
+                {crTunnelHealth.wg_up && crTunnelHealth.cr_ip ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                    title={`Este canal sale al CDN desde Costa Rica vía Pi5 (10.77.0.1). IP pública vista: ${crTunnelHealth.cr_ip}`}
+                  >
+                    🇨🇷 IP CR · <span className="font-mono">{crTunnelHealth.cr_ip}</span>
+                    {process.isEmitiendo && <span className="ml-1 opacity-80">• EMITIENDO</span>}
+                  </span>
+                ) : (
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border bg-amber-500/15 border-amber-500/40 text-amber-300"
+                    title="El túnel WireGuard al Pi5 (CR) no está activo. Este canal va a fallar al arrancar hasta que el túnel se restablezca."
+                  >
+                    ⚠️ Túnel CR caído
+                  </span>
+                )}
+              </div>
+            )}
 
             {processIndex === FILE_UPLOAD_INDEX ? (
               // Proceso Subida: Upload de archivos
@@ -1960,7 +1980,7 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
-                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && (
+                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
@@ -2011,7 +2031,7 @@ export default function EmisorM3U8Panel() {
                           : 'border-border'
                     }`}
                   />
-                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && (
+                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
                     <button
                       onClick={() => fetchChannelUrl(processIndex)}
                       disabled={fetchingChannel !== null}
