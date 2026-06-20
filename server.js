@@ -462,8 +462,19 @@ const spawnSharedEncoder = () => {
         sharedEncoder.respawnTimer = null;
         // En modo 'scrape' el token wmsAuthSign suele estar caducado tras un crash:
         // re-scrapeamos antes de respawnear para evitar bucle 403/404.
+        // Si el scrape falla, NO spawneamos con URL stale: reagendamos con backoff.
         if (canal6TsState.mode === 'scrape') {
-          try { await scrapeCanal6TsUrl().then((u) => { if (u) { canal6TsState.sourceUrl = u; saveCanal6TsState(); } }); } catch (_) {}
+          try {
+            const u = await scrapeCanal6TsUrl();
+            if (u) { canal6TsState.sourceUrl = u; saveCanal6TsState(); }
+          } catch (err) {
+            console.warn(`[canal6.ts shared] re-scrape falló post-crash: ${err.message} — reintentando en 8s`);
+            sharedEncoder.respawnTimer = setTimeout(() => {
+              sharedEncoder.respawnTimer = null;
+              spawnSharedEncoder();
+            }, 8000);
+            return;
+          }
         }
         spawnSharedEncoder();
       }, 2000);
