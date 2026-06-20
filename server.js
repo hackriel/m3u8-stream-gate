@@ -535,6 +535,24 @@ const PROXY_PROCESSES = new Set();
 // permitidos por TDMax en una sola cuenta.
 const PI_ACCOUNT_PROCESSES = new Set(['15', '24', '25', '26']); // CANAL 6 URL, FOX+ URL, FOX URL, FOX+ ALTERNO
 const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
+
+// ── Ruteo por proceso vía túnel WireGuard CR (Pi 5) ───────────────────
+// SOLO estos IDs deben pegar a los CDN geo-bloqueados con IP de CR.
+// El resto (FUTV URL 11, TELETICA URL 13, TDMAS URL 14, SRT, etc.) salen
+// por la IP del VPS y NO dependen del Pi. Si el Pi se cae solo se afectan
+// estos 4 procesos, los demás siguen funcionando intactos.
+//
+// Cómo funciona: FFmpeg se ejecuta como usuario 'croute' vía `runuser`.
+// iptables marca todo paquete de ese UID con fwmark 0x77, y `ip rule fwmark
+// 0x77` lo manda por la tabla cr_routed (default vía wg0 → Pi 5 CR).
+// El resto de procesos node/ffmpeg corren como root y salen por la IP del VPS.
+const CR_TUNNEL_PROCESSES = new Set(['15', '24', '25', '26']);
+const CR_TUNNEL_USER = 'croute';
+const wrapFfmpegForCrTunnel = (pid, cmd, args) => {
+  if (!CR_TUNNEL_PROCESSES.has(String(pid))) return { cmd, args, wrapped: false };
+  // runuser corre como root → no pide password.
+  return { cmd: 'runuser', args: ['-u', CR_TUNNEL_USER, '--', cmd, ...args], wrapped: true };
+};
 const getTdmaxCreds = (account) => {
   if (account === 'pi') {
     return {
