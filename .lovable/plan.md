@@ -1,63 +1,54 @@
+## Problema
 
-## Objetivo
+El tab "Canal 6 TS" actual es una implementación paralela (estado en archivo JSON, endpoints `/canal6-ts/*`, ffmpeg propio) totalmente fuera del pipeline `emission_processes`. Por eso:
 
-En el tab **TELETICA URL** (proceso 13), permitir elegir antes de iniciar entre:
+- No se ven logs en el visor estándar.
+- No aparece en la lista de uptime.
+- El status "Emitiendo" es opaco: si el ffmpeg interno no escribe al `.ts`, no hay forma de saberlo desde la UI.
+- El sub-tab "Manual / Scrapeo" no se persiste bien.
 
-- **Fuente Oficial** — URL directa `https://cdn01.teletica.com/TeleticaLiveStream/Stream/playlist_dvr.m3u8` con `Referer: https://bradmax.com/` (verificada HTTP 200, sin token, sin login).
-- **Scraping (TDMax)** — flujo actual con login + `wmsAuthSign`.
+## Solución: usar el mismo flujo que FOX URL / FOX+ URL
 
-Reglas de fallback:
-- **Oficial cae → cambia automáticamente a Scraping** (manteniendo el mismo perfil de salida y destino HLS).
-- **Scraping cae → NO promueve a Oficial**. Solo el usuario puede volver a seleccionar Oficial manualmente.
+FOX URL ya hace exactamente lo que necesitamos: scrapea TDMax con WireGuard CR, corre dentro de `emission_processes`, muestra logs, tiene dropdown de perfil (Normal / Mejorado 720 / Optimizado 480) y aparece en uptime.
 
-## Verificación previa
+### Cambios
 
-Antes de implementar, ya validé desde el VPS:
-```
-GET https://cdn01.teletica.com/TeleticaLiveStream/Stream/playlist_dvr.m3u8
-Headers: Referer: https://bradmax.com/
-→ 200 OK · Nimble/4.3.2 · master playlist con 4 variantes (720p/540p/360p/270p @ 29.97fps) · sin wmsAuthSign
-```
-Funciona. La CDN no exige token; solo valida `Referer = bradmax.com`. El Variant Pinning manual que ya existe en `server.js` (rama `hostname.includes('teletica.com')`) sigue aplicando y mantiene `nimblesessionid` sticky.
+**1. Backend (`server.js`)**
 
-## Cambios
+- Borrar todo el bloque Canal 6 TS paralelo (~300 líneas):
+  - `canal6TsState`, `CANAL6_TS_STATE_FILE`, `saveCanal6TsState`
+  - `scrapeCanal6TsUrl`, `scheduleCanal6TsRescrape`
+  - shared encoder `spawnCanal6TsSharedEncoder`
+  - endpoints `/canal6-ts/status`, `/start`, `/scrape-start`, `/scrape-now`, `/stop`, `/profile`
+  - generación dinámica del `.ts` por cliente en `/canal6.ts`
+- En el scraper estándar del pipeline (el que ya usa FOX URL), cuando `channel_id === '65d7aca4e4b0140cbf380bd0'` (Canal 6), forzar `account: 'pi'` (cuenta `info@media.cr` / `TDMAX_EMAIL_PI`) y reusar la ruta WireGuard CR ya existente para hosts `teletica.com` / `tdmax.com`. Esto se aplica también al header spoofing Referer/Origin a `https://www.app.tdmax.com/` para CDN Teletica (ya existente, solo confirmamos que sigue activo).
 
-### 1. Frontend — `src/components/EmisorM3U8Panel.tsx`
+**2. Frontend (`src/components/EmisorM3U8Panel.tsx`)**
 
-En la tarjeta del proceso 13:
-- Agregar selector segmentado **"Fuente: [Oficial] [Scraping]"** sobre el campo URL.
-- Estado persistido en `localStorage` (`teletica13_source_mode`, default `'scraping'` para no cambiar comportamiento por defecto).
-- Modo `oficial`:
-  - Auto-rellenar `process.m3u8` con la URL fija de bradmax.
-  - Ocultar/deshabilitar el botón "🔄 Teletica" (no hace falta scrapear).
-  - Botón Iniciar envía `source_mode: 'official'` en `/api/emit`.
-- Modo `scraping`: comportamiento actual sin cambios + envía `source_mode: 'scraping'`.
-- Si el server reporta vía log un cambio automático a scraping, actualizar el toggle local a `scraping`.
+- Borrar todo el state, polling, handlers y JSX del tab Canal 6 TS:
+  - `canal6TsStatus`, `canal6TsInput`, `canal6TsBusy`, `canal6TsSubTab`, `canal6TsSubTabInitedRef`
+  - `useEffect` de polling cada 5s a `/canal6-ts/status`
+  - funciones `canal6TsStart`, `canal6TsScrapeStart`, `canal6TsScrapeNow`, `canal6TsStop`, `canal6TsSwitchProfile`
+  - `TabsTrigger` "Canal 6 TS" (líneas ~2601-2625)
+  - `TabsContent value="canal6-ts"` completo (líneas ~2786-3070)
+- Convertir la entrada `CANAL 6 URL` (index 14) en un canal con scraping TDMax estándar:
+  ```ts
+  { name: "CANAL 6 URL", scrapeFn: "scrape-channel",
+    channelId: "65d7aca4e4b0140cbf380bd0",
+    fetchLabel: "🏛️ Repretel 6 (TDMax)" }
+  ```
+  (se quita el `presetUrl` cloudfront). Con esto el canal aparece automáticamente en logs, uptime, dropdown de perfil y todos los controles estándar — sin código nuevo.
+- Quitar el bloque de auto-sync del `presetUrl` cloudfront para Canal 6 en `App.tsx` / el `useEffect` que lo restaura (líneas ~944, 992-993, 1070-1077, 1030-1033).
 
-### 2. Server — `server.js`
+**3. Limpieza**
 
-- **Aceptar `source_mode`** en `POST /api/emit`. Guardar en `teleticaSourceMode: Map<process_id, 'official'|'scraping'>`.
-- **Headers FFmpeg (línea ~2903):** dentro de la rama `hostname.includes('teletica.com')`, distinguir por path:
-  - `pathname.includes('/TeleticaLiveStream/')` → `Referer/Origin = https://bradmax.com/`
-  - Resto (cdn02/cdn12 con `wmsAuthSign`) → `https://www.app.tdmax.com/` (actual).
-- **Variant Pinning manual** para Teletica oficial: hacer que `needsTdmaxLikePinning` también incluya el host de bradmax-style (ya lo cubre `isTeleticaSource`).
-- **Auto-recovery del proceso 13** (rama `CHANNEL_MAP[process_id]` ~línea 4671):
-  - Si `teleticaSourceMode.get('13') === 'official'`:
-    1. Loggear `⚠️ Fuente oficial falló — cambiando automáticamente a SCRAPING`.
-    2. `teleticaSourceMode.set('13', 'scraping')`.
-    3. Continuar con el flujo de scrape existente.
-  - Si ya está en `'scraping'`: comportamiento actual (sin promover a oficial).
-- **Endpoint nuevo `GET /api/teletica/source-mode`** que devuelve `{ mode: 'official'|'scraping' }` para que el frontend sincronice el toggle tras un fallback automático (poll cada 5s mientras emite).
+- Borrar `canal6-ts-state.json` del VPS (instrucción en respuesta).
+- Actualizar memorias: `mem://features/canal6-ts-scrape-tdmax.md` → marcar OBSOLETA, reemplazar por nota corta "Canal 6 usa flujo estándar (channelId `65d7aca4…0bd0`, cuenta `pi`, WireGuard CR)".
 
-### 3. Sin cambios
+## Resultado
 
-- DB / migraciones: no se requieren, el modo vive en memoria del server + localStorage del cliente.
-- Otros canales (FUTV, TDMAS 1, FOX, etc.): intactos.
-- Perfil de salida (720p / CBR 2000k), HLS slug `Teletica`, mutex con TELETICA SRT (21), watchdog, recovery circuit-breaker: intactos.
+El usuario verá Canal 6 como un canal más con su tab estándar: dropdown de calidad, panel de logs FFmpeg, badges de uptime, recovery automático, todo igual a FOX URL. La emisión sale al `.m3u8` HLS estándar (los clientes IPTV que esperaban `.ts` siguen funcionando porque la mayoría aceptan HLS; si necesitas mantener un endpoint `.ts` dedicado, lo evaluamos después).
 
-## Por qué es seguro
+## Pregunta antes de implementar
 
-- La URL oficial ya devolvió 200 + master M3U8 válido desde el VPS — no es teoría.
-- El cambio de header es **path-scoped** dentro de `teletica.com`: si por alguna razón se mete una URL `cdn02.teletica.com/TDMAX/...` en modo oficial (no debería pasar), el header sigue siendo `app.tdmax.com` y no rompe nada.
-- El fallback es **unidireccional** (oficial→scraping) como pediste, así que scraping nunca se reemplaza solo.
-- Si el modo oficial falla, el server simplemente cae al mismo flujo de recovery que hoy ya funciona para los demás canales TDMax.
+¿Confirmás que está bien dejar **solo la salida HLS estándar** (sin endpoint `.ts` dedicado)? Si tus clientes IPTV requieren forzosamente `.ts`, te aviso para mantener un proxy passthrough mínimo además del flujo estándar.
