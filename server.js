@@ -2753,6 +2753,19 @@ app.post('/api/emit', async (req, res) => {
     if (process_id === '13' && getTeleticaSourceMode('13') === 'official') {
       effectiveSourceM3u8 = TELETICA_OFFICIAL_URL;
     }
+
+    // ── CANAL 6 URL (15): persistir modo enviado por el frontend.
+    //    En 'official' usamos la URL pegada por el usuario tal cual (no hay
+    //    CDN fija). En 'scraping' seguimos el flujo TDMax actual. El FFmpeg
+    //    sale igualmente por el túnel CR (pid ∈ CHANNELS_VIA_PI_WG).
+    if (process_id === '15' && !is_recovery && (source_mode === 'official' || source_mode === 'scraping')) {
+      setCanal6SourceMode('15', source_mode);
+      sendLog('15', 'info', `🎛️ Modo Canal 6 seleccionado: ${source_mode.toUpperCase()}`);
+    }
+    if (process_id === '15' && getCanal6SourceMode('15') === 'official' && source_m3u8) {
+      sendLog('15', 'info', `🎯 Canal 6 OFICIAL: usando URL pegada por usuario`);
+      // effectiveSourceM3u8 ya viene del request — no sobrescribir.
+    }
     // SRT ingest: si el caller no provee source_m3u8 (o lo marca como srt://obs),
     // arrancamos un listener SRT que recibe de OBS en el puerto del proceso.
     const isSrtIngest = isSrtIngestProcess(process_id) && (
@@ -6082,6 +6095,65 @@ app.get('/api/teletica/source-mode', (req, res) => {
   res.json({ mode: getTeleticaSourceMode('13') });
 });
 
+app.get('/api/canal6/source-mode', (req, res) => {
+  res.json({ mode: getCanal6SourceMode('15') });
+});
+
+// ============= CR TUNNEL HEALTH =============
+// Devuelve si el túnel WireGuard al Pi5 está vivo y la IP pública que ve el
+// usuario `croute` (debe ser CR). Cachea resultado 10s para no martillar
+// api.ipify.org desde el dashboard.
+const crTunnelHealthState = { wg_up: false, cr_ip: null, last_check: 0, checking: false };
+const refreshCrTunnelHealth = async () => {
+  if (crTunnelHealthState.checking) return crTunnelHealthState;
+  const now = Date.now();
+  if (now - crTunnelHealthState.last_check < 10000) return crTunnelHealthState;
+  crTunnelHealthState.checking = true;
+  try {
+    // 1) ¿wg0 levantado y con peer?
+    let wgUp = false;
+    try {
+      const out = execSync('wg show wg0 latest-handshakes 2>/dev/null', { encoding: 'utf8', timeout: 2000 });
+      // Línea: "<pubkey>\t<unix_ts>". Handshake reciente (<180s) = peer vivo.
+      const ts = parseInt((out.trim().split(/\s+/)[1] || '0'), 10);
+      wgUp = ts > 0 && (Math.floor(Date.now() / 1000) - ts) < 180;
+    } catch { wgUp = false; }
+
+    // 2) IP pública vista por croute (si está wg_up).
+    let crIp = null;
+    if (wgUp) {
+      try {
+        const ip = execSync(
+          `sudo -n -u ${CR_TUNNEL_USER} curl -fsS --max-time 5 https://api.ipify.org`,
+          { encoding: 'utf8', timeout: 7000 }
+        ).trim();
+        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) crIp = ip;
+      } catch (_) { /* keep null */ }
+    }
+
+    crTunnelHealthState.wg_up = wgUp;
+    crTunnelHealthState.cr_ip = crIp;
+    crTunnelHealthState.last_check = now;
+  } finally {
+    crTunnelHealthState.checking = false;
+  }
+  return crTunnelHealthState;
+};
+
+app.get('/api/cr-tunnel/health', async (req, res) => {
+  try {
+    const h = await refreshCrTunnelHealth();
+    res.json({
+      wg_up: h.wg_up,
+      cr_ip: h.cr_ip,
+      last_check: h.last_check,
+      channels: Array.from(CHANNELS_VIA_PI_WG).map(Number),
+    });
+  } catch (err) {
+    res.status(500).json({ wg_up: false, cr_ip: null, error: err.message });
+  }
+});
+
 app.get('/api/status', (req, res) => {
   const { process_id } = req.query;
 
@@ -6710,6 +6782,22 @@ server.listen(PORT, () => {
         sendLog('13', 'info', `🎛️ Modo Teletica restaurado desde DB: ${persisted.toUpperCase()}`);
       } catch (err) {
         console.error('Error cargando teletica source_mode desde DB:', err.message);
+      }
+    })();
+
+    // ====== Cargar modo Canal 6 URL (15) desde DB ======
+    (async () => {
+      try {
+        const { data: row } = await supabase
+          .from('emission_processes')
+          .select('source_mode')
+          .eq('id', 15)
+          .maybeSingle();
+        const persisted = row?.source_mode === 'official' ? 'official' : 'scraping';
+        canal6SourceMode.set('15', persisted);
+        sendLog('15', 'info', `🎛️ Modo Canal 6 restaurado desde DB: ${persisted.toUpperCase()}`);
+      } catch (err) {
+        console.error('Error cargando canal6 source_mode desde DB:', err.message);
       }
     })();
 
