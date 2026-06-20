@@ -256,7 +256,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "TIGO SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "TELETICA URL", scrapeFn: "scrape-channel", channelId: "617c2f66e4b045a692106126", fetchLabel: "🔄 Teletica" },
   { name: "TDMAS 1 URL", scrapeFn: "scrape-channel", channelId: "66608d188f0839b8a740cfe9", fetchLabel: "🔄 TDmas1" },
-  { name: "CANAL 6 URL", scrapeFn: null, channelId: null, fetchLabel: "🏛️ Repretel", presetUrl: "https://d2qsan2ut81n2k.cloudfront.net/live/02f0dc35-8fd4-4021-8fa0-96c277f62653/ts:abr.m3u8" },
+  { name: "CANAL 6 URL", scrapeFn: "scrape-channel", channelId: "65d7aca4e4b0140cbf380bd0", fetchLabel: "🏛️ Repretel 6 (TDMax)" },
   { name: "DISNEY 7 SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
   { name: "FUTV ALTERNO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer de URL" },
   { name: "FUTV SRT", scrapeFn: null, channelId: null, fetchLabel: "", presetUrl: SRT_INTERNAL_SOURCE_URL },
