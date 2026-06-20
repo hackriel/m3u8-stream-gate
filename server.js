@@ -312,26 +312,35 @@ const scrapeCanal6TsUrl = async () => {
   if (canal6TsScrapeInFlight) return canal6TsScrapeInFlight;
   const channelId = canal6TsState.tdmaxChannelId || '65d7aca4e4b0140cbf380bd0';
   const account = canal6TsState.tdmaxAccount || 'pi';
-  const fnUrl = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1/scrape-channel`;
-  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
+  const channelName = 'Canal 6 TS';
+  // Mismo patrón que FOX URL / FOX+ URL: LOCAL (vía WireGuard CR para
+  // cdn*.teletica.com) → REMOTO (edge function) con 3 intentos y backoff.
+  // El tráfico LOCAL a teletica.com sale por el túnel WireGuard a IP costarricense
+  // (configurado a nivel OS), por lo que el token wmsAuthSign se firma con la
+  // IP correcta y FFmpeg podrá usar la URL sin 403.
   canal6TsScrapeInFlight = (async () => {
-    console.log(`[canal6.ts] 🔄 scrape TDMax channel=${channelId} account=${account}`);
-    const resp = await fetch(fnUrl, {
-      method: 'POST',
-      signal: AbortSignal.timeout(15000),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${anonKey}`,
-        'apikey': anonKey,
-      },
-      body: JSON.stringify({ channel_id: channelId, account, process_id: 'canal6ts' }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || !data?.success || !data?.url) {
-      const err = data?.error || `HTTP ${resp.status}`;
-      throw new Error(err);
+    let lastError = 'No se obtuvo URL';
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`[canal6.ts] 🔄 scrape intento ${attempt}/3 (LOCAL→REMOTO) channel=${channelId} account=${account}`);
+        const result = await scrapeStreamUrl(channelId, channelName, {
+          useProxy: false, // teletica.com ya sale por WireGuard a nivel OS
+          account,
+          processId: 'canal6ts',
+        });
+        if (result?.url) {
+          if (attempt > 1) console.log(`[canal6.ts] ✅ scrape recuperado en intento ${attempt}/3`);
+          return result.url;
+        }
+        lastError = result?.error || lastError;
+        console.warn(`[canal6.ts] ⚠️ scrape ${attempt}/3 sin URL: ${lastError}`);
+      } catch (e) {
+        lastError = e?.message || String(e);
+        console.warn(`[canal6.ts] ⚠️ scrape ${attempt}/3 error: ${lastError}`);
+      }
+      if (attempt < 3) await sleep(2500 * attempt);
     }
-    return data.url;
+    throw new Error(lastError);
   })();
   try {
     const url = await canal6TsScrapeInFlight;
