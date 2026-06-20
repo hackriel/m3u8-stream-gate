@@ -251,12 +251,26 @@ const CANAL6_TS_STATE_FILE = path.join(__dirname, 'canal6-ts-state.json');
 // profile: 'normal' (passthrough -c copy per cliente, como siempre)
 //          'mejorado720' (encode ÚNICO always-on 720p/2000k, fan-out a clientes)
 //          'optimizado480' (encode ÚNICO always-on 480p/1200k faster, fan-out a clientes)
-let canal6TsState = { sourceUrl: '', enabled: false, profile: 'normal' };
+// mode:    'manual' (URL pegada por el usuario)
+//          'scrape' (auto-scrape TDMax cuenta 'pi' / info@media.cr, channel Repretel 6)
+let canal6TsState = {
+  sourceUrl: '',
+  enabled: false,
+  profile: 'normal',
+  mode: 'manual',
+  tdmaxChannelId: '65d7aca4e4b0140cbf380bd0', // Repretel 6 en TDMax
+  tdmaxAccount: 'pi',                          // info@media.cr (TDMAX_EMAIL_PI)
+  lastScrapeAt: 0,
+  lastScrapeError: null,
+};
 try {
   if (fs.existsSync(CANAL6_TS_STATE_FILE)) {
     canal6TsState = { ...canal6TsState, ...JSON.parse(fs.readFileSync(CANAL6_TS_STATE_FILE, 'utf8')) };
     if (canal6TsState.profile !== 'mejorado720' && canal6TsState.profile !== 'optimizado480') canal6TsState.profile = 'normal';
-    console.log(`[canal6.ts] estado restaurado: enabled=${canal6TsState.enabled} profile=${canal6TsState.profile} url=${canal6TsState.sourceUrl ? 'set' : 'empty'}`);
+    if (canal6TsState.mode !== 'scrape') canal6TsState.mode = 'manual';
+    if (!canal6TsState.tdmaxChannelId) canal6TsState.tdmaxChannelId = '65d7aca4e4b0140cbf380bd0';
+    if (!canal6TsState.tdmaxAccount) canal6TsState.tdmaxAccount = 'pi';
+    console.log(`[canal6.ts] estado restaurado: enabled=${canal6TsState.enabled} mode=${canal6TsState.mode} profile=${canal6TsState.profile} url=${canal6TsState.sourceUrl ? 'set' : 'empty'}`);
   }
 } catch (e) {
   console.warn('[canal6.ts] no se pudo leer estado:', e.message);
@@ -288,6 +302,72 @@ const stopSharedEncoder = (reason) => {
     console.log(`[canal6.ts shared] stop ffmpeg (${reason})`);
     try { sharedEncoder.ff.kill('SIGKILL'); } catch (_) {}
     sharedEncoder.ff = null;
+  }
+};
+
+// ── Helper: scrape TDMax (cuenta pi / Repretel 6) vía edge function ──
+// Usado por el modo 'scrape' de Canal 6 TS. Devuelve la URL fresca o lanza error.
+let canal6TsScrapeInFlight = null;
+const scrapeCanal6TsUrl = async () => {
+  if (canal6TsScrapeInFlight) return canal6TsScrapeInFlight;
+  const channelId = canal6TsState.tdmaxChannelId || '65d7aca4e4b0140cbf380bd0';
+  const account = canal6TsState.tdmaxAccount || 'pi';
+  const fnUrl = `https://${(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace('https://', '').replace(/\/$/, '')}/functions/v1/scrape-channel`;
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
+  canal6TsScrapeInFlight = (async () => {
+    console.log(`[canal6.ts] 🔄 scrape TDMax channel=${channelId} account=${account}`);
+    const resp = await fetch(fnUrl, {
+      method: 'POST',
+      signal: AbortSignal.timeout(15000),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${anonKey}`,
+        'apikey': anonKey,
+      },
+      body: JSON.stringify({ channel_id: channelId, account, process_id: 'canal6ts' }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data?.success || !data?.url) {
+      const err = data?.error || `HTTP ${resp.status}`;
+      throw new Error(err);
+    }
+    return data.url;
+  })();
+  try {
+    const url = await canal6TsScrapeInFlight;
+    canal6TsState.lastScrapeAt = Date.now();
+    canal6TsState.lastScrapeError = null;
+    return url;
+  } catch (e) {
+    canal6TsState.lastScrapeAt = Date.now();
+    canal6TsState.lastScrapeError = e.message || String(e);
+    throw e;
+  } finally {
+    canal6TsScrapeInFlight = null;
+  }
+};
+
+// Re-scrape + actualizar sourceUrl + respawn del shared encoder (si aplica).
+// No-op si el modo no es 'scrape' o no está enabled.
+const refreshCanal6TsScrape = async (reason) => {
+  if (canal6TsState.mode !== 'scrape' || !canal6TsState.enabled) return null;
+  try {
+    const url = await scrapeCanal6TsUrl();
+    if (url && url !== canal6TsState.sourceUrl) {
+      canal6TsState.sourceUrl = url;
+      console.log(`[canal6.ts] 🔁 sourceUrl actualizada por scrape (${reason}): ${url.slice(0, 120)}`);
+    }
+    saveCanal6TsState();
+    // Forzar respawn del shared encoder con la URL nueva
+    if (isSharedEncoderProfile(canal6TsState.profile)) {
+      stopSharedEncoder(`scrape refresh: ${reason}`);
+      reconcileSharedEncoder();
+    }
+    return url;
+  } catch (e) {
+    console.warn(`[canal6.ts] ❌ scrape (${reason}) falló: ${e.message}`);
+    saveCanal6TsState();
+    return null;
   }
 };
 
@@ -369,8 +449,13 @@ const spawnSharedEncoder = () => {
     if (sharedEncoder.ff === ff) sharedEncoder.ff = null;
     // Respawn si seguimos en un perfil de shared encoder y enabled
     if (canal6TsState.enabled && isSharedEncoderProfile(canal6TsState.profile) && canal6TsState.sourceUrl) {
-      sharedEncoder.respawnTimer = setTimeout(() => {
+      sharedEncoder.respawnTimer = setTimeout(async () => {
         sharedEncoder.respawnTimer = null;
+        // En modo 'scrape' el token wmsAuthSign suele estar caducado tras un crash:
+        // re-scrapeamos antes de respawnear para evitar bucle 403/404.
+        if (canal6TsState.mode === 'scrape') {
+          try { await scrapeCanal6TsUrl().then((u) => { if (u) { canal6TsState.sourceUrl = u; saveCanal6TsState(); } }); } catch (_) {}
+        }
         spawnSharedEncoder();
       }, 2000);
     }
@@ -398,6 +483,7 @@ app.get('/canal6-ts/status', (req, res) => {
     sharedEncoderRunning: !!sharedEncoder.ff,
     sharedEncoderClients: sharedEncoder.clients.size,
     sharedEncoderUptimeSec: sharedEncoder.ff && sharedEncoder.startedAt ? Math.round((Date.now() - sharedEncoder.startedAt) / 1000) : 0,
+    scrapeInFlight: !!canal6TsScrapeInFlight,
   });
 });
 app.post('/canal6-ts/start', (req, res) => {
@@ -409,15 +495,55 @@ app.post('/canal6-ts/start', (req, res) => {
   }
   const urlChanged = url !== canal6TsState.sourceUrl;
   const profileChanged = profile !== canal6TsState.profile;
-  canal6TsState = { sourceUrl: url, enabled: true, profile };
+  canal6TsState = { ...canal6TsState, sourceUrl: url, enabled: true, profile, mode: 'manual' };
   saveCanal6TsState();
-  console.log(`[canal6.ts] START url=${url} profile=${profile} (urlChanged=${urlChanged} profileChanged=${profileChanged})`);
+  console.log(`[canal6.ts] START MANUAL url=${url} profile=${profile} (urlChanged=${urlChanged} profileChanged=${profileChanged})`);
   // Si estamos en modo shared-encoder y la URL/profile cambió, respawn el shared encoder.
   if (isSharedEncoderProfile(profile) && (urlChanged || profileChanged || !sharedEncoder.ff)) {
     stopSharedEncoder('start: url/profile change');
   }
   reconcileSharedEncoder();
   res.json({ ok: true, ...canal6TsState });
+});
+// ── NUEVO: inicio / refresh en modo SCRAPE (TDMax + WireGuard CR) ──
+app.post('/canal6-ts/scrape-start', async (req, res) => {
+  const reqProfile = (req.body?.profile || canal6TsState.profile || 'normal');
+  const profile = (reqProfile === 'mejorado720' || reqProfile === 'optimizado480') ? reqProfile : 'normal';
+  try {
+    // Activar modo scrape ANTES de scrapear para que el helper sepa
+    const profileChanged = profile !== canal6TsState.profile;
+    canal6TsState = { ...canal6TsState, enabled: true, profile, mode: 'scrape' };
+    const url = await scrapeCanal6TsUrl();
+    const urlChanged = url !== canal6TsState.sourceUrl;
+    canal6TsState.sourceUrl = url;
+    saveCanal6TsState();
+    console.log(`[canal6.ts] START SCRAPE url=${url.slice(0,120)} profile=${profile} (urlChanged=${urlChanged} profileChanged=${profileChanged})`);
+    if (isSharedEncoderProfile(profile) && (urlChanged || profileChanged || !sharedEncoder.ff)) {
+      stopSharedEncoder('scrape-start: url/profile change');
+    }
+    reconcileSharedEncoder();
+    res.json({ ok: true, ...canal6TsState });
+  } catch (e) {
+    saveCanal6TsState();
+    console.warn(`[canal6.ts] scrape-start falló: ${e.message}`);
+    res.status(502).json({ ok: false, error: e.message, ...canal6TsState });
+  }
+});
+// Forzar re-scrape ahora (mode='scrape' + enabled requerido)
+app.post('/canal6-ts/scrape-now', async (req, res) => {
+  if (canal6TsState.mode !== 'scrape') {
+    return res.status(400).json({ ok: false, error: 'No estás en modo scrape. Inicia con "Scrapear" primero.' });
+  }
+  if (!canal6TsState.enabled) {
+    return res.status(400).json({ ok: false, error: 'Canal 6 TS está detenido. Inicia primero.' });
+  }
+  try {
+    const url = await refreshCanal6TsScrape('manual');
+    if (!url) throw new Error(canal6TsState.lastScrapeError || 'Scrape devolvió vacío');
+    res.json({ ok: true, ...canal6TsState });
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message, ...canal6TsState });
+  }
 });
 app.post('/canal6-ts/stop', (req, res) => {
   canal6TsState.enabled = false;
@@ -445,7 +571,27 @@ app.post('/canal6-ts/profile', (req, res) => {
 });
 
 // Si al arrancar el server ya está enabled en modo mejorado, arrancar shared encoder.
-setTimeout(() => { try { reconcileSharedEncoder(); } catch (e) { console.warn('[canal6.ts] reconcile boot:', e.message); } }, 1000);
+// Si además mode='scrape', refrescar URL primero (los tokens TDMax expiran tras horas).
+setTimeout(async () => {
+  try {
+    if (canal6TsState.enabled && canal6TsState.mode === 'scrape') {
+      await refreshCanal6TsScrape('boot');
+    }
+    reconcileSharedEncoder();
+  } catch (e) { console.warn('[canal6.ts] reconcile boot:', e.message); }
+}, 1500);
+
+// Auto re-scrape periódico cuando estamos en modo scrape (TDMax wmsAuthSign expira).
+// Cada 30min: si lastScrapeAt > 4h, re-scrapea y respawn.
+setInterval(() => {
+  try {
+    if (canal6TsState.mode !== 'scrape' || !canal6TsState.enabled) return;
+    const age = Date.now() - (canal6TsState.lastScrapeAt || 0);
+    if (age > 4 * 60 * 60 * 1000) {
+      refreshCanal6TsScrape('periodic 4h').catch(() => {});
+    }
+  } catch (_) {}
+}, 30 * 60 * 1000);
 
 app.get('/canal6.ts', (req, res) => {
   if (!canal6TsState.enabled || !canal6TsState.sourceUrl) {
