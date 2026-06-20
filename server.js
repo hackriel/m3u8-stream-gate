@@ -5071,8 +5071,6 @@ app.post('/api/emit', async (req, res) => {
                 
                 if (primaryResult.cancelled) {
                   sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual durante health-check`);
-                  manualStopProcesses.delete(String(process_id));
-                  manualStopProcesses.delete(Number(process_id));
                   autoRecoveryInProgress.set(String(process_id), false);
                   return;
                 }
@@ -5093,8 +5091,6 @@ app.post('/api/emit', async (req, res) => {
               // Verificar parada manual una última vez
               if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
                 sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual justo antes de lanzar FFmpeg`);
-                manualStopProcesses.delete(String(process_id));
-                manualStopProcesses.delete(Number(process_id));
                 autoRecoveryInProgress.set(String(process_id), false);
                 return;
               }
@@ -5804,6 +5800,7 @@ app.post('/api/emit/restart', async (req, res) => {
     // 3) Resetear contadores y flags transitorios. NO tocar always_on.
     recoveryAttempts.set(process_id, 0);
     manualStopProcesses.delete(process_id);
+    manualStopProcesses.delete(String(process_id));
     manualStopProcesses.delete(Number(process_id));
     resetCircuitBreaker(process_id);
     emissionStatuses.set(process_id, 'idle');
