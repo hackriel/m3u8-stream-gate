@@ -1871,7 +1871,7 @@ export default function EmisorM3U8Panel() {
                     >
                       <span className="opacity-70">🔐 Logueado con:</span>
                       <span className="font-mono">
-                        {(processIndex === 24 || processIndex === 25) ? 'info@media.cr' : 'arlopfa@gmail.com'}
+                        {PI_ACCOUNT_PROCESSES.has(processIndex) ? 'info@media.cr' : 'arlopfa@gmail.com'}
                       </span>
                     </span>
                   </div>
