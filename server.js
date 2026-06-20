@@ -481,6 +481,34 @@ const setTeleticaSourceMode = (pid, mode) => {
   return m;
 };
 
+// ───────────────────────────────────────────────────────────────────────
+// CANAL 6 URL (15) — toggle Oficial vs Scraping (espejo del de Teletica).
+// Reusa la columna persistida `emission_processes.source_mode`.
+// Modo 'official' = usar la URL que el usuario pegó en el input (no hay
+// CDN fija como Bradmax). Modo 'scraping' = flujo TDMax actual.
+// Fallback unidireccional: official → scraping en recovery. De scraping
+// nunca se promueve a official (solo el usuario lo selecciona).
+// ───────────────────────────────────────────────────────────────────────
+const canal6SourceMode = new Map(); // pid (string) -> 'official' | 'scraping'
+const getCanal6SourceMode = (pid) =>
+  (canal6SourceMode.get(String(pid)) === 'official' ? 'official' : 'scraping');
+const setCanal6SourceMode = (pid, mode) => {
+  const m = mode === 'official' ? 'official' : 'scraping';
+  canal6SourceMode.set(String(pid), m);
+  try {
+    if (typeof supabase !== 'undefined' && supabase) {
+      supabase
+        .from('emission_processes')
+        .update({ source_mode: m })
+        .eq('id', parseInt(String(pid), 10))
+        .then(({ error }) => {
+          if (error) console.error(`[canal6SourceMode] persist error pid=${pid}:`, error.message);
+        });
+    }
+  } catch (_) {}
+  return m;
+};
+
 const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 // Perfiles de salida (CBR x264).
 //   - preset:      compromiso CPU vs calidad visual (faster ≈ +15% calidad vs veryfast).
@@ -5402,7 +5430,13 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 150)}...`);
 
     // Ejecutar ffmpeg
-    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
+    // Los canales en CHANNELS_VIA_PI_WG (15/24/25) se lanzan como `runuser -u croute`
+    // para que sus paquetes reciban fwmark y salgan por el túnel WG hacia el Pi5 CR.
+    const [spawnCmd, spawnArgs] = wrapFfmpegSpawn(process_id, ffmpegArgs);
+    if (isViaCrTunnel(process_id)) {
+      sendLog(process_id, 'info', `🇨🇷 Saliendo vía túnel WireGuard CR (Pi5) — runuser ${CR_TUNNEL_USER}`);
+    }
+    const ffmpegProcess = spawn(spawnCmd, spawnArgs, {
       cwd: path.join(__dirname, 'uploads')
     });
     
