@@ -51,6 +51,10 @@ async function scrapeChannelWithFallback(
 ): Promise<{ success: boolean; url?: string; error?: string }> {
   const body: Record<string, unknown> = { channel_id: channelId, process_id: processIndex };
   if (playerUrl) body.player_url = playerUrl;
+  const shouldFallbackFromLocalError = (error?: string, status?: number) => {
+    if (status === 429) return false;
+    return /fetch failed|UND_ERR_|CONNECT_TIMEOUT|ETIMEDOUT|ECONN|ENOTFOUND|EAI_AGAIN|timeout/i.test(error || '');
+  };
 
   // 1) Intento local (producción VPS)
   try {
@@ -62,7 +66,10 @@ async function scrapeChannelWithFallback(
     const ct = resp.headers.get('content-type') || '';
     if (ct.includes('application/json')) {
       const data = await resp.json();
-      return data;
+      if (data?.success || !shouldFallbackFromLocalError(data?.error, resp.status)) {
+        return data;
+      }
+      console.warn('[scrape] /api/local-scrape falló por red del VPS, usando edge function:', data?.error);
     }
     // No JSON → muy probablemente estamos en la preview de Lovable y el
     // endpoint no existe (devuelve index.html). Continuar al fallback.
