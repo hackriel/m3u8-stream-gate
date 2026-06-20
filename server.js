@@ -5806,7 +5806,6 @@ app.post('/api/emit/stop', async (req, res) => {
     const numericProcessId = parseInt(process_id);
     sendLog(process_id, 'info', internal_refresh ? `Detención interna (refresh 10h)` : `Solicitada detención de emisión`);
 
-    // (drop-test endpoint registered below)
 
     // NOTA: NO tocamos always_on aquí. El switch "Encendido siempre" es
     // controlado EXCLUSIVAMENTE por el usuario desde el endpoint /api/always-on.
