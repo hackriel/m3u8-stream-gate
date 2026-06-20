@@ -2875,45 +2875,151 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
 
-                  {/* Input URL fuente + acciones */}
+                  {/* Sub-tabs: Manual URL vs Scrapeo TDMax (WireGuard CR) */}
                   <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
-                    <label className="text-xs text-muted-foreground mb-2 block">URL fuente HLS (.m3u8) de Canal 6:</label>
-                    <textarea
-                      value={canal6TsInput}
-                      onChange={(e) => setCanal6TsInput(e.target.value)}
-                      placeholder="https://d2qsan2ut81n2k.cloudfront.net/live/.../ts:abr.m3u8"
-                      rows={2}
-                      className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 break-all resize-none"
-                    />
-                    <div className="flex flex-wrap gap-2 mt-3">
-                      {!active ? (
-                        <button
-                          onClick={canal6TsStart}
-                          disabled={canal6TsBusy || !canal6TsInput.trim()}
-                          className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-all"
-                        >
-                          {canal6TsBusy ? 'Iniciando…' : '▶ Emitir'}
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            onClick={canal6TsStop}
-                            disabled={canal6TsBusy}
-                            className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-all"
-                          >
-                            {canal6TsBusy ? 'Deteniendo…' : '■ Detener'}
-                          </button>
-                          <button
-                            onClick={canal6TsStart}
-                            disabled={canal6TsBusy || !canal6TsInput.trim() || canal6TsInput.trim() === canal6TsStatus.sourceUrl}
-                            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-medium transition-all"
-                            title="Actualiza la URL fuente sin detener"
-                          >
-                            ↻ Actualizar URL
-                          </button>
-                        </>
+                    <div className="flex gap-2 mb-4 border-b border-border pb-3">
+                      <button
+                        type="button"
+                        onClick={() => setCanal6TsSubTab('manual')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all flex items-center gap-1.5 ${
+                          canal6TsSubTab === 'manual'
+                            ? 'bg-primary/20 border-primary/50 text-primary'
+                            : 'bg-background border-border text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        ✏️ Manual URL
+                        {active && canal6TsStatus.mode === 'manual' && (
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCanal6TsSubTab('scrape')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all flex items-center gap-1.5 ${
+                          canal6TsSubTab === 'scrape'
+                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                            : 'bg-background border-border text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        🌐 Scrapeo TDMax · WireGuard CR
+                        {active && canal6TsStatus.mode === 'scrape' && (
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+                        )}
+                      </button>
+                      {active && (
+                        <span className="ml-auto text-[10px] text-muted-foreground self-center">
+                          Modo activo: <b className="text-foreground">{canal6TsStatus.mode === 'scrape' ? 'Scrapeo' : 'Manual'}</b>
+                        </span>
                       )}
                     </div>
+
+                    {canal6TsSubTab === 'manual' && (
+                      <>
+                        <label className="text-xs text-muted-foreground mb-2 block">URL fuente HLS (.m3u8) de Canal 6:</label>
+                        <textarea
+                          value={canal6TsInput}
+                          onChange={(e) => setCanal6TsInput(e.target.value)}
+                          placeholder="https://d2qsan2ut81n2k.cloudfront.net/live/.../ts:abr.m3u8"
+                          rows={2}
+                          className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 break-all resize-none"
+                        />
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {!(active && canal6TsStatus.mode === 'manual') ? (
+                            <button
+                              onClick={canal6TsStart}
+                              disabled={canal6TsBusy || !canal6TsInput.trim()}
+                              className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-all"
+                              title={active && canal6TsStatus.mode === 'scrape' ? 'Esto detendrá el modo Scrapeo y activará el modo Manual' : ''}
+                            >
+                              {canal6TsBusy ? 'Iniciando…' : (active && canal6TsStatus.mode === 'scrape' ? '▶ Cambiar a Manual' : '▶ Emitir')}
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={canal6TsStop}
+                                disabled={canal6TsBusy}
+                                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-all"
+                              >
+                                {canal6TsBusy ? 'Deteniendo…' : '■ Detener'}
+                              </button>
+                              <button
+                                onClick={canal6TsStart}
+                                disabled={canal6TsBusy || !canal6TsInput.trim() || canal6TsInput.trim() === canal6TsStatus.sourceUrl}
+                                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-medium transition-all"
+                                title="Actualiza la URL fuente sin detener"
+                              >
+                                ↻ Actualizar URL
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
+
+                    {canal6TsSubTab === 'scrape' && (
+                      <>
+                        <div className="mb-3 text-xs text-muted-foreground leading-relaxed">
+                          Scrapea <b>Repretel 6</b> en TDMax con la cuenta <code>info@media.cr</code>. La sesión y el stream pasan por el túnel <b>WireGuard CR</b> (Pi 5 en casa) para que el CDN vea IP costarricense — mismo método de FOX URL y FOX+ URL. Token TDMax se refresca automáticamente cada 4h.
+                        </div>
+                        <div className="bg-background border border-border rounded-lg px-3 py-2 mb-3">
+                          <div className="text-[10px] uppercase text-muted-foreground mb-1">URL scrapeada actual:</div>
+                          <code className="text-[11px] font-mono text-foreground break-all">
+                            {canal6TsStatus.mode === 'scrape' && canal6TsStatus.sourceUrl
+                              ? canal6TsStatus.sourceUrl
+                              : <span className="text-muted-foreground">— (aún no se ha scrapeado en esta sesión)</span>}
+                          </code>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] mb-3">
+                          <div className="bg-background/40 rounded-lg p-2 border border-border/40">
+                            <div className="text-[10px] uppercase text-muted-foreground">Último scrape</div>
+                            <div className="font-mono text-foreground">
+                              {canal6TsStatus.lastScrapeAt
+                                ? `${Math.max(0, Math.floor((Date.now() - canal6TsStatus.lastScrapeAt) / 60000))} min atrás`
+                                : '—'}
+                            </div>
+                          </div>
+                          <div className={`bg-background/40 rounded-lg p-2 border ${canal6TsStatus.lastScrapeError ? 'border-red-500/50' : 'border-border/40'}`}>
+                            <div className="text-[10px] uppercase text-muted-foreground">Estado</div>
+                            <div className={`font-mono ${canal6TsStatus.lastScrapeError ? 'text-red-400' : 'text-foreground'}`} title={canal6TsStatus.lastScrapeError || ''}>
+                              {canal6TsStatus.scrapeInFlight ? 'scrapeando…' : (canal6TsStatus.lastScrapeError ? 'error' : 'ok')}
+                            </div>
+                          </div>
+                        </div>
+                        {canal6TsStatus.lastScrapeError && (
+                          <div className="text-[11px] text-red-400 mb-3 break-all">⚠️ {canal6TsStatus.lastScrapeError}</div>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {!(active && canal6TsStatus.mode === 'scrape') ? (
+                            <button
+                              onClick={canal6TsScrapeStart}
+                              disabled={canal6TsBusy}
+                              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium transition-all"
+                              title={active && canal6TsStatus.mode === 'manual' ? 'Esto detendrá el modo Manual y activará Scrapeo' : ''}
+                            >
+                              {canal6TsBusy ? 'Scrapeando…' : (active && canal6TsStatus.mode === 'manual' ? '🌐 Cambiar a Scrapeo' : '🌐 Scrapear y emitir')}
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={canal6TsStop}
+                                disabled={canal6TsBusy}
+                                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-all"
+                              >
+                                {canal6TsBusy ? 'Deteniendo…' : '■ Detener'}
+                              </button>
+                              <button
+                                onClick={canal6TsScrapeNow}
+                                disabled={canal6TsBusy}
+                                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-medium transition-all"
+                                title="Forzar un nuevo scrape ahora (renueva token TDMax)"
+                              >
+                                ↻ Scrapear ahora
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="bg-card/50 border border-border rounded-xl p-4 mb-4">
