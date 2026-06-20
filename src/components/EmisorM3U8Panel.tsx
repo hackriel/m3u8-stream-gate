@@ -110,7 +110,7 @@ const getDefaultOutputProfile = (processIndex: number): OutputProfile =>
 // 19 (RANDOM Disney 7): funcionalidad migrada al tab Disney 7 (ID 0).
 //   La lógica permanece en el código por si se necesita revertir; solo se ocultan los tabs.
 // 12 (TIGO SRT): descartado — Tigo HDCP bloquea Cam Link 4K (memoria del proyecto).
-const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 19]);
+const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 19]);
 // Procesos que emiten HLS local (sin RTMP)
 // ID 0 (Disney 7) ahora emite HLS al slug 'Disney7' (igual que RANDOM Disney 7).
 // Disney 8 (ID 10) NO está aquí: usa RTMP destino manual pegado por el usuario.
