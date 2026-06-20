@@ -481,6 +481,34 @@ const setTeleticaSourceMode = (pid, mode) => {
   return m;
 };
 
+// ───────────────────────────────────────────────────────────────────────
+// CANAL 6 URL (15) — toggle Oficial vs Scraping (espejo del de Teletica).
+// Reusa la columna persistida `emission_processes.source_mode`.
+// Modo 'official' = usar la URL que el usuario pegó en el input (no hay
+// CDN fija como Bradmax). Modo 'scraping' = flujo TDMax actual.
+// Fallback unidireccional: official → scraping en recovery. De scraping
+// nunca se promueve a official (solo el usuario lo selecciona).
+// ───────────────────────────────────────────────────────────────────────
+const canal6SourceMode = new Map(); // pid (string) -> 'official' | 'scraping'
+const getCanal6SourceMode = (pid) =>
+  (canal6SourceMode.get(String(pid)) === 'official' ? 'official' : 'scraping');
+const setCanal6SourceMode = (pid, mode) => {
+  const m = mode === 'official' ? 'official' : 'scraping';
+  canal6SourceMode.set(String(pid), m);
+  try {
+    if (typeof supabase !== 'undefined' && supabase) {
+      supabase
+        .from('emission_processes')
+        .update({ source_mode: m })
+        .eq('id', parseInt(String(pid), 10))
+        .then(({ error }) => {
+          if (error) console.error(`[canal6SourceMode] persist error pid=${pid}:`, error.message);
+        });
+    }
+  } catch (_) {}
+  return m;
+};
+
 const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 // Perfiles de salida (CBR x264).
 //   - preset:      compromiso CPU vs calidad visual (faster ≈ +15% calidad vs veryfast).
@@ -529,7 +557,28 @@ const saveOutputProfileForProcess = (processId, profile) => {
 // ───────────────────────────────────────────────────────────────────────
 const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080';
 // IDs de proceso que deben enrutar TODO su tráfico (scraping + FFmpeg) por el proxy
-const PROXY_PROCESSES = new Set();
+// Ahora "proxy" = bind del socket de scraping al source-IP del túnel WireGuard
+// (10.77.0.2). El VPS tiene una `ip rule from 10.77.0.2 table cr_routed` que
+// rutea esos sockets vía wg0 → Pi5 CR. Ver setup-vps-cr-wireguard.sh.
+// Solo los 3 canales geo-bloqueados deben scrapear vía CR.
+const PROXY_PROCESSES = new Set(['15', '24', '25']);
+
+// ───────────────────────────────────────────────────────────────────────
+// CR WireGuard Gateway — lista blanca de canales cuyo FFmpeg debe salir
+// por el túnel hacia el Pi5 (IP residencial CR). Implementado vía
+// `runuser -u croute -- ffmpeg ...`: los paquetes del UID croute reciben
+// fwmark 0x77 → tabla cr_routed → wg0. Si el túnel se cae, SOLO estos
+// canales fallan; el resto sigue saliendo por la IP del VPS.
+// ───────────────────────────────────────────────────────────────────────
+const CHANNELS_VIA_PI_WG = new Set(['15', '24', '25']); // CANAL 6 URL, FOX+ URL, FOX URL
+const CR_TUNNEL_USER = 'croute';
+const isViaCrTunnel = (pid) => CHANNELS_VIA_PI_WG.has(String(pid));
+// Wrappea un spawn de ffmpeg cuando el pid debe salir por el túnel CR.
+// Devuelve [command, args] para pasar tal cual a child_process.spawn.
+const wrapFfmpegSpawn = (pid, ffmpegArgs) => {
+  if (!isViaCrTunnel(pid)) return ['ffmpeg', ffmpegArgs];
+  return ['runuser', ['-u', CR_TUNNEL_USER, '--', 'ffmpeg', ...ffmpegArgs]];
+};
 // IDs que deben usar la SEGUNDA cuenta TDMax (info@media.cr, la del Raspberry)
 // en vez de la cuenta principal (arlopfa). Evita exceder el cupo de devices
 // permitidos por TDMax en una sola cuenta.
@@ -1219,6 +1268,13 @@ const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
       method: options.method || 'GET',
       headers: options.headers || {},
       agent: getProxyAgent(),
+      // Bindea el socket saliente a la IP WG del VPS (10.77.0.2). El sistema
+      // tiene una `ip rule from 10.77.0.2 table cr_routed` que rutea por
+      // wg0 → Pi5. Así el scraping TDMax sale con IP CR sin necesidad de
+      // SOCKS5/proxychains. Si wg0 no existe, el bind falla y el fetch
+      // termina en error claro (manejado arriba por los recovery).
+      localAddress: '10.77.0.2',
+      family: 4,
       timeout: 15000,
     }, (response) => {
       const chunks = [];
@@ -2696,6 +2752,19 @@ app.post('/api/emit', async (req, res) => {
     }
     if (process_id === '13' && getTeleticaSourceMode('13') === 'official') {
       effectiveSourceM3u8 = TELETICA_OFFICIAL_URL;
+    }
+
+    // ── CANAL 6 URL (15): persistir modo enviado por el frontend.
+    //    En 'official' usamos la URL pegada por el usuario tal cual (no hay
+    //    CDN fija). En 'scraping' seguimos el flujo TDMax actual. El FFmpeg
+    //    sale igualmente por el túnel CR (pid ∈ CHANNELS_VIA_PI_WG).
+    if (process_id === '15' && !is_recovery && (source_mode === 'official' || source_mode === 'scraping')) {
+      setCanal6SourceMode('15', source_mode);
+      sendLog('15', 'info', `🎛️ Modo Canal 6 seleccionado: ${source_mode.toUpperCase()}`);
+    }
+    if (process_id === '15' && getCanal6SourceMode('15') === 'official' && source_m3u8) {
+      sendLog('15', 'info', `🎯 Canal 6 OFICIAL: usando URL pegada por usuario`);
+      // effectiveSourceM3u8 ya viene del request — no sobrescribir.
     }
     // SRT ingest: si el caller no provee source_m3u8 (o lo marca como srt://obs),
     // arrancamos un listener SRT que recibe de OBS en el puerto del proceso.
@@ -5374,7 +5443,13 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 150)}...`);
 
     // Ejecutar ffmpeg
-    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
+    // Los canales en CHANNELS_VIA_PI_WG (15/24/25) se lanzan como `runuser -u croute`
+    // para que sus paquetes reciban fwmark y salgan por el túnel WG hacia el Pi5 CR.
+    const [spawnCmd, spawnArgs] = wrapFfmpegSpawn(process_id, ffmpegArgs);
+    if (isViaCrTunnel(process_id)) {
+      sendLog(process_id, 'info', `🇨🇷 Saliendo vía túnel WireGuard CR (Pi5) — runuser ${CR_TUNNEL_USER}`);
+    }
+    const ffmpegProcess = spawn(spawnCmd, spawnArgs, {
       cwd: path.join(__dirname, 'uploads')
     });
     
@@ -6020,6 +6095,65 @@ app.get('/api/teletica/source-mode', (req, res) => {
   res.json({ mode: getTeleticaSourceMode('13') });
 });
 
+app.get('/api/canal6/source-mode', (req, res) => {
+  res.json({ mode: getCanal6SourceMode('15') });
+});
+
+// ============= CR TUNNEL HEALTH =============
+// Devuelve si el túnel WireGuard al Pi5 está vivo y la IP pública que ve el
+// usuario `croute` (debe ser CR). Cachea resultado 10s para no martillar
+// api.ipify.org desde el dashboard.
+const crTunnelHealthState = { wg_up: false, cr_ip: null, last_check: 0, checking: false };
+const refreshCrTunnelHealth = async () => {
+  if (crTunnelHealthState.checking) return crTunnelHealthState;
+  const now = Date.now();
+  if (now - crTunnelHealthState.last_check < 10000) return crTunnelHealthState;
+  crTunnelHealthState.checking = true;
+  try {
+    // 1) ¿wg0 levantado y con peer?
+    let wgUp = false;
+    try {
+      const out = execSync('wg show wg0 latest-handshakes 2>/dev/null', { encoding: 'utf8', timeout: 2000 });
+      // Línea: "<pubkey>\t<unix_ts>". Handshake reciente (<180s) = peer vivo.
+      const ts = parseInt((out.trim().split(/\s+/)[1] || '0'), 10);
+      wgUp = ts > 0 && (Math.floor(Date.now() / 1000) - ts) < 180;
+    } catch { wgUp = false; }
+
+    // 2) IP pública vista por croute (si está wg_up).
+    let crIp = null;
+    if (wgUp) {
+      try {
+        const ip = execSync(
+          `sudo -n -u ${CR_TUNNEL_USER} curl -fsS --max-time 5 https://api.ipify.org`,
+          { encoding: 'utf8', timeout: 7000 }
+        ).trim();
+        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) crIp = ip;
+      } catch (_) { /* keep null */ }
+    }
+
+    crTunnelHealthState.wg_up = wgUp;
+    crTunnelHealthState.cr_ip = crIp;
+    crTunnelHealthState.last_check = now;
+  } finally {
+    crTunnelHealthState.checking = false;
+  }
+  return crTunnelHealthState;
+};
+
+app.get('/api/cr-tunnel/health', async (req, res) => {
+  try {
+    const h = await refreshCrTunnelHealth();
+    res.json({
+      wg_up: h.wg_up,
+      cr_ip: h.cr_ip,
+      last_check: h.last_check,
+      channels: Array.from(CHANNELS_VIA_PI_WG).map(Number),
+    });
+  } catch (err) {
+    res.status(500).json({ wg_up: false, cr_ip: null, error: err.message });
+  }
+});
+
 app.get('/api/status', (req, res) => {
   const { process_id } = req.query;
 
@@ -6648,6 +6782,22 @@ server.listen(PORT, () => {
         sendLog('13', 'info', `🎛️ Modo Teletica restaurado desde DB: ${persisted.toUpperCase()}`);
       } catch (err) {
         console.error('Error cargando teletica source_mode desde DB:', err.message);
+      }
+    })();
+
+    // ====== Cargar modo Canal 6 URL (15) desde DB ======
+    (async () => {
+      try {
+        const { data: row } = await supabase
+          .from('emission_processes')
+          .select('source_mode')
+          .eq('id', 15)
+          .maybeSingle();
+        const persisted = row?.source_mode === 'official' ? 'official' : 'scraping';
+        canal6SourceMode.set('15', persisted);
+        sendLog('15', 'info', `🎛️ Modo Canal 6 restaurado desde DB: ${persisted.toUpperCase()}`);
+      } catch (err) {
+        console.error('Error cargando canal6 source_mode desde DB:', err.message);
       }
     })();
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
@@ -577,6 +577,59 @@ export default function EmisorM3U8Panel() {
       } catch {}
     }, 5000);
     return () => clearInterval(interval);
+  }, []);
+  // ── CANAL 6 URL (15): toggle Oficial / Scraping (espejo de Teletica).
+  //    'official' = usuario pega URL libre (no auto-rellena).
+  //    'scraping' = flujo TDMax actual.
+  const [canal6Mode, setCanal6Mode] = useState<'official' | 'scraping'>(() => {
+    try {
+      const v = localStorage.getItem('canal6_15_source_mode');
+      return v === 'official' ? 'official' : 'scraping';
+    } catch {
+      return 'scraping';
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('canal6_15_source_mode', canal6Mode); } catch {}
+  }, [canal6Mode]);
+  useEffect(() => {
+    let lastServerMode: 'official' | 'scraping' | null = null;
+    const interval = setInterval(async () => {
+      try {
+        const r = await fetch('/api/canal6/source-mode');
+        if (!r.ok) return;
+        const { mode } = await r.json();
+        if (mode !== 'official' && mode !== 'scraping') return;
+        if (lastServerMode === null) { lastServerMode = mode; return; }
+        if (mode !== lastServerMode) {
+          lastServerMode = mode;
+          setCanal6Mode(prev => (prev !== mode ? mode : prev));
+        }
+      } catch {}
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ── Salida CR vía Pi5 (WireGuard) — set + poll de health del túnel.
+  const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([15, 24, 25]), []);
+  const [crTunnelHealth, setCrTunnelHealth] = useState<{ wg_up: boolean; cr_ip: string | null }>({
+    wg_up: false,
+    cr_ip: null,
+  });
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/cr-tunnel/health');
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled) return;
+        setCrTunnelHealth({ wg_up: !!j.wg_up, cr_ip: typeof j.cr_ip === 'string' ? j.cr_ip : null });
+      } catch {}
+    };
+    tick();
+    const interval = setInterval(tick, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
   const [outputProfiles, setOutputProfiles] = useState<Record<number, OutputProfile>>(() => {
     try {
@@ -1359,6 +1412,7 @@ export default function EmisorM3U8Panel() {
           process_id: processIndex.toString(),
           output_profile: selectedProfile,
           ...(processIndex === TELETICA_URL_INDEX ? { source_mode: teleticaMode } : {}),
+          ...(processIndex === CANAL6_URL_INDEX ? { source_mode: canal6Mode } : {}),
           ...(isM3uFileProcess && m3uPayload ? {
             // passthrough_mode: 'transcode' → usa el perfil estándar 720p CBR 2000k
             // (mismo que Disney 7 ID 0). Resuelve el "video crudo no va bien" en Xui/IPTV.
@@ -1676,6 +1730,26 @@ export default function EmisorM3U8Panel() {
             <h2 className="text-lg font-medium mb-4 text-accent">
               {processIndex === FILE_UPLOAD_INDEX ? "Archivos Locales" : "Fuente y Cabeceras"} - {channelConfig.name}
             </h2>
+            {CR_TUNNEL_CHANNELS.has(processIndex) && (
+              <div className="mb-4 -mt-2">
+                {crTunnelHealth.wg_up && crTunnelHealth.cr_ip ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                    title={`Este canal sale al CDN desde Costa Rica vía Pi5 (10.77.0.1). IP pública vista: ${crTunnelHealth.cr_ip}`}
+                  >
+                    🇨🇷 IP CR · <span className="font-mono">{crTunnelHealth.cr_ip}</span>
+                    {process.isEmitiendo && <span className="ml-1 opacity-80">• EMITIENDO</span>}
+                  </span>
+                ) : (
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border bg-amber-500/15 border-amber-500/40 text-amber-300"
+                    title="El túnel WireGuard al Pi5 (CR) no está activo. Este canal va a fallar al arrancar hasta que el túnel se restablezca."
+                  >
+                    ⚠️ Túnel CR caído
+                  </span>
+                )}
+              </div>
+            )}
 
             {processIndex === FILE_UPLOAD_INDEX ? (
               // Proceso Subida: Upload de archivos
@@ -1866,7 +1940,47 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
-                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && (
+                {processIndex === CANAL6_URL_INDEX && (
+                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
+                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                      Fuente Canal 6
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCanal6Mode('official')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          canal6Mode === 'official'
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Pegá tu propia URL (sin scraping). El FFmpeg igual sale por IP CR vía Pi5."
+                      >
+                        🏛️ Oficial (URL pegada)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCanal6Mode('scraping')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          canal6Mode === 'scraping'
+                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Login TDMax + token de 60s (flujo histórico)"
+                      >
+                        🔐 Scraping (TDMax)
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      {canal6Mode === 'official'
+                        ? 'Usá la URL que pegues en el input. Sin login, sin scraping. El consumo igual sale por IP de Costa Rica vía Pi5.'
+                        : 'Scraping TDMax (cuenta info@media.cr) + token de 60s. El servidor renueva automáticamente.'}
+                    </p>
+                  </div>
+                )}
+                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
@@ -1917,7 +2031,7 @@ export default function EmisorM3U8Panel() {
                           : 'border-border'
                     }`}
                   />
-                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && (
+                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
                     <button
                       onClick={() => fetchChannelUrl(processIndex)}
                       disabled={fetchingChannel !== null}
