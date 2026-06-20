@@ -304,9 +304,15 @@ export default function EmisorM3U8Panel() {
     sharedEncoderRunning?: boolean;
     sharedEncoderClients?: number;
     sharedEncoderUptimeSec?: number;
-  }>({ enabled: false, sourceUrl: '', profile: 'normal' });
+    mode?: 'manual' | 'scrape';
+    lastScrapeAt?: number;
+    lastScrapeError?: string | null;
+    scrapeInFlight?: boolean;
+  }>({ enabled: false, sourceUrl: '', profile: 'normal', mode: 'manual' });
   const [canal6TsInput, setCanal6TsInput] = useState<string>('');
   const [canal6TsBusy, setCanal6TsBusy] = useState(false);
+  // Sub-tab dentro del panel Canal 6 TS: 'manual' (URL pegada) | 'scrape' (TDMax pi vía WireGuard CR)
+  const [canal6TsSubTab, setCanal6TsSubTab] = useState<'manual' | 'scrape'>('manual');
 
   // Polling estado Canal 6 TS
   useEffect(() => {
@@ -324,8 +330,14 @@ export default function EmisorM3U8Panel() {
           sharedEncoderRunning: !!j.sharedEncoderRunning,
           sharedEncoderClients: j.sharedEncoderClients || 0,
           sharedEncoderUptimeSec: j.sharedEncoderUptimeSec || 0,
+          mode: j.mode === 'scrape' ? 'scrape' : 'manual',
+          lastScrapeAt: j.lastScrapeAt || 0,
+          lastScrapeError: j.lastScrapeError || null,
+          scrapeInFlight: !!j.scrapeInFlight,
         });
         setCanal6TsInput((prev) => (prev ? prev : (j.sourceUrl || '')));
+        // Alinear sub-tab al modo persistido (solo en el primer fetch)
+        setCanal6TsSubTab((prev) => (j.mode === 'scrape' ? 'scrape' : prev));
       } catch (_) { /* offline */ }
     };
     fetchStatus();
@@ -348,6 +360,35 @@ export default function EmisorM3U8Panel() {
       toast.success('Canal 6 TS emitiendo');
     } catch (e: any) {
       toast.error(`No se pudo iniciar: ${e.message}`);
+    } finally { setCanal6TsBusy(false); }
+  };
+
+  // Iniciar / refrescar modo SCRAPE TDMax (cuenta info@media.cr vía WireGuard CR)
+  const canal6TsScrapeStart = async () => {
+    setCanal6TsBusy(true);
+    try {
+      const r = await fetch(`${PUBLIC_HLS_BASE_URL}/canal6-ts/scrape-start`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile: canal6TsStatus.profile }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || 'Error');
+      setCanal6TsStatus((s) => ({ ...s, enabled: true, mode: 'scrape', sourceUrl: j.sourceUrl || s.sourceUrl }));
+      toast.success('Canal 6 TS scrapeando (TDMax + WireGuard CR)');
+    } catch (e: any) {
+      toast.error(`No se pudo scrapear: ${e.message}`);
+    } finally { setCanal6TsBusy(false); }
+  };
+  const canal6TsScrapeNow = async () => {
+    setCanal6TsBusy(true);
+    try {
+      const r = await fetch(`${PUBLIC_HLS_BASE_URL}/canal6-ts/scrape-now`, { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || 'Error');
+      setCanal6TsStatus((s) => ({ ...s, sourceUrl: j.sourceUrl || s.sourceUrl }));
+      toast.success('URL refrescada por scrape');
+    } catch (e: any) {
+      toast.error(`No se pudo refrescar: ${e.message}`);
     } finally { setCanal6TsBusy(false); }
   };
   const canal6TsStop = async () => {
