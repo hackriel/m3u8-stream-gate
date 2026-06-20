@@ -660,11 +660,17 @@ app.get('/canal6.ts', (req, res) => {
   // ────── PERFIL NORMAL: passthrough per-cliente (comportamiento original) ──────
   const src = canal6TsState.sourceUrl;
   const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+  // Mismo criterio que el shared encoder: si la fuente es teletica/tdmax,
+  // usar Referer/Origin de TDMax (la CDN valida literal). Si no, canal6.com.ni.
+  const isTeleticaSrc = /(^|\.)teletica\.com\//i.test(src) || /(^|\.)tdmax\.com\//i.test(src);
+  const headersBlock = isTeleticaSrc
+    ? `Referer: ${TDMAX_APP_REFERER}\r\nOrigin: ${TDMAX_APP_ORIGIN}\r\n`
+    : 'Referer: https://www.canal6.com.ni/\r\nOrigin: https://www.canal6.com.ni\r\n';
   const ffArgs = [
     '-hide_banner',
     '-loglevel', 'error',
     '-user_agent', ua,
-    '-headers', 'Referer: https://www.canal6.com.ni/\r\nOrigin: https://www.canal6.com.ni\r\n',
+    '-headers', headersBlock,
     '-reconnect', '1',
     '-reconnect_streamed', '1',
     '-reconnect_on_network_error', '1',
