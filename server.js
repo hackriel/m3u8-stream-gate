@@ -4665,9 +4665,6 @@ app.post('/api/emit', async (req, res) => {
 
       if (isManualStop) {
         sendLog(process_id, 'info', '🛑 Parada manual detectada - Auto-recovery desactivado');
-        manualStopProcesses.delete(process_id);
-        manualStopProcesses.delete(String(process_id));
-        manualStopProcesses.delete(Number(process_id));
         quickRetryState.delete(process_id);
       } else if (String(process_id) === '17' && (code !== null || signal)) {
         // ───────────────────────────────────────────────────────────────
@@ -4777,8 +4774,6 @@ app.post('/api/emit', async (req, res) => {
               // Verificar si el usuario detuvo manualmente mientras esperábamos
               if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
                 sendLog(process_id, 'info', `🛑 Retry rápido cancelado: parada manual detectada durante espera`);
-                manualStopProcesses.delete(String(process_id));
-                manualStopProcesses.delete(Number(process_id));
                 return;
               }
 
@@ -4910,8 +4905,6 @@ app.post('/api/emit', async (req, res) => {
             // Verificar si el usuario detuvo manualmente mientras esperábamos
             if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
               sendLog(process_id, 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
-              manualStopProcesses.delete(String(process_id));
-              manualStopProcesses.delete(Number(process_id));
               return;
             }
             // TELETICA URL (13): 2 reintentos en OFICIAL antes de cambiar a SCRAPING.
@@ -4961,7 +4954,6 @@ app.post('/api/emit', async (req, res) => {
             await sleep(500);
             if (manualStopProcesses.has('26') || manualStopProcesses.has(26)) {
               sendLog('26', 'info', `🛑 Recovery cancelado: parada manual detectada durante espera`);
-              manualStopProcesses.delete('26'); manualStopProcesses.delete(26);
               return;
             }
             try {
@@ -5004,8 +4996,6 @@ app.post('/api/emit', async (req, res) => {
             try {
               if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
                 sendLog(procId, 'info', `🛑 Recovery cancelado: parada manual detectada`);
-                manualStopProcesses.delete(String(process_id));
-                manualStopProcesses.delete(Number(process_id));
                 return;
               }
               if (!supabase) {
