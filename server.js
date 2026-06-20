@@ -1821,7 +1821,16 @@ const scrapeStreamUrlLocal = async (channelId, channelName, { useProxy = false, 
     // Retornar URL + accessToken + cookies para que FFmpeg los use
     return { url: streamUrl, accessToken, cookies: allCookieStr || null };
   } catch (err) {
-    return { url: null, error: `Error en scraping local: ${err.message}` };
+    // Exponer la causa real del fetch (DNS/TLS/timeout/conn reset) para que
+    // el dashboard muestre algo accionable en vez del genérico "fetch failed".
+    const cause = err && err.cause ? err.cause : null;
+    const causeBits = cause
+      ? [cause.code, cause.errno, cause.syscall, cause.hostname, cause.message]
+          .filter(Boolean)
+          .join(' ')
+      : '';
+    const detail = causeBits ? `${err.message} — ${causeBits}` : err.message;
+    return { url: null, error: `Error en scraping local: ${detail}` };
   }
 };
 
