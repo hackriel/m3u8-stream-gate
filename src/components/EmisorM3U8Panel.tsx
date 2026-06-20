@@ -578,6 +578,59 @@ export default function EmisorM3U8Panel() {
     }, 5000);
     return () => clearInterval(interval);
   }, []);
+  // ── CANAL 6 URL (15): toggle Oficial / Scraping (espejo de Teletica).
+  //    'official' = usuario pega URL libre (no auto-rellena).
+  //    'scraping' = flujo TDMax actual.
+  const [canal6Mode, setCanal6Mode] = useState<'official' | 'scraping'>(() => {
+    try {
+      const v = localStorage.getItem('canal6_15_source_mode');
+      return v === 'official' ? 'official' : 'scraping';
+    } catch {
+      return 'scraping';
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('canal6_15_source_mode', canal6Mode); } catch {}
+  }, [canal6Mode]);
+  useEffect(() => {
+    let lastServerMode: 'official' | 'scraping' | null = null;
+    const interval = setInterval(async () => {
+      try {
+        const r = await fetch('/api/canal6/source-mode');
+        if (!r.ok) return;
+        const { mode } = await r.json();
+        if (mode !== 'official' && mode !== 'scraping') return;
+        if (lastServerMode === null) { lastServerMode = mode; return; }
+        if (mode !== lastServerMode) {
+          lastServerMode = mode;
+          setCanal6Mode(prev => (prev !== mode ? mode : prev));
+        }
+      } catch {}
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ── Salida CR vía Pi5 (WireGuard) — set + poll de health del túnel.
+  const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([15, 24, 25]), []);
+  const [crTunnelHealth, setCrTunnelHealth] = useState<{ wg_up: boolean; cr_ip: string | null }>({
+    wg_up: false,
+    cr_ip: null,
+  });
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/cr-tunnel/health');
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled) return;
+        setCrTunnelHealth({ wg_up: !!j.wg_up, cr_ip: typeof j.cr_ip === 'string' ? j.cr_ip : null });
+      } catch {}
+    };
+    tick();
+    const interval = setInterval(tick, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
   const [outputProfiles, setOutputProfiles] = useState<Record<number, OutputProfile>>(() => {
     try {
       const parsed = JSON.parse(sessionStorage.getItem("emisor-output-profiles") || "{}");
