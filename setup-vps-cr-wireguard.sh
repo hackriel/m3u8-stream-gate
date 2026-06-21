@@ -80,7 +80,9 @@ Table      = off
 # Raspberry Pi 5 en casa CR
 PublicKey           = $PI_PUBKEY
 Endpoint            = $PI_ENDPOINT
-AllowedIPs          = $WG_PEER_IP
+# 0.0.0.0/0 = todo el tráfico que el kernel mande por wg0 sale por el Pi (gateway CR).
+# El policy-routing limita qué procesos llegan a wg0 (solo uid:croute).
+AllowedIPs          = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
 chmod 600 "$WG_CONF"
