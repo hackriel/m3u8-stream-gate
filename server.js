@@ -557,12 +557,12 @@ const saveOutputProfileForProcess = (processId, profile) => {
 // evitar el geobloqueo y la validación de IP del CDN de Tigo.
 // ───────────────────────────────────────────────────────────────────────
 const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080';
-// IDs de proceso que deben enrutar TODO su tráfico (scraping + FFmpeg) por el proxy
-// Ahora "proxy" = bind del socket de scraping al source-IP del túnel WireGuard
-// (10.77.0.2). El VPS tiene una `ip rule from 10.77.0.2 table cr_routed` que
-// rutea esos sockets vía wg0 → Pi5 CR. Ver setup-vps-cr-wireguard.sh.
-// Solo los 3 canales geo-bloqueados deben scrapear vía CR.
+// IDs que requieren scraping local vía Pi5 CR (token/IP deben coincidir).
 const PROXY_PROCESSES = new Set(['15', '24', '25']);
+
+// Fallback legado SOCKS/proxychains para FFmpeg. FOX/FOX+ ya NO deben pasar
+// por este bloque: el scraping usa proxy HTTP Pi5 y FFmpeg sale por runuser croute.
+const LEGACY_SOCKS_FFMPEG_PROCESSES = new Set([]);
 
 // Proxy HTTP en la Pi (Node) para scraping TDMax de canales geo-bloqueados.
 // En esta instalación: VPS = 10.77.0.1, Pi5 = 10.77.0.2 (verificado con
@@ -3860,7 +3860,7 @@ app.post('/api/emit', async (req, res) => {
       const encInfo = cfg.passphrase ? '🔐 AES-128' : '⚠️ sin encriptación';
       const slug = HLS_SLUG_MAP[process_id] || `stream_${process_id}`;
       sendLog(process_id, 'success', `🛰️ SRT ingest activo (1 solo proceso): srt://0.0.0.0:${cfg.port} → /live/${slug}/playlist.m3u8 (${encInfo}, latency=${cfg.latencyMs}ms, perfil ${cfg._lastProfile || 'default'})`);
-    } else if (PROXY_PROCESSES.has(process_id)) {
+    } else if (LEGACY_SOCKS_FFMPEG_PROCESSES.has(process_id)) {
       // ── MODO PROXY (legacy/fallback): proxychains4 → CDN HLS ──
       sendLog(process_id, 'info', `🔍 Verificando salud del proxy SOCKS5 (Pi5 CR)...`);
       const health = await updateProxyHealth();
@@ -3896,6 +3896,11 @@ app.post('/api/emit', async (req, res) => {
         spawnArgs = ['-q', '-f', confPath, 'ffmpeg', ...ffmpegArgs];
         sendLog(process_id, 'warn', `⚠️ Fase 1 fallback activo: FFmpeg vía proxychains4 (sin token refresh proactivo)`);
       }
+    }
+
+    if (!ffmpegProcess && spawnCmd === 'ffmpeg' && isViaCrTunnel(process_id)) {
+      [spawnCmd, spawnArgs] = wrapFfmpegSpawn(process_id, ffmpegArgs);
+      sendLog(process_id, 'info', `🇨🇷 FFmpeg saldrá vía túnel WireGuard CR (runuser ${CR_TUNNEL_USER}); sin SOCKS/proxychains`);
     }
 
     const commandStr = spawnCmd + ' ' + spawnArgs.join(' ');
