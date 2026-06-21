@@ -564,6 +564,12 @@ const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrP
 // Solo los 3 canales geo-bloqueados deben scrapear vía CR.
 const PROXY_PROCESSES = new Set(['15', '24', '25']);
 
+// Proxy HTTP en la Pi (tinyproxy) para scraping TDMax de canales geo-bloqueados.
+// Si está configurado, reemplaza el bind directo a WireGuard (localAddress) en
+// las peticiones de scraping. El tráfico FFmpeg sigue saliendo por el túnel.
+const LOCAL_PROXY_URL = process.env.LOCAL_PROXY_URL || '';
+const localProxyAgent = LOCAL_PROXY_URL ? new ProxyAgent(LOCAL_PROXY_URL) : null;
+
 // ───────────────────────────────────────────────────────────────────────
 // CR WireGuard Gateway — lista blanca de canales cuyo FFmpeg debe salir
 // por el túnel hacia el Pi5 (IP residencial CR). Implementado vía
