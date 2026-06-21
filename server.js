@@ -13,6 +13,7 @@ import http from 'http';
 import https from 'https';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import { request as undiciRequest, ProxyAgent } from 'undici';
 
 // FOX/FOX+ URL filler (pantalla "RECONECTANDO" mientras se re-scrape)
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
