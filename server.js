@@ -1272,6 +1272,7 @@ const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
   // Si hay proxy HTTP configurado (tinyproxy en la Pi), usarlo en lugar del
   // bind directo a WireGuard. Más estándar, más fácil de debuggear.
   if (localProxyAgent) {
+    sendLog('system', 'info', `🌐 Scraping vía proxy HTTP Pi5: ${LOCAL_PROXY_URL.replace(/:\/\/([^:@]+):[^@]+@/, '://$1:***@')}`);
     return undiciRequest(url, {
       method: options.method || 'GET',
       headers: options.headers || {},
@@ -1296,7 +1297,9 @@ const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
     });
   }
 
-  // Fallback: bind directo a la IP del túnel WireGuard
+  // Fallback legacy: bind directo a la IP local WireGuard del VPS.
+  // Debe evitarse en producción; si falla con EADDRNOTAVAIL, configurar/usar
+  // LOCAL_PROXY_URL=http://10.77.0.1:8888 (proxy HTTP del Pi5).
   return new Promise((resolve, reject) => {
     const targetUrl = new URL(url);
     const transport = targetUrl.protocol === 'https:' ? https : http;
