@@ -15,7 +15,16 @@ túnel **no es la ruta por defecto**.
 
 ## Orden de arranque (desde cero)
 
-En el Pi (como root):
+### 1) Bajar el código al Pi
+
+```bash
+git clone https://github.com/hackriel/m3u8-stream-gate.git
+cd m3u8-stream-gate
+```
+
+### 2) Instalar el gateway
+
+En el Pi (como root, desde la carpeta del repo):
 
 ```bash
 sudo bash pi5-cr-gateway/uninstall.sh   # solo si venís de un estado roto
