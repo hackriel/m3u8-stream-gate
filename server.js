@@ -564,11 +564,12 @@ const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrP
 // Solo los 3 canales geo-bloqueados deben scrapear vía CR.
 const PROXY_PROCESSES = new Set(['15', '24', '25']);
 
-// Proxy HTTP en la Pi (tinyproxy) para scraping TDMax de canales geo-bloqueados.
-// Pi5 = 10.77.0.1, VPS = 10.77.0.2. El error `bind EADDRNOTAVAIL 10.77.0.2`
-// ocurre cuando se intenta bindear el socket al IP del VPS; para FOX/FOX+ el
-// scraping debe conectarse al proxy del Pi, no bindear localAddress.
-const LOCAL_PROXY_URL = process.env.LOCAL_PROXY_URL || 'http://10.77.0.1:8888';
+// Proxy HTTP en la Pi (Node) para scraping TDMax de canales geo-bloqueados.
+// En esta instalación: VPS = 10.77.0.1, Pi5 = 10.77.0.2 (verificado con
+// `curl -x http://10.77.0.2:8888 https://ifconfig.me` → IP residencial CR).
+// Para FOX/FOX+ el scraping debe conectarse al proxy del Pi, no bindear
+// localAddress al IP del VPS (eso da `bind EADDRNOTAVAIL`).
+const LOCAL_PROXY_URL = process.env.LOCAL_PROXY_URL || 'http://10.77.0.2:8888';
 const localProxyAgent = LOCAL_PROXY_URL ? new ProxyAgent(LOCAL_PROXY_URL) : null;
 
 // ───────────────────────────────────────────────────────────────────────
