@@ -565,9 +565,10 @@ const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrP
 const PROXY_PROCESSES = new Set(['15', '24', '25']);
 
 // Proxy HTTP en la Pi (tinyproxy) para scraping TDMax de canales geo-bloqueados.
-// Si está configurado, reemplaza el bind directo a WireGuard (localAddress) en
-// las peticiones de scraping. El tráfico FFmpeg sigue saliendo por el túnel.
-const LOCAL_PROXY_URL = process.env.LOCAL_PROXY_URL || '';
+// Pi5 = 10.77.0.1, VPS = 10.77.0.2. El error `bind EADDRNOTAVAIL 10.77.0.2`
+// ocurre cuando se intenta bindear el socket al IP del VPS; para FOX/FOX+ el
+// scraping debe conectarse al proxy del Pi, no bindear localAddress.
+const LOCAL_PROXY_URL = process.env.LOCAL_PROXY_URL || 'http://10.77.0.1:8888';
 const localProxyAgent = LOCAL_PROXY_URL ? new ProxyAgent(LOCAL_PROXY_URL) : null;
 
 // ───────────────────────────────────────────────────────────────────────
@@ -1271,6 +1272,7 @@ const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
   // Si hay proxy HTTP configurado (tinyproxy en la Pi), usarlo en lugar del
   // bind directo a WireGuard. Más estándar, más fácil de debuggear.
   if (localProxyAgent) {
+    sendLog('system', 'info', `🌐 Scraping vía proxy HTTP Pi5: ${LOCAL_PROXY_URL.replace(/:\/\/([^:@]+):[^@]+@/, '://$1:***@')}`);
     return undiciRequest(url, {
       method: options.method || 'GET',
       headers: options.headers || {},
@@ -1295,7 +1297,9 @@ const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
     });
   }
 
-  // Fallback: bind directo a la IP del túnel WireGuard
+  // Fallback legacy: bind directo a la IP local WireGuard del VPS.
+  // Debe evitarse en producción; si falla con EADDRNOTAVAIL, configurar/usar
+  // LOCAL_PROXY_URL=http://10.77.0.1:8888 (proxy HTTP del Pi5).
   return new Promise((resolve, reject) => {
     const targetUrl = new URL(url);
     const transport = targetUrl.protocol === 'https:' ? https : http;
