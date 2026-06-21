@@ -565,9 +565,10 @@ const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrP
 const PROXY_PROCESSES = new Set(['15', '24', '25']);
 
 // Proxy HTTP en la Pi (tinyproxy) para scraping TDMax de canales geo-bloqueados.
-// Si está configurado, reemplaza el bind directo a WireGuard (localAddress) en
-// las peticiones de scraping. El tráfico FFmpeg sigue saliendo por el túnel.
-const LOCAL_PROXY_URL = process.env.LOCAL_PROXY_URL || '';
+// Pi5 = 10.77.0.1, VPS = 10.77.0.2. El error `bind EADDRNOTAVAIL 10.77.0.2`
+// ocurre cuando se intenta bindear el socket al IP del VPS; para FOX/FOX+ el
+// scraping debe conectarse al proxy del Pi, no bindear localAddress.
+const LOCAL_PROXY_URL = process.env.LOCAL_PROXY_URL || 'http://10.77.0.1:8888';
 const localProxyAgent = LOCAL_PROXY_URL ? new ProxyAgent(LOCAL_PROXY_URL) : null;
 
 // ───────────────────────────────────────────────────────────────────────
