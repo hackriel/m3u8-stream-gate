@@ -10,7 +10,7 @@
 #
 # Uso:  sudo bash setup-pi5.sh
 # ============================================================================
-set -euo pipefail
+set -eo pipefail
 
 if [[ $EUID -ne 0 ]]; then
   echo "Ejecutar con sudo: sudo bash setup-pi5.sh"
@@ -84,10 +84,18 @@ apt-get update -qq
 apt-get install -y watchdog
 
 CFG_FILE=""
-[[ -f /boot/firmware/config.txt ]] && CFG_FILE=/boot/firmware/config.txt
-[[ -z "$CFG_FILE" && -f /boot/config.txt ]] && CFG_FILE=/boot/config.txt
-if [[ -n "$CFG_FILE" ]] && ! grep -q "^dtparam=watchdog=on" "$CFG_FILE"; then
-  echo "dtparam=watchdog=on" >>"$CFG_FILE"
+if [ -f /boot/firmware/config.txt ]; then
+  CFG_FILE=/boot/firmware/config.txt
+elif [ -f /boot/config.txt ]; then
+  CFG_FILE=/boot/config.txt
+fi
+if [ -n "$CFG_FILE" ]; then
+  if ! grep -q "^dtparam=watchdog=on" "$CFG_FILE"; then
+    echo "dtparam=watchdog=on" >>"$CFG_FILE"
+    echo "   OK: dtparam=watchdog=on agregado a $CFG_FILE"
+  fi
+else
+  echo "   AVISO: no se encontro config.txt"
 fi
 
 cat >/etc/watchdog.conf <<'EOF'
