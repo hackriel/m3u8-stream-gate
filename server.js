@@ -1268,6 +1268,34 @@ const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
     return fetch(url, options);
   }
 
+  // Si hay proxy HTTP configurado (tinyproxy en la Pi), usarlo en lugar del
+  // bind directo a WireGuard. Más estándar, más fácil de debuggear.
+  if (localProxyAgent) {
+    return undiciRequest(url, {
+      method: options.method || 'GET',
+      headers: options.headers || {},
+      body: options.body,
+      dispatcher: localProxyAgent,
+      signal: options.signal,
+    }).then(({ statusCode, headers: uHeaders, body }) => {
+      const setCookie = uHeaders['set-cookie'];
+      return {
+        ok: statusCode >= 200 && statusCode < 300,
+        status: statusCode || 0,
+        headers: {
+          get: (name) => {
+            const value = uHeaders[name.toLowerCase()];
+            return Array.isArray(value) ? value.join(', ') : (value ?? null);
+          },
+          getSetCookie: () => Array.isArray(setCookie) ? setCookie : (setCookie ? [setCookie] : []),
+        },
+        text: () => body.text(),
+        json: () => body.json(),
+      };
+    });
+  }
+
+  // Fallback: bind directo a la IP del túnel WireGuard
   return new Promise((resolve, reject) => {
     const targetUrl = new URL(url);
     const transport = targetUrl.protocol === 'https:' ? https : http;
@@ -1275,11 +1303,6 @@ const fetchWithOptionalProxy = (url, options = {}, useProxy = false) => {
       method: options.method || 'GET',
       headers: options.headers || {},
       agent: getProxyAgent(),
-      // Bindea el socket saliente a la IP WG del VPS (10.77.0.2). El sistema
-      // tiene una `ip rule from 10.77.0.2 table cr_routed` que rutea por
-      // wg0 → Pi5. Así el scraping TDMax sale con IP CR sin necesidad de
-      // SOCKS5/proxychains. Si wg0 no existe, el bind falla y el fetch
-      // termina en error claro (manejado arriba por los recovery).
       localAddress: '10.77.0.2',
       family: 4,
       timeout: 15000,
