@@ -510,6 +510,156 @@ const setCanal6SourceMode = (pid, mode) => {
   return m;
 };
 
+// ───────────────────────────────────────────────────────────────────────
+// TELECABLE (piloto: FOX URL pid 25) — tercera fuente alternativa.
+//
+// Modo 'scraping' = flujo TDMax/CR actual (intacto).
+// Modo 'telecable' = login a la API de Telecable/mastele desde la IP del VPS
+//   (sin túnel CR), obtención de URL HLS firmada, FFmpeg directo.
+//
+// La firma del CDN (`signature-ip`) se emite a la IP que hace el GET de
+// /api/playlist, por lo que el login DEBE correr aquí en el VPS — no en
+// edge function — para que coincida con la IP que luego consume FFmpeg.
+//
+// Persistencia: el modo se guarda en `emission_processes.source_mode`
+// (misma columna que Teletica/Canal 6). La URL firmada y su expiración
+// viven SOLO en memoria (efímeras).
+// ───────────────────────────────────────────────────────────────────────
+const TELECABLE_API_BASE = 'https://api.srv.teleplus.c.mtvreg.com';
+const TELECABLE_UA = 'TPlay_iOS/20260122134025 CFNetwork/3860.600.12 Darwin/25.5.0';
+const TELECABLE_CAPABILITIES = 'vast,normalize_id,category,deeplink,carousel,people,lowlatency';
+const TELECABLE_PLAYLIST_CAPS = 'adaptive,webvtt,fmp4,vast,clientvast,alerts,carousel,lowlatency';
+const TELECABLE_DEFAULT_QUALITY = 40;
+const TELECABLE_REFRESH_MARGIN_S = 24 * 3600;        // refrescar URL cuando le queden <24h
+const TELECABLE_MIN_RELOGIN_INTERVAL_MS = 20_000;    // anti-abuse rate-limit
+const TELECABLE_PROCESSES = new Set(['25']);         // piloto: solo FOX URL
+const TELECABLE_CONTENT_MAP = { '25': 'FOX' };       // pid → content-id en /api/playlist
+
+const telecableSourceMode = new Map();   // pid → 'scraping' | 'telecable'
+const telecableState = new Map();        // pid → { phpsessid, url, expiresAt, contentId, quality, fetchedAt }
+const telecableLastReloginAt = new Map();// pid → Date.now() del último relogin (rate-limit)
+const telecableFailureCount = new Map(); // pid → count de fallos consecutivos de login
+
+const getFoxSourceMode = (pid) =>
+  (telecableSourceMode.get(String(pid)) === 'telecable' ? 'telecable' : 'scraping');
+const setFoxSourceMode = (pid, mode) => {
+  const m = mode === 'telecable' ? 'telecable' : 'scraping';
+  telecableSourceMode.set(String(pid), m);
+  try {
+    if (typeof supabase !== 'undefined' && supabase) {
+      supabase
+        .from('emission_processes')
+        .update({ source_mode: m })
+        .eq('id', parseInt(String(pid), 10))
+        .then(({ error }) => {
+          if (error) console.error(`[telecableSourceMode] persist error pid=${pid}:`, error.message);
+        });
+    }
+  } catch (_) {}
+  return m;
+};
+const isTelecableMode = (pid) =>
+  TELECABLE_PROCESSES.has(String(pid)) && getFoxSourceMode(pid) === 'telecable';
+
+// Login + playlist + busca canal por content-id. Devuelve URL firmada lista para
+// que FFmpeg la consuma. NO se cachea entre procesos: cada pid hace su login
+// (10ms a 200ms, suficientemente rápido).
+async function telecableLoginAndResolve(processId, contentIdOverride = null, qualityOverride = null) {
+  const pid = String(processId);
+  const deviceId = process.env.TELECABLE_DEVICE_ID;
+  const devicePassword = process.env.TELECABLE_DEVICE_PASSWORD;
+  if (!deviceId || !devicePassword) {
+    throw new Error('TELECABLE_DEVICE_ID/TELECABLE_DEVICE_PASSWORD no configurados en env');
+  }
+  const lastAt = telecableLastReloginAt.get(pid) || 0;
+  const elapsed = Date.now() - lastAt;
+  if (elapsed < TELECABLE_MIN_RELOGIN_INTERVAL_MS) {
+    const waitMs = TELECABLE_MIN_RELOGIN_INTERVAL_MS - elapsed;
+    await new Promise(r => setTimeout(r, waitMs));
+  }
+  telecableLastReloginAt.set(pid, Date.now());
+
+  const contentId = contentIdOverride || TELECABLE_CONTENT_MAP[pid];
+  if (!contentId) throw new Error(`Sin content-id Telecable para pid=${pid}`);
+  const quality = qualityOverride || telecableState.get(pid)?.quality || TELECABLE_DEFAULT_QUALITY;
+
+  // 1) device-login
+  const loginUrl =
+    `${TELECABLE_API_BASE}/api/device-login?capabilities=${encodeURIComponent(TELECABLE_CAPABILITIES)}` +
+    `&deviceId=${encodeURIComponent(deviceId)}&lang=es&password=${encodeURIComponent(devicePassword)}` +
+    `&unit=mastele&version=4.1.0`;
+  let loginResp;
+  try {
+    loginResp = await fetch(loginUrl, {
+      headers: { 'User-Agent': TELECABLE_UA, 'Accept': 'application/json' },
+    });
+  } catch (e) {
+    throw new Error(`telecable login network error: ${e.message}`);
+  }
+  const loginJson = await loginResp.json().catch(() => ({}));
+  if (!loginResp.ok || loginJson?.status !== 1 || !loginJson?.PHPSESSID) {
+    throw new Error(`telecable login_failed status=${loginJson?.status} error=${loginJson?.error || loginResp.status}`);
+  }
+  const phpsessid = loginJson.PHPSESSID;
+
+  // 2) playlist
+  const plUrl =
+    `${TELECABLE_API_BASE}/api/playlist?logosize=512&format=m3u8` +
+    `&capabilities=${encodeURIComponent(TELECABLE_PLAYLIST_CAPS)}` +
+    `&quality=${quality}&radioFormat=m3u8&PHPSESSID=${encodeURIComponent(phpsessid)}`;
+  const plResp = await fetch(plUrl, {
+    headers: {
+      'User-Agent': TELECABLE_UA,
+      'Accept': 'application/json',
+      'Cookie': `PHPSESSID=${phpsessid}; _nss=1`,
+    },
+  });
+  if (!plResp.ok) throw new Error(`telecable playlist http=${plResp.status}`);
+  const plJson = await plResp.json();
+  if (plJson?.status !== 1 || !Array.isArray(plJson.channels)) {
+    throw new Error(`telecable playlist invalid status=${plJson?.status}`);
+  }
+  const channel = plJson.channels.find(c => c.id === contentId);
+  if (!channel?.url) throw new Error(`telecable channel not found: ${contentId}`);
+
+  // Extraer expiración del query string de la URL firmada
+  let expiresAt = 0;
+  try {
+    const u = new URL(channel.url);
+    expiresAt = parseInt(u.searchParams.get('signature-expiration') || '0', 10);
+  } catch (_) { /* opcional */ }
+
+  const state = {
+    phpsessid,
+    url: channel.url,
+    expiresAt,
+    contentId,
+    quality,
+    fetchedAt: Math.floor(Date.now() / 1000),
+  };
+  telecableState.set(pid, state);
+  telecableFailureCount.set(pid, 0);
+  return state;
+}
+
+// Wrapper que registra fallo + log. Usado por /api/emit y autoRecoverChannel.
+async function safeTelecableResolve(processId) {
+  try {
+    const st = await telecableLoginAndResolve(processId);
+    sendLog(processId, 'success',
+      `📡 Telecable URL obtenida (contentId=${st.contentId}, quality=${st.quality}, expira en ${
+        st.expiresAt ? Math.floor((st.expiresAt - Date.now() / 1000) / 3600) + 'h' : '?'
+      })`);
+    return st;
+  } catch (e) {
+    const pid = String(processId);
+    const failed = (telecableFailureCount.get(pid) || 0) + 1;
+    telecableFailureCount.set(pid, failed);
+    sendLog(processId, 'error', `❌ Telecable login fallo #${failed}: ${e.message}`);
+    throw e;
+  }
+}
+
 const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 // Perfiles de salida (CBR x264).
 //   - preset:      compromiso CPU vs calidad visual (faster ≈ +15% calidad vs veryfast).
