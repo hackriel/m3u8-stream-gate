@@ -1,156 +1,103 @@
 ## Objetivo
 
-1. Reintroducir el ruteo selectivo CR (solo IDs **15 Canal 6 URL, 24 FOX+ URL, 25 FOX URL**) sin que afecte a los canales USA si el túnel se cae.
-2. Re-crear todos los scripts del Pi 5 y del VPS dentro del repo (versionados), para correrlos remotamente sin tocar archivos a mano.
-3. Mostrar en el dashboard un badge visible cuando un canal está emitiendo con IP de Costa Rica.
-4. Replicar en Canal 6 URL el toggle "Oficial / Scraping" que ya tiene Teletica, con tabs estables (no se mueven, no se quedan pegados).
+Agregar una **tercera fuente alternativa** ("Telecable") al canal **FOX URL (pid 25)**, sin tocar nada del scraping CR actual. Si Telecable cae y `always_on` está activo, el sistema debe relogarse, traer un URL fresco y reiniciar FFmpeg automáticamente.
 
----
-
-## Arquitectura de la separación quirúrgica
-
-**Regla de oro:** la tabla principal del VPS jamás se modifica. WireGuard `wg0` se levanta SIN `AllowedIPs = 0.0.0.0/0` agresivo y SIN cambiar `default route`. Solo los procesos marcados salen por el túnel.
-
-Mecanismo (UID-based routing, ya probado antes):
-
-- Se crea un usuario sistema `croute` en el VPS (sin login, sin home real, sin sudo).
-- `iptables -t mangle -A OUTPUT -m owner --uid-owner croute -j MARK --set-mark 0x77`
-- `ip rule add fwmark 0x77 table 100 priority 100`
-- `ip route add default dev wg0 table 100`
-- Cualquier proceso lanzado como `croute` → marca 0x77 → tabla 100 → wg0 → Pi 5 → internet CR. Todo lo demás → tabla `main` → IP USA.
-
-En `server.js`:
-
-```js
-const CHANNELS_VIA_PI_WG = new Set(['15', '24', '25']); // Canal 6, FOX+, FOX
-const wrapFfmpegForCrTunnel = (pid, argv) =>
-  CHANNELS_VIA_PI_WG.has(String(pid))
-    ? ['runuser', '-u', 'croute', '--', 'ffmpeg', ...argv]
-    : ['ffmpeg', ...argv];
+```text
+FOX URL (pid 25)
+├── Tab "Scraping" (actual, sale por túnel CR Pi5) ← intacto
+└── Tab "Telecable" (nuevo, sale por IP del VPS)   ← se construye
 ```
 
-El scraping HTTP de esos 3 IDs se hace vía `undici` con un `Agent` que abre el socket bind-to-source 10.77.0.2 (la IP WG del VPS), de modo que TDMax también vea IP CR. Implementado en un helper `crFetch(url, opts)` usado SOLO en los flujos de scrape de 15/24/25.
+## Alcance del piloto
 
-**Fail-safe:** Si `wg0` se cae, los 3 canales CR fallan limpio (FFmpeg cierra, autoRecovery con circuit breaker). Los otros 17 canales no se enteran.
+Solo pid 25 (FOX). Si funciona limpio, se replica en Canal 6, Teletica, FUTV, FOX+, TDmax (tabla `TELECABLE_CONTENT_MAP` ya queda preparada para extender).
 
----
+## Cambios
 
-## Plan de cambios
+### 1. Edge function nueva: `telecable-stream`
 
-### 1. Pi 5 — `pi5-cr-gateway/` (nuevo en el repo)
+`supabase/functions/telecable-stream/index.ts`
 
-Carpeta nueva con todo lo necesario para dejar el Pi como gateway WG:
+- Input: `{ content_id: 'FOX', quality?: 40 }`
+- Hace `GET /api/device-login` con `TELECABLE_DEVICE_ID` + `TELECABLE_DEVICE_PASSWORD` (env)
+- Hace `GET /api/playlist?PHPSESSID=…&quality=…`
+- Busca canal por `content_id`, devuelve:
+  ```json
+  { "url": "https://stream.srv.telecable…", "expires_at": 1782799260, "phpsessid": "…" }
+  ```
+- 401/status:0 → `{ error: 'login_failed' }` con HTTP 502 para que el VPS sepa diferenciar de error de red.
 
-- `install.sh` — idempotente, ejecutable como root en el Pi (Raspberry Pi OS Bookworm 64-bit). Hace:
-  1. `apt update && apt install -y wireguard-tools iptables-persistent qrencode curl`
-  2. Habilita `net.ipv4.ip_forward=1` permanente en `/etc/sysctl.d/99-cr-gw.conf`
-  3. Detecta interfaz WAN (`ip route show default | awk '/default/{print $5; exit}'`) → `eth0`/`wlan0`
-  4. Genera par de claves del Pi en `/etc/wireguard/keys/` si no existen
-  5. Escribe `/etc/wireguard/wg0.conf` (Pi = 10.77.0.1/24, listen 51820, MASQUERADE de 10.77.0.0/24 → WAN)
-  6. `systemctl enable --now wg-quick@wg0`
-  7. **Detecta y muestra la IP pública del Pi** con `curl -s https://api.ipify.org` y la imprime en pantalla con un banner claro: `>>> IP pública del Pi5: X.X.X.X — usar esta IP como Endpoint en el VPS si no tenés DDNS <<<`
-  8. Imprime la public key del Pi y un bloque `[Peer]` listo para pegar en el VPS.
-- `add-vps-peer.sh <vps_pubkey>` — agrega/actualiza el peer del VPS en `wg0.conf` y recarga.
-- `status.sh` — `wg show`, `ip a show wg0`, ping a 10.77.0.2, IP pública vista por curl, tamaño de tráfico tx/rx.
-- `uninstall.sh` — limpieza total para empezar de cero (porque venimos de un estado roto).
-- `README.md` — pasos en orden: `uninstall.sh` → `install.sh` → copiar pubkey al VPS → ejecutar `add-vps-peer.sh` con la pubkey que devolverá el setup del VPS → `status.sh`.
+### 2. `server.js` (VPS)
 
-**Requisitos físicos** (lo confirmamos en el momento desde el output de `install.sh`):
-- IP pública en casa (no CGNAT). El `install.sh` advierte si la IP pública detectada está en rangos CGNAT (100.64.0.0/10) y aborta con instrucción.
-- Port forward UDP/51820 → Pi en el router.
+**Estado en memoria + persistencia (replica patrón Teletica):**
+```js
+const foxSourceMode = new Map(); // '25' → 'scraping' | 'telecable'
+const TELECABLE_CONTENT_MAP = { '25': 'FOX' }; // extensible
+const TELECABLE_REFRESH_MARGIN_S = 3600;       // refresh 1h antes de expirar
+```
 
-### 2. VPS — `setup-vps-cr-wireguard.sh` (nuevo, en raíz)
+**`/api/emit` (pid 25):**
+- Acepta `source_mode in {scraping, telecable}` y `telecable_quality` (default 40).
+- Persiste en `emission_processes.source_mode`.
+- Si `telecable`: invoca edge function, guarda URL firmado y `expires_at` en memoria (NO en DB — la firma es efímera y atada a IP), arranca FFmpeg directo sin pasar por wrapper `croute`.
 
-Script idempotente para correr en el VPS como root:
+**Auto-recuperación (3 puntos del recovery loop existente):**
+- Si modo `telecable` y FFmpeg sale con código de error, o stall del watchdog, o quedan <30 min de firma → **forzar relogin** (nueva llamada edge function), reemplazar URL, restart FFmpeg.
+- Si edge function falla 3x seguidas (con backoff 30s): `emit_status='error'`, `emit_msg='Telecable login falló'`. El circuit breaker existente (max 6 fallos) detiene el ciclo. NO se cae a `scraping` automáticamente: el usuario elige.
 
-1. `apt install -y wireguard-tools iptables-persistent`
-2. Crea usuario `croute` (`useradd -r -s /usr/sbin/nologin croute`) si no existe
-3. Genera claves del VPS en `/etc/wireguard/keys/` si no existen
-4. Pide por env var o argumento: `PI_PUBKEY`, `PI_ENDPOINT` (IP:51820 del Pi)
-5. Escribe `/etc/wireguard/wg0.conf` (VPS = 10.77.0.2/24, `Table = off` ← crítico: WG no toca rutas principales)
-6. Crea `/etc/systemd/system/cr-policy-routing.service` que al boot ejecuta:
-   ```
-   iptables -t mangle -C OUTPUT -m owner --uid-owner croute -j MARK --set-mark 0x77 || iptables -t mangle -A ...
-   ip rule add fwmark 0x77 table 100 priority 100 2>/dev/null || true
-   ip route replace default dev wg0 table 100
-   ```
-7. `systemctl enable --now wg-quick@wg0 cr-policy-routing`
-8. Test de verificación: `sudo -u croute curl -s https://api.ipify.org` debe imprimir IP CR; `curl -s https://api.ipify.org` debe imprimir IP USA. Aborta con mensaje claro si no.
-9. Imprime la pubkey del VPS para pegar en el Pi.
+**Refresh proactivo:**
+- Loop `setInterval(60_000)` revisa procesos con `source_mode='telecable'` activos. Si `expires_at - now < TELECABLE_REFRESH_MARGIN_S` → relogin + restart suave (sin contar como recovery).
 
-### 3. `server.js` — wiring del wrapper
+**FFmpeg:**
+- Mismo perfil 720p CBR 2000k 29.97fps actual.
+- Headers `User-Agent` iOS app + `Cookie: PHPSESSID=…`. (Confirmado funcional desde shell del sandbox.)
 
-- Constante `CHANNELS_VIA_PI_WG = new Set(['15','24','25'])`.
-- Helper `wrapFfmpegForCrTunnel(pid, ffmpegArgs)` que devuelve `[cmd, args]`. Cambiar los 2-3 puntos donde se hace `spawn('ffmpeg', args, ...)` para esos pids → `spawn(cmd, args, ...)`. (Para el resto de pids el comportamiento es idéntico.)
-- Helper `crFetch(url, opts)` usando `undici.Agent` con `connect: { localAddress: '10.77.0.2' }`. Reemplazar los `fetch` del scrape de pids 15/24/25 (login TDMax, master HLS preflight) por `crFetch`.
-- Endpoint `GET /api/cr-tunnel/health` → devuelve `{ wg_up: bool, cr_ip: string|null, last_check: ts }`. Cachea 10s, hace `sudo -u croute curl https://api.ipify.org` (timeout 4s) y verifica que la IP empiece con un rango CR conocido o simplemente que sea distinta a la IP USA del VPS.
-- En `/api/status` (o donde se serializa por proceso) incluir `via_cr_tunnel: CHANNELS_VIA_PI_WG.has(String(id))` para que el frontend lo lea sin lógica extra.
+**No tocar:**
+- Wrapper `croute` / CHANNELS_VIA_PI_WG (sigue aplicando cuando modo = `scraping`).
+- `scrape-channel` edge function (sigue siendo el flujo TDMax).
 
-### 4. Canal 6 URL (15) — toggle Oficial / Scraping
+### 3. UI — `EmisorM3U8Panel.tsx`
 
-Espejo de Teletica:
+Dentro de la card FOX URL (pid 25):
 
-- Columna `source_mode` ya existe en `emission_processes`. Reusarla para pid 15.
-- Server: `canal6SourceMode` Map, `setCanal6SourceMode`, persistencia DB, carga al boot.
-- Endpoint `GET /api/canal6/source-mode`.
-- En `/api/emit`: si `process_id === '15'` y `source_mode in {official, scraping}` → set + log.
-- Fallback unidireccional `official → scraping` en los 3 puntos de recovery (idéntico al patrón Teletica).
-- Modo `official`: usa el `m3u8` que el usuario haya pegado en el input (no hay URL "fija" tipo Bradmax porque acá la url oficial varía). FFmpeg igual sale por el túnel CR (porque pid 15 ∈ CHANNELS_VIA_PI_WG), con su perfil Canal 6 actual (master vivo + program-map). Logs claros: `🎛️ Canal 6 modo OFICIAL: usando URL pegada por usuario`.
-- Modo `scraping`: TDMax → cdn12 (flujo actual).
+```text
+┌─ Fuente ────────────────────────────┐
+│ [ Scraping ] [ Telecable ]          │ ← tabs estables, memoized
+└─────────────────────────────────────┘
 
-Frontend (`EmisorM3U8Panel.tsx`):
+Si tab = Telecable:
+  Calidad: [ 40 ▼ ]   (10, 20, 30, 40, 50)
+  Botón "Refrescar URL ahora"          (opcional, debug)
+  Badge: "🟢 Vence en 23h 14m"
+```
 
-- Replicar el bloque de `teleticaMode` para `canal6Mode` (key `canal6_15_source_mode` en localStorage).
-- En el tab Canal 6 URL renderizar el mismo componente de tabs que Teletica. Usar `<Tabs value={canal6Mode} onValueChange={...}>` con `TabsList` de ancho fijo y `TabsTrigger` con `flex-1` para que NO se muevan. Memoizar el componente de tabs (`React.memo`) con `value` como prop para evitar re-mounts que causan el "se queda pegado".
-- En modo `official` NO auto-rellena el input (a diferencia de Teletica). El usuario pega lo que quiera.
-- Mandar `source_mode: canal6Mode` en `/api/emit` cuando `processIndex === CANAL6_URL_INDEX`.
-- Poll a `/api/canal6/source-mode` cada 5s con el mismo patrón anti-overwrite.
+- Estado `foxSourceMode` (key localStorage `fox_25_source_mode`).
+- Poll `/api/fox/source-mode` cada 5s con patrón anti-overwrite (mismo de Teletica).
+- Tokens semánticos para colores (sin hardcode).
 
-### 5. Badge "Emitiendo con IP CR" en el dashboard
+### 4. Memoria
 
-- En `EmisorM3U8Panel.tsx`, conjunto local `CR_TUNNEL_CHANNELS = new Set([15, 24, 25])`.
-- Estado `crTunnelHealth: { wg_up, cr_ip }` poll cada 15s a `/api/cr-tunnel/health`.
-- En la card de cada proceso que esté `running` Y `CR_TUNNEL_CHANNELS.has(id)`:
-  - Badge verde: 🇨🇷 `IP CR · {cr_ip}` si `wg_up` y `cr_ip` válida.
-  - Badge ámbar: `Túnel CR caído` si `!wg_up`.
-- Tooltip con texto: `"Este canal está saliendo al CDN desde Costa Rica vía Pi5 (10.77.0.1)"`.
-- Color/tipografía via tokens semánticos del design system (no hardcoded).
+Crear `mem://features/fox-url-telecable.md`: piloto pid 25, login VPS-direct (no CR), refresh @ expire-1h, mutex con tab Scraping (un solo modo activo).
 
-### 6. Documentación / README
+Actualizar `mem://index.md` con la nueva referencia.
 
-- `pi5-cr-gateway/README.md`: pasos de arranque desde cero (reset → install → intercambiar keys → status).
-- Sección en `README.md` raíz: "Salida CR selectiva (Pi 5)" con el orden VPS↔Pi y troubleshooting (qué hacer si el badge muestra ámbar).
+## Lo que NO se construye en este piloto
 
-### 7. Memoria del proyecto
-
-Actualizar `mem://architecture/cr-wireguard-gateway.md`: lista blanca actual `[15, 24, 25]`, scripts viven en `pi5-cr-gateway/` y `setup-vps-cr-wireguard.sh`, `Table = off` es obligatorio, badge UI activo.
-
----
-
-## Orden de ejecución
-
-1. **Implementar todo en el repo** (scripts Pi + VPS + server.js + UI + badge + toggle Canal 6 + memoria).
-2. **En el Pi 5**: `git pull` (o copiar la carpeta), `sudo bash pi5-cr-gateway/uninstall.sh && sudo bash pi5-cr-gateway/install.sh`. Anotar pubkey + IP pública que imprime.
-3. **En el VPS**: `git pull && sudo PI_PUBKEY=... PI_ENDPOINT=IP:51820 bash setup-vps-cr-wireguard.sh`. Anotar pubkey del VPS que imprime.
-4. **En el Pi**: `sudo bash pi5-cr-gateway/add-vps-peer.sh <vps_pubkey>`.
-5. **Verificar**: `sudo bash pi5-cr-gateway/status.sh` (Pi) y `curl localhost:3000/api/cr-tunnel/health` (VPS).
-6. Reiniciar `m3u8-emitter.service`, levantar Canal 6 URL, ver el badge 🇨🇷 IP CR en el dashboard.
-
----
-
-## Riesgos y mitigaciones
-
-- **CGNAT en CR**: el `install.sh` lo detecta y aborta con instrucción de pedirle al ISP IP pública o usar Tailscale Funnel como plan B.
-- **MTU**: `wg0` con MTU 1380 por defecto en el setup, para evitar fragmentación con CDNs HTTPS.
-- **Killswitch accidental**: usamos `Table = off` en wg0.conf — WireGuard NO instala rutas. Si el script de policy routing falla, los canales CR fallan, pero los USA siguen.
-- **Caída del Pi**: solo afecta IDs 15/24/25; badge ámbar avisa.
-
----
+- Replicar Telecable en otros canales (queda para fase 2 tras validar FOX).
+- Selector de URL alterna manual (Telecable siempre auto-loguea).
+- Caché de PHPSESSID compartida entre procesos (cada canal hace su login propio — son <100ms y evita interferencia).
 
 ## Detalles técnicos clave
 
-- WG subred: `10.77.0.0/24` (Pi=.1, VPS=.2), puerto UDP 51820, MTU 1380, PersistentKeepalive 25s.
-- Marca de paquete: `0x77`, tabla de ruteo: `100` (nombre `cr_routed` en `/etc/iproute2/rt_tables`).
-- Usuario VPS: `croute` (system, nologin).
-- Verificación de IP CR: rangos AS conocidos (Tigo/Liberty/Kolbi) cargados como prefijos en una whitelist pequeña, o simplemente `cr_ip !== vps_public_ip`.
-- `crFetch` usa `undici@^6` (ya en `package.json` por Supabase).
+- **IP de firma**: la URL viene atada a `signature-ip`. El sandbox Lovable y el VPS tienen IPs distintas → la edge function debe correr en el contexto donde luego se consume. ✅ Cumplido: edge function corre en infra Supabase (IP estable), el FFmpeg consume desde VPS. Mientras la firma sea válida para *cualquier IP del cliente HTTP del CDN*, funciona. **Riesgo a verificar en el piloto**: si el CDN exige que el GET venga desde la misma IP que vio la API, la edge function deberá ser llamada *desde el VPS hacia el VPS* (server.js implementa el login él mismo en vez de invocar edge function). Plan B ya previsto: si en pruebas falla, mover la lógica de login a `server.js` (10 líneas, mismo `fetch`).
+- **Secrets**: `TELECABLE_DEVICE_ID`, `TELECABLE_DEVICE_PASSWORD` ya guardados.
+- **Rate limit**: máximo 1 relogin cada 20s por proceso para no parecer abuso.
+- **Logging**: prefijo `[telecable:25]` en stderr para filtrar.
+
+## Orden de implementación
+
+1. Crear edge function `telecable-stream` y probarla con curl.
+2. Wiring en `server.js` (estado + /api/emit + recovery hooks + refresh loop).
+3. UI: tabs + selector calidad + badge expiración.
+4. Memoria + README.
+5. Verificación end-to-end con FOX URL en preview.

@@ -610,6 +610,51 @@ export default function EmisorM3U8Panel() {
     return () => clearInterval(interval);
   }, []);
 
+  // ── FOX URL (25): toggle Scraping (TDMax+CR) / Telecable (login directo VPS).
+  //    El modo Telecable hace login a la API de Telecable desde el VPS y
+  //    consume HLS firmado sin pasar por el túnel CR.
+  const [foxMode, setFoxMode] = useState<'scraping' | 'telecable'>(() => {
+    try {
+      const v = localStorage.getItem('fox_25_source_mode');
+      return v === 'telecable' ? 'telecable' : 'scraping';
+    } catch {
+      return 'scraping';
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('fox_25_source_mode', foxMode); } catch {}
+  }, [foxMode]);
+  const [foxTelecableInfo, setFoxTelecableInfo] = useState<{
+    expires_at: number | null;
+    expires_in_s: number | null;
+    last_login_failure_count: number;
+  } | null>(null);
+  useEffect(() => {
+    let lastServerMode: 'scraping' | 'telecable' | null = null;
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/fox/source-mode');
+        if (!r.ok) return;
+        const j = await r.json();
+        if (j.mode === 'telecable' || j.mode === 'scraping') {
+          if (lastServerMode === null) { lastServerMode = j.mode; }
+          else if (j.mode !== lastServerMode) {
+            lastServerMode = j.mode;
+            setFoxMode(prev => (prev !== j.mode ? j.mode : prev));
+          }
+        }
+        setFoxTelecableInfo({
+          expires_at: j.telecable?.expires_at ?? null,
+          expires_in_s: j.telecable?.expires_in_s ?? null,
+          last_login_failure_count: j.last_login_failure_count ?? 0,
+        });
+      } catch {}
+    };
+    tick();
+    const interval = setInterval(tick, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   // ── Salida CR vía Pi5 (WireGuard) — set + poll de health del túnel.
   const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([15, 24, 25]), []);
   const [crTunnelHealth, setCrTunnelHealth] = useState<{ wg_up: boolean; cr_ip: string | null }>({
@@ -1413,6 +1458,7 @@ export default function EmisorM3U8Panel() {
           output_profile: selectedProfile,
           ...(processIndex === TELETICA_URL_INDEX ? { source_mode: teleticaMode } : {}),
           ...(processIndex === CANAL6_URL_INDEX ? { source_mode: canal6Mode } : {}),
+          ...(processIndex === FOX_URL_INDEX ? { source_mode: foxMode } : {}),
           ...(isM3uFileProcess && m3uPayload ? {
             // passthrough_mode: 'transcode' → usa el perfil estándar 720p CBR 2000k
             // (mismo que Disney 7 ID 0). Resuelve el "video crudo no va bien" en Xui/IPTV.
@@ -1978,6 +2024,77 @@ export default function EmisorM3U8Panel() {
                         ? 'Usá la URL que pegues en el input. Sin login, sin scraping. El consumo igual sale por IP de Costa Rica vía Pi5.'
                         : 'Scraping TDMax (cuenta info@media.cr) + token de 60s. El servidor renueva automáticamente.'}
                     </p>
+                  </div>
+                )}
+                {processIndex === FOX_URL_INDEX && (
+                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
+                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                      Fuente FOX URL
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFoxMode('scraping')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          foxMode === 'scraping'
+                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Scraping TDMax + salida por túnel CR (Pi5)"
+                      >
+                        🔐 Scraping (TDMax+CR)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFoxMode('telecable')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          foxMode === 'telecable'
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Login directo a Telecable desde el VPS (sin CR)"
+                      >
+                        📡 Telecable (VPS)
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      {foxMode === 'telecable'
+                        ? 'Login automático a la API de Telecable desde el VPS. URL HLS firmada se refresca proactivamente. No usa túnel CR.'
+                        : 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'}
+                    </p>
+                    {foxMode === 'telecable' && foxTelecableInfo && (
+                      <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-muted-foreground">
+                          {foxTelecableInfo.expires_in_s !== null && foxTelecableInfo.expires_in_s > 0
+                            ? `🟢 URL vence en ${Math.floor(foxTelecableInfo.expires_in_s / 3600)}h ${Math.floor((foxTelecableInfo.expires_in_s % 3600) / 60)}m`
+                            : '⚪ Sin URL cacheada todavía'}
+                          {foxTelecableInfo.last_login_failure_count > 0 && (
+                            <span className="ml-2 text-red-400">· ⚠️ {foxTelecableInfo.last_login_failure_count} fallo(s)</span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const r = await fetch('/api/fox/refresh-telecable', { method: 'POST' });
+                              const j = await r.json().catch(() => ({}));
+                              if (r.ok) {
+                                toast.success(`URL Telecable refrescada (vence en ${Math.floor((j.expires_in_s || 0) / 3600)}h)`);
+                              } else {
+                                toast.error(j.error || 'No se pudo refrescar');
+                              }
+                            } catch (e: any) {
+                              toast.error(e?.message || 'Error de red');
+                            }
+                          }}
+                          className="px-2 py-1 rounded bg-amber-500/10 border border-amber-500/40 text-amber-300 hover:bg-amber-500/20 text-[10px]"
+                        >
+                          ↻ Refrescar
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
