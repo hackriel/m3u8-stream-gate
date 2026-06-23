@@ -1,15 +1,15 @@
 ---
-name: FOX URL Telecable mode
-description: Modo alternativo de FOX URL (pid 25) usando login directo a la API de Telecable desde el VPS, sin túnel CR
+name: Telecable alternate mode (multi-channel)
+description: Modo alternativo para FUTV (11), Teletica (13), TDMas1 (14), Canal 6 (15), FOX+ (24) y FOX URL (25) — login directo a la API de Telecable desde el VPS, sin túnel CR
 type: feature
 ---
 
-# FOX URL (pid 25) — Modo Telecable
+# Modo Telecable (multi-canal)
 
-Piloto de tercera fuente para canales URL. Toggle dentro del tab FOX URL:
+Toggle "Telecable (VPS)" disponible en los tabs URL: FUTV (11), Teletica (13), TDMas1 (14), Canal 6 (15), FOX+ (24), FOX (25). Gana sobre el modo oficial/scraping cuando está activo.
 
-- `scraping` (default): scraping TDMax + FFmpeg vía `runuser croute` (túnel CR Pi5).
-- `telecable`: login directo a `https://api.srv.teleplus.c.mtvreg.com/api/device-login` desde el VPS, fetch de `/api/playlist`, búsqueda del canal por `content-id` (`FOX`), URL HLS firmada consumida por FFmpeg directo. NO usa túnel CR.
+- `scraping` (default): flujo histórico del canal (TDMax + Pi5/CR, o lo que aplique).
+- `telecable`: login directo a `https://api.srv.teleplus.c.mtvreg.com/api/device-login` desde el VPS, fetch de `/api/playlist`, búsqueda del canal por `content-id` (con fallback por patrones de nombre), URL HLS firmada consumida por FFmpeg directo. NO usa túnel CR.
 
 ## Por qué el login corre en el VPS y no en edge function
 
@@ -25,7 +25,7 @@ Username/password del usuario (`3737604` / `3737604`) NO se usa — el pairing y
 
 ## Refresh strategy
 
-- Reactivo: en `autoRecoverChannel` si pid=25 y mode=telecable → relogin antes de reintentar.
+- Reactivo: en `autoRecoverChannel` si `isTelecableMode(pid)` → relogin antes de reintentar.
 - Proactivo: `setInterval(60_000)` revisa si `signature-expiration - now < 24h` → relogin silencioso.
 - Rate-limit: máximo 1 relogin cada 20s por proceso (`TELECABLE_MIN_RELOGIN_INTERVAL_MS`).
 - Sin fallback automático a scraping: si telecable falla, el circuit breaker existente detiene el ciclo y el usuario debe elegir modo manualmente.
@@ -34,13 +34,17 @@ Username/password del usuario (`3737604` / `3737604`) NO se usa — el pairing y
 
 - `telecableSourceMode` (Map): pid → mode, persistido en `emission_processes.source_mode`.
 - `telecableState` (Map): pid → `{ phpsessid, url, expiresAt, contentId, quality, fetchedAt }` — SOLO memoria (efímero).
-- `TELECABLE_CONTENT_MAP`: `{ '25': 'FOX' }` — extensible a otros canales (Canal 6, Teletica, FUTV, FOX+, TDmas) cuando se valide el piloto.
+- `TELECABLE_CHANNEL_MATCHERS`: por pid, lista de `contentIds` candidatos + `namePatterns` regex fallback. Tolerante a renombres del CDN.
+- `lastTelecablePlaylist`: caché de la última playlist resuelta (5 min), usada por el endpoint discovery.
 
 ## Endpoints
 
-- `GET /api/fox/source-mode` — devuelve `{ mode, telecable: { content_id, quality, expires_at, expires_in_s }, last_login_failure_count }`.
-- `POST /api/fox/refresh-telecable` — fuerza relogin sin reiniciar FFmpeg (botón Refrescar en UI).
+- `GET /api/telecable/:pid/source-mode` — devuelve `{ mode, telecable: { content_id, quality, expires_at, expires_in_s }, last_login_failure_count }`.
+- `POST /api/telecable/:pid/source-mode` body `{ mode }` — setea `telecable` o `scraping`.
+- `POST /api/telecable/:pid/refresh` — fuerza relogin sin reiniciar FFmpeg.
+- `GET /api/telecable/channels` — lista todos los canales de la playlist (para ajustar matchers).
+- ALIASES legacy: `GET/POST /api/fox/source-mode`, `POST /api/fox/refresh-telecable` (pid 25).
 
 ## isViaCrTunnel override
 
-`isViaCrTunnel(pid)` devuelve `false` para pid 25 cuando está en modo telecable, para que `wrapFfmpegSpawn` NO use `runuser croute`. FFmpeg sale por la IP del VPS para coincidir con `signature-ip`.
+`isViaCrTunnel(pid)` devuelve `false` para cualquier pid cuando `isTelecableMode(pid)`, para que `wrapFfmpegSpawn` NO use `runuser croute`. FFmpeg sale por la IP del VPS para coincidir con `signature-ip`.
