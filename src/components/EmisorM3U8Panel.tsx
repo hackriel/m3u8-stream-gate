@@ -1776,7 +1776,7 @@ export default function EmisorM3U8Panel() {
             <h2 className="text-lg font-medium mb-4 text-accent">
               {processIndex === FILE_UPLOAD_INDEX ? "Archivos Locales" : "Fuente y Cabeceras"} - {channelConfig.name}
             </h2>
-            {CR_TUNNEL_CHANNELS.has(processIndex) && (
+            {CR_TUNNEL_CHANNELS.has(processIndex) && !(processIndex === FOX_URL_INDEX && foxMode === 'telecable') && (
               <div className="mb-4 -mt-2">
                 {crTunnelHealth.wg_up && crTunnelHealth.cr_ip ? (
                   <span
@@ -2065,7 +2065,7 @@ export default function EmisorM3U8Panel() {
                         : 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'}
                     </p>
                     {foxMode === 'telecable' && foxTelecableInfo && (
-                      <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                      <div className="mt-2 flex items-center gap-2 text-[11px]">
                         <span className="text-muted-foreground">
                           {foxTelecableInfo.expires_in_s !== null && foxTelecableInfo.expires_in_s > 0
                             ? `🟢 URL vence en ${Math.floor(foxTelecableInfo.expires_in_s / 3600)}h ${Math.floor((foxTelecableInfo.expires_in_s % 3600) / 60)}m`
@@ -2074,30 +2074,11 @@ export default function EmisorM3U8Panel() {
                             <span className="ml-2 text-red-400">· ⚠️ {foxTelecableInfo.last_login_failure_count} fallo(s)</span>
                           )}
                         </span>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const r = await fetch('/api/fox/refresh-telecable', { method: 'POST' });
-                              const j = await r.json().catch(() => ({}));
-                              if (r.ok) {
-                                toast.success(`URL Telecable refrescada (vence en ${Math.floor((j.expires_in_s || 0) / 3600)}h)`);
-                              } else {
-                                toast.error(j.error || 'No se pudo refrescar');
-                              }
-                            } catch (e: any) {
-                              toast.error(e?.message || 'Error de red');
-                            }
-                          }}
-                          className="px-2 py-1 rounded bg-amber-500/10 border border-amber-500/40 text-amber-300 hover:bg-amber-500/20 text-[10px]"
-                        >
-                          ↻ Refrescar
-                        </button>
                       </div>
                     )}
                   </div>
                 )}
-                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
+                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && !(processIndex === FOX_URL_INDEX && foxMode === 'telecable') && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
@@ -2150,7 +2131,27 @@ export default function EmisorM3U8Panel() {
                   />
                   {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
                     <button
-                      onClick={() => fetchChannelUrl(processIndex)}
+                      onClick={async () => {
+                        if (processIndex === FOX_URL_INDEX && foxMode === 'telecable') {
+                          setFetchingChannel(processIndex);
+                          try {
+                            const r = await fetch('/api/fox/refresh-telecable', { method: 'POST' });
+                            const j = await r.json().catch(() => ({}));
+                            if (r.ok) {
+                              if (j.url) updateProcess(processIndex, { m3u8: j.url });
+                              toast.success(`URL Telecable refrescada (vence en ${Math.floor((j.expires_in_s || 0) / 3600)}h)`);
+                            } else {
+                              toast.error(j.error || 'No se pudo refrescar');
+                            }
+                          } catch (e: any) {
+                            toast.error(e?.message || 'Error de red');
+                          } finally {
+                            setFetchingChannel(null);
+                          }
+                          return;
+                        }
+                        fetchChannelUrl(processIndex);
+                      }}
                       disabled={fetchingChannel !== null}
                       className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
                       title={`Obtener URL ${channelConfig.name} automáticamente`}
