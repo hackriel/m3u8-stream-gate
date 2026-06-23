@@ -731,7 +731,13 @@ const localProxyAgent = LOCAL_PROXY_URL ? new ProxyAgent(LOCAL_PROXY_URL) : null
 // ───────────────────────────────────────────────────────────────────────
 const CHANNELS_VIA_PI_WG = new Set(['15', '24', '25']); // CANAL 6 URL, FOX+ URL, FOX URL
 const CR_TUNNEL_USER = 'croute';
-const isViaCrTunnel = (pid) => CHANNELS_VIA_PI_WG.has(String(pid));
+const isViaCrTunnel = (pid) => {
+  if (!CHANNELS_VIA_PI_WG.has(String(pid))) return false;
+  // Si el pid está en modo Telecable, FFmpeg sale por la IP del VPS
+  // (NO por túnel CR), porque la URL firmada está atada a la IP del VPS.
+  if (isTelecableMode(pid)) return false;
+  return true;
+};
 // Wrappea un spawn de ffmpeg cuando el pid debe salir por el túnel CR.
 // Devuelve [command, args] para pasar tal cual a child_process.spawn.
 const wrapFfmpegSpawn = (pid, ffmpegArgs) => {
