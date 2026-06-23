@@ -2383,28 +2383,7 @@ export default function EmisorM3U8Panel() {
                 </button>
               )}
               {(processIndex === FOXMAS_URL_INDEX || processIndex === FOX_URL_INDEX) && process.isEmitiendo && (
-                <button
-                  onClick={async () => {
-                    if (!confirm(`💣 ¿Botar la sesión de ${channelConfig.name}?\n\nMatará FFmpeg simulando una caída. Deberías ver:\n1. Pantalla "RECONECTANDO" (filler)\n2. Re-scrape TDMax\n3. Nueva señal en vivo`)) return;
-                    try {
-                      const r = await fetch('/api/emit/drop', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ process_id: processIndex.toString() })
-                      });
-                      const j = await r.json().catch(() => ({}));
-                      if (!r.ok) toast.error(`Error: ${j.error || r.status}`);
-                      else toast.success('💣 Sesión botada — observa el filler y la recuperación');
-                    } catch (e: any) {
-                      toast.error(`Error de red: ${e?.message || e}`);
-                    }
-                  }}
-                  title="TEST: mata FFmpeg para validar filler + auto-recovery (sin marcar como parada manual)"
-                  className="px-4 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-[.98] transition-all duration-200 font-medium text-white shadow-lg hover:shadow-xl"
-                >
-                  💣 Botar
-                </button>
-              )}
+              {false && null}
             </div>
 
             {/* Always-On Toggle (excluye solo subida de archivo) */}
