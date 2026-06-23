@@ -2349,13 +2349,13 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
   const fallbackUrl = CHANNEL_FALLBACK_URLS[process_id];
   const rememberedState = getRememberedStreamState(process_id);
 
-  // ── FOX URL (25) en modo Telecable: relogin y URL fresca, sin scraping TDMax.
+  // ── Modo Telecable (cualquier pid): relogin y URL fresca, sin scraping TDMax.
   //    Si el login falla, el flujo cae al circuit breaker existente.
-  if (String(process_id) === '25' && isTelecableMode('25')) {
+  if (isTelecableMode(process_id)) {
     sendLog(process_id, 'info',
       `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}) — Telecable: refrescando URL firmada...`);
     try {
-      const st = await safeTelecableResolve('25');
+      const st = await safeTelecableResolve(process_id);
       newUrl = st.url;
     } catch (e) {
       sendLog(process_id, 'error', `❌ AUTO-RECOVERY Telecable falló: ${e.message}`);
@@ -3043,30 +3043,30 @@ app.post('/api/emit', async (req, res) => {
       // effectiveSourceM3u8 ya viene del request — no sobrescribir.
     }
 
-    // ── FOX URL (25) — TELECABLE / SCRAPING ────────────────────────────
+    // ── TELECABLE (pids en TELECABLE_PROCESSES) ────────────────────────
     //    'telecable' = login directo desde el VPS a la API de Telecable;
     //    se resuelve URL HLS firmada y se reemplaza effectiveSourceM3u8.
     //    El FFmpeg sale por la IP del VPS (NO por túnel CR), porque la
     //    firma del CDN está atada a esa IP.
-    if (process_id === '25' && !is_recovery && (source_mode === 'telecable' || source_mode === 'scraping')) {
-      setFoxSourceMode('25', source_mode);
-      sendLog('25', 'info', `🎛️ Modo FOX URL seleccionado: ${source_mode.toUpperCase()}`);
-      telecableFailureCount.set('25', 0);
+    if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && source_mode === 'telecable') {
+      setTelecableSourceMode(process_id, 'telecable');
+      sendLog(process_id, 'info', `🎛️ Modo TELECABLE activado (pid ${process_id})`);
+      telecableFailureCount.set(String(process_id), 0);
+    } else if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && source_mode && source_mode !== 'telecable') {
+      // Cualquier otro source_mode (scraping/official) desactiva Telecable.
+      setTelecableSourceMode(process_id, 'scraping');
     }
-    if (process_id === '25' && isTelecableMode('25')) {
+    if (isTelecableMode(process_id)) {
       try {
-        // Cache hit si la URL todavía está fresca (>1h hasta expirar) y este
-        // es un retry inmediato; si no, relogin (cubre cold-start + recovery).
-        const cached = telecableState.get('25');
+        const cached = telecableState.get(String(process_id));
         const stillFresh = cached?.expiresAt &&
           (cached.expiresAt - Math.floor(Date.now() / 1000) > TELECABLE_REFRESH_MARGIN_S) &&
-          is_recovery; // en recovery preferimos reusar URL caché si sigue válida
-        const st = stillFresh ? cached : await safeTelecableResolve('25');
+          is_recovery;
+        const st = stillFresh ? cached : await safeTelecableResolve(process_id);
         effectiveSourceM3u8 = st.url;
-        sendLog('25', 'info', `📡 FOX URL Telecable → consumiendo HLS firmado (IP VPS)`);
+        sendLog(process_id, 'info', `📡 Telecable → consumiendo HLS firmado (IP VPS)`);
       } catch (e) {
-        // Si falla, devolvemos error claro al cliente y NO arrancamos FFmpeg.
-        sendLog('25', 'error', `❌ No se pudo obtener URL Telecable: ${e.message}`);
+        sendLog(process_id, 'error', `❌ No se pudo obtener URL Telecable: ${e.message}`);
         return res.status(502).json({ error: `Telecable: ${e.message}` });
       }
     }
@@ -3123,10 +3123,10 @@ app.post('/api/emit', async (req, res) => {
     // OPTIMIZACIÓN #1: si el caller (Quick Retry) ya scrapeó hace <10s, reusar la
     // URL recibida y saltar este refresh para evitar doble scrape (que duplica
     // sesiones en Streann y desincroniza el token con la conexión FFmpeg).
-    // En modo Telecable (pid 25), la URL firmada ya viene resuelta por login directo
-    // desde el VPS — NO se debe scrapear vía Pi5/TDMax. Saltar el refresh JIT.
-    const isFoxTelecable = process_id === '25' && isTelecableMode('25');
-    if (!isTigoHdmiProcess && !isFoxTelecable && PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
+    // En modo Telecable (cualquier pid), la URL firmada ya viene resuelta por login
+    // directo desde el VPS — NO se debe scrapear vía Pi5/TDMax. Saltar el refresh JIT.
+    const isAnyTelecable = isTelecableMode(process_id);
+    if (!isTigoHdmiProcess && !isAnyTelecable && PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
       const cached = scrapeSessionCache.get(process_id);
       const cacheAgeMs = cached?.timestamp ? Date.now() - cached.timestamp : Infinity;
       const skipRefresh = is_recovery && cacheAgeMs < 10000;
@@ -4207,9 +4207,8 @@ app.post('/api/emit', async (req, res) => {
     // Mantiene caliente la sesión nimblesessionid para evitar que el CDN
     // la marque como idle y rote (causa probable de los reloads ciegos de 2-3s).
     // En modo HDMI no hay sesión CDN que mantener viva.
-    // En modo Telecable (pid 25) el upstream es Telecable HLS firmado, no el
-    // CDN de Tigo/TDMax con sesión nimble — NO necesita keepalive vía Pi5.
-    const skipKeepAliveForTelecable = String(process_id) === '25' && isTelecableMode('25');
+    // En modo Telecable (cualquier pid) el upstream es HLS firmado: NO keepalive.
+    const skipKeepAliveForTelecable = isTelecableMode(process_id);
     if (PROXY_PROCESSES.has(String(process_id)) && !isTigoHdmiMode && !skipKeepAliveForTelecable) {
       startTigoKeepAlive(process_id, effectiveSourceM3u8, sessionUserAgent);
     }
