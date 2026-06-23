@@ -2290,12 +2290,27 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
   let newUrl = null;
   const fallbackUrl = CHANNEL_FALLBACK_URLS[process_id];
   const rememberedState = getRememberedStreamState(process_id);
-  
+
+  // ── FOX URL (25) en modo Telecable: relogin y URL fresca, sin scraping TDMax.
+  //    Si el login falla, el flujo cae al circuit breaker existente.
+  if (String(process_id) === '25' && isTelecableMode('25')) {
+    sendLog(process_id, 'info',
+      `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}) — Telecable: refrescando URL firmada...`);
+    try {
+      const st = await safeTelecableResolve('25');
+      newUrl = st.url;
+    } catch (e) {
+      sendLog(process_id, 'error', `❌ AUTO-RECOVERY Telecable falló: ${e.message}`);
+      autoRecoveryInProgress.set(process_id, false);
+      return;
+    }
+  }
+
   // Si es el segundo intento (o más) y hay fallback, usar directamente la URL oficial
-  if (attempts >= 2 && fallbackUrl) {
+  if (!newUrl && attempts >= 2 && fallbackUrl) {
     sendLog(process_id, 'warn', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Usando URL oficial de respaldo...`);
     newUrl = fallbackUrl;
-  } else {
+  } else if (!newUrl) {
     sendLog(process_id, 'info', `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}): Obteniendo nueva URL...`);
     
     // 🧹 FIX: Si llevamos 2+ intentos seguidos, la sesión cacheada (cookies/token previos)
