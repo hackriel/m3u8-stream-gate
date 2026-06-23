@@ -7519,3 +7519,26 @@ server.listen(PORT, () => {
     }
   }, 3500);
 });
+
+// ───────────────────────────────────────────────────────────────────────
+// Loop de refresh proactivo Telecable.
+// Cada 60s revisa procesos en modo telecable: si la URL firmada vence en
+// <TELECABLE_REFRESH_MARGIN_S, hace relogin silencioso para tener URL
+// fresca lista para el próximo recovery. NO reinicia FFmpeg.
+// ───────────────────────────────────────────────────────────────────────
+setInterval(async () => {
+  for (const pid of TELECABLE_PROCESSES) {
+    if (!isTelecableMode(pid)) continue;
+    const st = telecableState.get(pid);
+    const nowS = Math.floor(Date.now() / 1000);
+    const secsLeft = st?.expiresAt ? (st.expiresAt - nowS) : 0;
+    const needsRefresh = !st || !st.expiresAt || secsLeft < TELECABLE_REFRESH_MARGIN_S;
+    if (!needsRefresh) continue;
+    try {
+      await safeTelecableResolve(pid);
+      sendLog(pid, 'info', `🔁 Telecable URL refrescada proactivamente (preventivo)`);
+    } catch (_) {
+      // El error ya fue logueado por safeTelecableResolve. El próximo ciclo reintenta.
+    }
+  }
+}, 60_000);
