@@ -3053,7 +3053,10 @@ app.post('/api/emit', async (req, res) => {
     // OPTIMIZACIÓN #1: si el caller (Quick Retry) ya scrapeó hace <10s, reusar la
     // URL recibida y saltar este refresh para evitar doble scrape (que duplica
     // sesiones en Streann y desincroniza el token con la conexión FFmpeg).
-    if (!isTigoHdmiProcess && PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
+    // En modo Telecable (pid 25), la URL firmada ya viene resuelta por login directo
+    // desde el VPS — NO se debe scrapear vía Pi5/TDMax. Saltar el refresh JIT.
+    const isFoxTelecable = process_id === '25' && isFoxTelecableMode('25');
+    if (!isTigoHdmiProcess && !isFoxTelecable && PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
       const cached = scrapeSessionCache.get(process_id);
       const cacheAgeMs = cached?.timestamp ? Date.now() - cached.timestamp : Infinity;
       const skipRefresh = is_recovery && cacheAgeMs < 10000;
