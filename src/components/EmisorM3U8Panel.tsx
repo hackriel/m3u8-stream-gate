@@ -2155,13 +2155,13 @@ export default function EmisorM3U8Panel() {
                           : 'border-border'
                     }`}
                   />
-                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
+                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && !(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') && (
                     <button
                       onClick={async () => {
-                        if (processIndex === FOX_URL_INDEX && foxMode === 'telecable') {
+                        if (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') {
                           setFetchingChannel(processIndex);
                           try {
-                            const r = await fetch('/api/fox/refresh-telecable', { method: 'POST' });
+                            const r = await fetch(`/api/telecable/${processIndex}/refresh`, { method: 'POST' });
                             const j = await r.json().catch(() => ({}));
                             if (r.ok) {
                               if (j.url) updateProcess(processIndex, { m3u8: j.url });
