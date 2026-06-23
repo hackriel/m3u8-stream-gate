@@ -6372,9 +6372,7 @@ app.post('/api/fox/source-mode', (req, res) => {
 // NO reinicia FFmpeg — solo actualiza el caché de URL firmada.
 app.post('/api/fox/refresh-telecable', async (req, res) => {
   try {
-    if (!isTelecableMode('25')) {
-      return res.status(400).json({ error: 'FOX URL no está en modo telecable' });
-    }
+    setFoxSourceMode('25', 'telecable');
     const st = await safeTelecableResolve('25');
     res.json({
       ok: true,
