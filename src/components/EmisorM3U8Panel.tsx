@@ -1793,7 +1793,7 @@ export default function EmisorM3U8Panel() {
             <h2 className="text-lg font-medium mb-4 text-accent">
               {processIndex === FILE_UPLOAD_INDEX ? "Archivos Locales" : "Fuente y Cabeceras"} - {channelConfig.name}
             </h2>
-            {CR_TUNNEL_CHANNELS.has(processIndex) && !(processIndex === FOX_URL_INDEX && foxMode === 'telecable') && (
+            {CR_TUNNEL_CHANNELS.has(processIndex) && !(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') && (
               <div className="mb-4 -mt-2">
                 {crTunnelHealth.wg_up && crTunnelHealth.cr_ip ? (
                   <span
