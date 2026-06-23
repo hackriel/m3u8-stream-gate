@@ -532,8 +532,26 @@ const TELECABLE_PLAYLIST_CAPS = 'adaptive,webvtt,fmp4,vast,clientvast,alerts,car
 const TELECABLE_DEFAULT_QUALITY = 40;
 const TELECABLE_REFRESH_MARGIN_S = 24 * 3600;        // refrescar URL cuando le queden <24h
 const TELECABLE_MIN_RELOGIN_INTERVAL_MS = 20_000;    // anti-abuse rate-limit
-const TELECABLE_PROCESSES = new Set(['25']);         // piloto: solo FOX URL
-const TELECABLE_CONTENT_MAP = { '25': 'FOX' };       // pid → content-id en /api/playlist
+// Canales con modo alterno Telecable (login directo VPS, sin túnel CR).
+// pid 25 fue el piloto; ampliado a FUTV/Teletica/TDMas1/Canal6/FOX+ tras validación.
+const TELECABLE_PROCESSES = new Set(['11','13','14','15','24','25']);
+// Matchers: probamos primero content-id exacto; si no aparece en la playlist,
+// caemos a patrones por nombre. Tolerante a renombres del CDN Telecable.
+const TELECABLE_CHANNEL_MATCHERS = {
+  '11': { contentIds: ['FUTV'],                                  namePatterns: [/futv/i] },
+  '13': { contentIds: ['TELETICA','CANAL7','TELE7'],             namePatterns: [/teletica/i, /canal\s*7/i] },
+  '14': { contentIds: ['TDMAS','TDMAS1','TDMAS_1','TDMASUNO'],   namePatterns: [/td\s*m[aá]s\s*1?\b/i] },
+  '15': { contentIds: ['CANAL6','REPRETEL6','REPRETEL_6'],       namePatterns: [/canal\s*6/i, /repretel/i] },
+  '24': { contentIds: ['FOXPLUS','FOX_PLUS','FOXMAS','FOX+'],    namePatterns: [/fox\s*\+/i, /fox\s*plus/i, /foxm[aá]s/i] },
+  '25': { contentIds: ['FOX'],                                   namePatterns: [/^fox$/i] },
+};
+// Compat: TELECABLE_CONTENT_MAP se sigue exponiendo (algunos lugares lo leen).
+const TELECABLE_CONTENT_MAP = Object.fromEntries(
+  Object.entries(TELECABLE_CHANNEL_MATCHERS).map(([pid, m]) => [pid, m.contentIds[0]])
+);
+
+// Caché global de la última playlist Telecable resuelta (para /api/telecable/channels).
+let lastTelecablePlaylist = { fetchedAt: 0, channels: [] };
 
 const telecableSourceMode = new Map();   // pid → 'scraping' | 'telecable'
 const telecableState = new Map();        // pid → { phpsessid, url, expiresAt, contentId, quality, fetchedAt }
@@ -560,6 +578,9 @@ const setFoxSourceMode = (pid, mode) => {
 };
 const isTelecableMode = (pid) =>
   TELECABLE_PROCESSES.has(String(pid)) && getFoxSourceMode(pid) === 'telecable';
+// Aliases con nombre nuevo (más claros). Mantenemos los viejos por compat.
+const getTelecableSourceMode = getFoxSourceMode;
+const setTelecableSourceMode = setFoxSourceMode;
 
 // Login + playlist + busca canal por content-id. Devuelve URL firmada lista para
 // que FFmpeg la consuma. NO se cachea entre procesos: cada pid hace su login
@@ -579,8 +600,12 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   }
   telecableLastReloginAt.set(pid, Date.now());
 
-  const contentId = contentIdOverride || TELECABLE_CONTENT_MAP[pid];
-  if (!contentId) throw new Error(`Sin content-id Telecable para pid=${pid}`);
+  const matcher = TELECABLE_CHANNEL_MATCHERS[pid];
+  const explicitContentId = contentIdOverride
+    || telecableState.get(pid)?.contentId
+    || (matcher && matcher.contentIds[0])
+    || TELECABLE_CONTENT_MAP[pid];
+  if (!explicitContentId && !matcher) throw new Error(`Sin content-id Telecable para pid=${pid}`);
   const quality = qualityOverride || telecableState.get(pid)?.quality || TELECABLE_DEFAULT_QUALITY;
 
   // 1) device-login
@@ -619,8 +644,39 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   if (plJson?.status !== 1 || !Array.isArray(plJson.channels)) {
     throw new Error(`telecable playlist invalid status=${plJson?.status}`);
   }
-  const channel = plJson.channels.find(c => c.id === contentId);
-  if (!channel?.url) throw new Error(`telecable channel not found: ${contentId}`);
+  // Cachear playlist para el endpoint /api/telecable/channels (debug/discovery).
+  lastTelecablePlaylist = {
+    fetchedAt: Math.floor(Date.now() / 1000),
+    channels: plJson.channels.map(c => ({
+      contentId: c.id,
+      name: c.name || c.title || null,
+      quality: c.quality || null,
+    })),
+  };
+  // 1) intento por content-id exacto (override → caché → primer candidato del matcher)
+  const candidateIds = contentIdOverride
+    ? [contentIdOverride]
+    : (matcher?.contentIds || [explicitContentId]);
+  let channel = null;
+  let resolvedContentId = null;
+  for (const cid of candidateIds) {
+    const found = plJson.channels.find(c => c.id === cid);
+    if (found?.url) { channel = found; resolvedContentId = cid; break; }
+  }
+  // 2) fallback por patrones de nombre
+  if (!channel && matcher?.namePatterns?.length) {
+    for (const re of matcher.namePatterns) {
+      const found = plJson.channels.find(c => {
+        const n = (c.name || c.title || '').toString();
+        return n && re.test(n);
+      });
+      if (found?.url) { channel = found; resolvedContentId = found.id; break; }
+    }
+  }
+  if (!channel?.url) {
+    throw new Error(`telecable channel not found: tried ${candidateIds.join(',')}${matcher?.namePatterns?.length ? ' + patterns' : ''}`);
+  }
+  const contentId = resolvedContentId;
 
   // Extraer expiración del query string de la URL firmada
   let expiresAt = 0;
