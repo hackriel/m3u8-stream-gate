@@ -610,56 +610,67 @@ export default function EmisorM3U8Panel() {
     return () => clearInterval(interval);
   }, []);
 
-  // ── FOX URL (25): toggle Scraping (TDMax+CR) / Telecable (login directo VPS).
-  //    El modo Telecable hace login a la API de Telecable desde el VPS y
-  //    consume HLS firmado sin pasar por el túnel CR.
-  const [foxMode, setFoxMode] = useState<'scraping' | 'telecable'>(() => {
-    try {
-      const v = localStorage.getItem('fox_25_source_mode');
-      return v === 'telecable' ? 'telecable' : 'scraping';
-    } catch {
-      return 'scraping';
+  // ── TELECABLE: modo alterno por pid (FUTV/Teletica/TDMas1/Canal6/FOX+/FOX).
+  //    'telecable' = login directo a la API de Telecable desde el VPS (sin túnel CR).
+  //    'scraping'  = flujo histórico del canal (TDMax+Pi5 o lo que aplique).
+  const TELECABLE_PIDS = useMemo(() => new Set<number>([11, 13, 14, 15, 24, 25]), []);
+  type TelecableMode = 'scraping' | 'telecable';
+  type TelecableInfo = { expires_at: number | null; expires_in_s: number | null; last_login_failure_count: number } | null;
+  const [telecableModes, setTelecableModes] = useState<Record<number, TelecableMode>>(() => {
+    const init: Record<number, TelecableMode> = {};
+    for (const pid of [11, 13, 14, 15, 24, 25]) {
+      try {
+        const v = localStorage.getItem(`telecable_${pid}_source_mode`);
+        init[pid] = v === 'telecable' ? 'telecable' : 'scraping';
+      } catch { init[pid] = 'scraping'; }
     }
+    return init;
   });
-  const handleFoxModeChange = useCallback((mode: 'scraping' | 'telecable') => {
-    setFoxMode(mode);
-    try { localStorage.setItem('fox_25_source_mode', mode); } catch {}
-    void fetch('/api/fox/source-mode', {
+  const [telecableInfos, setTelecableInfos] = useState<Record<number, TelecableInfo>>({});
+  const handleTelecableModeChange = useCallback((pid: number, mode: TelecableMode) => {
+    setTelecableModes(prev => ({ ...prev, [pid]: mode }));
+    try { localStorage.setItem(`telecable_${pid}_source_mode`, mode); } catch {}
+    void fetch(`/api/telecable/${pid}/source-mode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode }),
     }).catch(() => {});
   }, []);
-  const [foxTelecableInfo, setFoxTelecableInfo] = useState<{
-    expires_at: number | null;
-    expires_in_s: number | null;
-    last_login_failure_count: number;
-  } | null>(null);
+  // Compat alias para el resto del archivo que aún refiere foxMode (pid 25).
+  const foxMode = telecableModes[25] || 'scraping';
+  const handleFoxModeChange = useCallback((mode: TelecableMode) => handleTelecableModeChange(25, mode), [handleTelecableModeChange]);
+  const foxTelecableInfo = telecableInfos[25] || null;
+  // Poll por pid del estado real en el servidor.
   useEffect(() => {
-    let lastServerMode: 'scraping' | 'telecable' | null = null;
+    const lastSeen: Record<number, TelecableMode | null> = {};
     const tick = async () => {
-      try {
-        const r = await fetch('/api/fox/source-mode');
-        if (!r.ok) return;
-        const j = await r.json();
-        if (j.mode === 'telecable' || j.mode === 'scraping') {
-          if (lastServerMode === null) { lastServerMode = j.mode; }
-          else if (j.mode !== lastServerMode) {
-            lastServerMode = j.mode;
-            setFoxMode(prev => (prev !== j.mode ? j.mode : prev));
+      await Promise.all(Array.from(TELECABLE_PIDS).map(async (pid) => {
+        try {
+          const r = await fetch(`/api/telecable/${pid}/source-mode`);
+          if (!r.ok) return;
+          const j = await r.json();
+          if (j.mode === 'telecable' || j.mode === 'scraping') {
+            if (lastSeen[pid] === undefined) lastSeen[pid] = j.mode;
+            else if (j.mode !== lastSeen[pid]) {
+              lastSeen[pid] = j.mode;
+              setTelecableModes(prev => (prev[pid] !== j.mode ? { ...prev, [pid]: j.mode } : prev));
+            }
           }
-        }
-        setFoxTelecableInfo({
-          expires_at: j.telecable?.expires_at ?? null,
-          expires_in_s: j.telecable?.expires_in_s ?? null,
-          last_login_failure_count: j.last_login_failure_count ?? 0,
-        });
-      } catch {}
+          setTelecableInfos(prev => ({
+            ...prev,
+            [pid]: {
+              expires_at: j.telecable?.expires_at ?? null,
+              expires_in_s: j.telecable?.expires_in_s ?? null,
+              last_login_failure_count: j.last_login_failure_count ?? 0,
+            },
+          }));
+        } catch {}
+      }));
     };
     tick();
     const interval = setInterval(tick, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [TELECABLE_PIDS]);
 
   // ── Salida CR vía Pi5 (WireGuard) — set + poll de health del túnel.
   const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([15, 24, 25]), []);
