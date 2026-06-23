@@ -460,9 +460,16 @@ export default function EmisorM3U8Panel() {
               (rawProfile === 'normal' || rawProfile === 'balanced' || rawProfile === 'optimized' || rawProfile === 'passthrough') &&
               row.id >= 0 && row.id < NUM_PROCESSES
             ) {
-              setOutputProfiles((prev) =>
-                prev[row.id] === rawProfile ? prev : { ...prev, [row.id]: rawProfile },
-              );
+              // Si el usuario cambió el perfil localmente hace <PROFILE_WRITE_GUARD_MS,
+              // ignoramos el realtime para evitar flicker (el row puede traer el
+              // valor viejo si el UPDATE no fue causado por output_profile).
+              const lastLocal = pendingProfileWritesRef.current[row.id] || 0;
+              const fresh = Date.now() - lastLocal < PROFILE_WRITE_GUARD_MS;
+              if (!fresh) {
+                setOutputProfiles((prev) =>
+                  prev[row.id] === rawProfile ? prev : { ...prev, [row.id]: rawProfile },
+                );
+              }
             }
             setProcesses(prev => {
               const newProcesses = [...prev];
