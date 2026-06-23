@@ -610,6 +610,51 @@ export default function EmisorM3U8Panel() {
     return () => clearInterval(interval);
   }, []);
 
+  // ── FOX URL (25): toggle Scraping (TDMax+CR) / Telecable (login directo VPS).
+  //    El modo Telecable hace login a la API de Telecable desde el VPS y
+  //    consume HLS firmado sin pasar por el túnel CR.
+  const [foxMode, setFoxMode] = useState<'scraping' | 'telecable'>(() => {
+    try {
+      const v = localStorage.getItem('fox_25_source_mode');
+      return v === 'telecable' ? 'telecable' : 'scraping';
+    } catch {
+      return 'scraping';
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('fox_25_source_mode', foxMode); } catch {}
+  }, [foxMode]);
+  const [foxTelecableInfo, setFoxTelecableInfo] = useState<{
+    expires_at: number | null;
+    expires_in_s: number | null;
+    last_login_failure_count: number;
+  } | null>(null);
+  useEffect(() => {
+    let lastServerMode: 'scraping' | 'telecable' | null = null;
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/fox/source-mode');
+        if (!r.ok) return;
+        const j = await r.json();
+        if (j.mode === 'telecable' || j.mode === 'scraping') {
+          if (lastServerMode === null) { lastServerMode = j.mode; }
+          else if (j.mode !== lastServerMode) {
+            lastServerMode = j.mode;
+            setFoxMode(prev => (prev !== j.mode ? j.mode : prev));
+          }
+        }
+        setFoxTelecableInfo({
+          expires_at: j.telecable?.expires_at ?? null,
+          expires_in_s: j.telecable?.expires_in_s ?? null,
+          last_login_failure_count: j.last_login_failure_count ?? 0,
+        });
+      } catch {}
+    };
+    tick();
+    const interval = setInterval(tick, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   // ── Salida CR vía Pi5 (WireGuard) — set + poll de health del túnel.
   const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([15, 24, 25]), []);
   const [crTunnelHealth, setCrTunnelHealth] = useState<{ wg_up: boolean; cr_ip: string | null }>({
