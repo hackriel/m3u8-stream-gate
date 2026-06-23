@@ -798,6 +798,8 @@ const getProxyAgent = () => undefined;
 // MISMA IP (proxychains4/SOCKS5) para mantener la sesión caliente.
 // El resultado se descarta — solo importa que el CDN vea actividad.
 const tigoKeepAliveIntervals = new Map(); // process_id → intervalId
+// Set de pids con un POST /api/emit en vuelo — evita doble spawn por doble click.
+const emitInFlight = new Set();
 
 const startTigoKeepAlive = (process_id, playlistUrl, userAgent) => {
   // Limpiar interval previo si existe (recovery/restart)
@@ -2924,6 +2926,18 @@ app.post('/api/emit', async (req, res) => {
       output_profile = null,
       source_mode = null, // Teletica URL (13): 'official' | 'scraping'
     } = req.body;
+    // Anti-doble-emit: si llega un segundo POST /api/emit para el mismo pid
+    // mientras el primero todavía está arrancando, devolvemos 409 y NO
+    // spawneamos otro FFmpeg en paralelo (causaba dos procesos con perfiles
+    // distintos compitiendo por la misma salida HLS).
+    const _dedupePid = String(rawProcessId);
+    if (emitInFlight.has(_dedupePid)) {
+      sendLog(_dedupePid, 'warn', `⏸️ /api/emit ignorado: ya hay una solicitud en curso para este pid`);
+      return res.status(409).json({ error: 'Emit en curso, ignorando duplicado' });
+    }
+    emitInFlight.add(_dedupePid);
+    res.on('finish', () => emitInFlight.delete(_dedupePid));
+    res.on('close', () => emitInFlight.delete(_dedupePid));
     // Normalizar el modo. Compat: si llega `passthrough: true` sin `passthrough_mode`,
     // asumimos 'copy' (comportamiento histórico). Si llega 'transcode', desactivamos
     // el flag para que NO se ejecute el bloque de strip de transcoding.
@@ -4137,7 +4151,10 @@ app.post('/api/emit', async (req, res) => {
     // Mantiene caliente la sesión nimblesessionid para evitar que el CDN
     // la marque como idle y rote (causa probable de los reloads ciegos de 2-3s).
     // En modo HDMI no hay sesión CDN que mantener viva.
-    if (PROXY_PROCESSES.has(String(process_id)) && !isTigoHdmiMode) {
+    // En modo Telecable (pid 25) el upstream es Telecable HLS firmado, no el
+    // CDN de Tigo/TDMax con sesión nimble — NO necesita keepalive vía Pi5.
+    const skipKeepAliveForTelecable = String(process_id) === '25' && isTelecableMode('25');
+    if (PROXY_PROCESSES.has(String(process_id)) && !isTigoHdmiMode && !skipKeepAliveForTelecable) {
       startTigoKeepAlive(process_id, effectiveSourceM3u8, sessionUserAgent);
     }
 
