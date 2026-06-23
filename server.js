@@ -2957,6 +2957,35 @@ app.post('/api/emit', async (req, res) => {
       sendLog('15', 'info', `🎯 Canal 6 OFICIAL: usando URL pegada por usuario`);
       // effectiveSourceM3u8 ya viene del request — no sobrescribir.
     }
+
+    // ── FOX URL (25) — TELECABLE / SCRAPING ────────────────────────────
+    //    'telecable' = login directo desde el VPS a la API de Telecable;
+    //    se resuelve URL HLS firmada y se reemplaza effectiveSourceM3u8.
+    //    El FFmpeg sale por la IP del VPS (NO por túnel CR), porque la
+    //    firma del CDN está atada a esa IP.
+    if (process_id === '25' && !is_recovery && (source_mode === 'telecable' || source_mode === 'scraping')) {
+      setFoxSourceMode('25', source_mode);
+      sendLog('25', 'info', `🎛️ Modo FOX URL seleccionado: ${source_mode.toUpperCase()}`);
+      telecableFailureCount.set('25', 0);
+    }
+    if (process_id === '25' && isTelecableMode('25')) {
+      try {
+        // Cache hit si la URL todavía está fresca (>1h hasta expirar) y este
+        // es un retry inmediato; si no, relogin (cubre cold-start + recovery).
+        const cached = telecableState.get('25');
+        const stillFresh = cached?.expiresAt &&
+          (cached.expiresAt - Math.floor(Date.now() / 1000) > TELECABLE_REFRESH_MARGIN_S) &&
+          is_recovery; // en recovery preferimos reusar URL caché si sigue válida
+        const st = stillFresh ? cached : await safeTelecableResolve('25');
+        effectiveSourceM3u8 = st.url;
+        sendLog('25', 'info', `📡 FOX URL Telecable → consumiendo HLS firmado (IP VPS)`);
+      } catch (e) {
+        // Si falla, devolvemos error claro al cliente y NO arrancamos FFmpeg.
+        sendLog('25', 'error', `❌ No se pudo obtener URL Telecable: ${e.message}`);
+        return res.status(502).json({ error: `Telecable: ${e.message}` });
+      }
+    }
+
     // SRT ingest: si el caller no provee source_m3u8 (o lo marca como srt://obs),
     // arrancamos un listener SRT que recibe de OBS en el puerto del proceso.
     const isSrtIngest = isSrtIngestProcess(process_id) && (
