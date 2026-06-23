@@ -2065,7 +2065,7 @@ export default function EmisorM3U8Panel() {
                         : 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'}
                     </p>
                     {foxMode === 'telecable' && foxTelecableInfo && (
-                      <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                      <div className="mt-2 flex items-center gap-2 text-[11px]">
                         <span className="text-muted-foreground">
                           {foxTelecableInfo.expires_in_s !== null && foxTelecableInfo.expires_in_s > 0
                             ? `🟢 URL vence en ${Math.floor(foxTelecableInfo.expires_in_s / 3600)}h ${Math.floor((foxTelecableInfo.expires_in_s % 3600) / 60)}m`
@@ -2074,25 +2074,6 @@ export default function EmisorM3U8Panel() {
                             <span className="ml-2 text-red-400">· ⚠️ {foxTelecableInfo.last_login_failure_count} fallo(s)</span>
                           )}
                         </span>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const r = await fetch('/api/fox/refresh-telecable', { method: 'POST' });
-                              const j = await r.json().catch(() => ({}));
-                              if (r.ok) {
-                                toast.success(`URL Telecable refrescada (vence en ${Math.floor((j.expires_in_s || 0) / 3600)}h)`);
-                              } else {
-                                toast.error(j.error || 'No se pudo refrescar');
-                              }
-                            } catch (e: any) {
-                              toast.error(e?.message || 'Error de red');
-                            }
-                          }}
-                          className="px-2 py-1 rounded bg-amber-500/10 border border-amber-500/40 text-amber-300 hover:bg-amber-500/20 text-[10px]"
-                        >
-                          ↻ Refrescar
-                        </button>
                       </div>
                     )}
                   </div>
