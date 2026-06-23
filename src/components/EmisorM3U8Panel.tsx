@@ -2026,6 +2026,77 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
+                {processIndex === FOX_URL_INDEX && (
+                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
+                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                      Fuente FOX URL
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFoxMode('scraping')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          foxMode === 'scraping'
+                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Scraping TDMax + salida por túnel CR (Pi5)"
+                      >
+                        🔐 Scraping (TDMax+CR)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFoxMode('telecable')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          foxMode === 'telecable'
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Login directo a Telecable desde el VPS (sin CR)"
+                      >
+                        📡 Telecable (VPS)
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      {foxMode === 'telecable'
+                        ? 'Login automático a la API de Telecable desde el VPS. URL HLS firmada se refresca proactivamente. No usa túnel CR.'
+                        : 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'}
+                    </p>
+                    {foxMode === 'telecable' && foxTelecableInfo && (
+                      <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-muted-foreground">
+                          {foxTelecableInfo.expires_in_s !== null && foxTelecableInfo.expires_in_s > 0
+                            ? `🟢 URL vence en ${Math.floor(foxTelecableInfo.expires_in_s / 3600)}h ${Math.floor((foxTelecableInfo.expires_in_s % 3600) / 60)}m`
+                            : '⚪ Sin URL cacheada todavía'}
+                          {foxTelecableInfo.last_login_failure_count > 0 && (
+                            <span className="ml-2 text-red-400">· ⚠️ {foxTelecableInfo.last_login_failure_count} fallo(s)</span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const r = await fetch('/api/fox/refresh-telecable', { method: 'POST' });
+                              const j = await r.json().catch(() => ({}));
+                              if (r.ok) {
+                                toast.success(`URL Telecable refrescada (vence en ${Math.floor((j.expires_in_s || 0) / 3600)}h)`);
+                              } else {
+                                toast.error(j.error || 'No se pudo refrescar');
+                              }
+                            } catch (e: any) {
+                              toast.error(e?.message || 'Error de red');
+                            }
+                          }}
+                          className="px-2 py-1 rounded bg-amber-500/10 border border-amber-500/40 text-amber-300 hover:bg-amber-500/20 text-[10px]"
+                        >
+                          ↻ Refrescar
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
