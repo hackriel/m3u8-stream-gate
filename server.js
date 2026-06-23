@@ -6339,6 +6339,44 @@ app.get('/api/canal6/source-mode', (req, res) => {
   res.json({ mode: getCanal6SourceMode('15') });
 });
 
+// ───── FOX URL (25) — modo Telecable / Scraping ─────
+app.get('/api/fox/source-mode', (req, res) => {
+  const pid = '25';
+  const mode = getFoxSourceMode(pid);
+  const st = telecableState.get(pid);
+  res.json({
+    mode,
+    telecable: st
+      ? {
+          content_id: st.contentId,
+          quality: st.quality,
+          fetched_at: st.fetchedAt,
+          expires_at: st.expiresAt,
+          expires_in_s: st.expiresAt ? Math.max(0, st.expiresAt - Math.floor(Date.now() / 1000)) : null,
+        }
+      : null,
+    last_login_failure_count: telecableFailureCount.get(pid) || 0,
+  });
+});
+
+// Forzar relogin (debug / botón "Refrescar URL ahora" del dashboard).
+// NO reinicia FFmpeg — solo actualiza el caché de URL firmada.
+app.post('/api/fox/refresh-telecable', async (req, res) => {
+  try {
+    if (!isTelecableMode('25')) {
+      return res.status(400).json({ error: 'FOX URL no está en modo telecable' });
+    }
+    const st = await safeTelecableResolve('25');
+    res.json({
+      ok: true,
+      expires_at: st.expiresAt,
+      expires_in_s: st.expiresAt ? Math.max(0, st.expiresAt - Math.floor(Date.now() / 1000)) : null,
+    });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 // ============= CR TUNNEL HEALTH =============
 // Devuelve si el túnel WireGuard al Pi5 está vivo y la IP pública que ve el
 // usuario `croute` (debe ser CR). Cachea resultado 10s para no martillar
