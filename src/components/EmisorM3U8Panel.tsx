@@ -1776,7 +1776,7 @@ export default function EmisorM3U8Panel() {
             <h2 className="text-lg font-medium mb-4 text-accent">
               {processIndex === FILE_UPLOAD_INDEX ? "Archivos Locales" : "Fuente y Cabeceras"} - {channelConfig.name}
             </h2>
-            {CR_TUNNEL_CHANNELS.has(processIndex) && (
+            {CR_TUNNEL_CHANNELS.has(processIndex) && !(processIndex === FOX_URL_INDEX && foxMode === 'telecable') && (
               <div className="mb-4 -mt-2">
                 {crTunnelHealth.wg_up && crTunnelHealth.cr_ip ? (
                   <span
@@ -2097,7 +2097,7 @@ export default function EmisorM3U8Panel() {
                     )}
                   </div>
                 )}
-                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
+                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && !(processIndex === FOX_URL_INDEX && foxMode === 'telecable') && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
