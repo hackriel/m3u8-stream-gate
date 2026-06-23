@@ -4137,7 +4137,10 @@ app.post('/api/emit', async (req, res) => {
     // Mantiene caliente la sesión nimblesessionid para evitar que el CDN
     // la marque como idle y rote (causa probable de los reloads ciegos de 2-3s).
     // En modo HDMI no hay sesión CDN que mantener viva.
-    if (PROXY_PROCESSES.has(String(process_id)) && !isTigoHdmiMode) {
+    // En modo Telecable (pid 25) el upstream es Telecable HLS firmado, no el
+    // CDN de Tigo/TDMax con sesión nimble — NO necesita keepalive vía Pi5.
+    const skipKeepAliveForTelecable = String(process_id) === '25' && isTelecableMode('25');
+    if (PROXY_PROCESSES.has(String(process_id)) && !isTigoHdmiMode && !skipKeepAliveForTelecable) {
       startTigoKeepAlive(process_id, effectiveSourceM3u8, sessionUserAgent);
     }
 
