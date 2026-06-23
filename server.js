@@ -532,8 +532,26 @@ const TELECABLE_PLAYLIST_CAPS = 'adaptive,webvtt,fmp4,vast,clientvast,alerts,car
 const TELECABLE_DEFAULT_QUALITY = 40;
 const TELECABLE_REFRESH_MARGIN_S = 24 * 3600;        // refrescar URL cuando le queden <24h
 const TELECABLE_MIN_RELOGIN_INTERVAL_MS = 20_000;    // anti-abuse rate-limit
-const TELECABLE_PROCESSES = new Set(['25']);         // piloto: solo FOX URL
-const TELECABLE_CONTENT_MAP = { '25': 'FOX' };       // pid → content-id en /api/playlist
+// Canales con modo alterno Telecable (login directo VPS, sin túnel CR).
+// pid 25 fue el piloto; ampliado a FUTV/Teletica/TDMas1/Canal6/FOX+ tras validación.
+const TELECABLE_PROCESSES = new Set(['11','13','14','15','24','25']);
+// Matchers: probamos primero content-id exacto; si no aparece en la playlist,
+// caemos a patrones por nombre. Tolerante a renombres del CDN Telecable.
+const TELECABLE_CHANNEL_MATCHERS = {
+  '11': { contentIds: ['FUTV'],                                  namePatterns: [/futv/i] },
+  '13': { contentIds: ['TELETICA','CANAL7','TELE7'],             namePatterns: [/teletica/i, /canal\s*7/i] },
+  '14': { contentIds: ['TDMAS','TDMAS1','TDMAS_1','TDMASUNO'],   namePatterns: [/td\s*m[aá]s\s*1?\b/i] },
+  '15': { contentIds: ['CANAL6','REPRETEL6','REPRETEL_6'],       namePatterns: [/canal\s*6/i, /repretel/i] },
+  '24': { contentIds: ['FOXPLUS','FOX_PLUS','FOXMAS','FOX+'],    namePatterns: [/fox\s*\+/i, /fox\s*plus/i, /foxm[aá]s/i] },
+  '25': { contentIds: ['FOX'],                                   namePatterns: [/^fox$/i] },
+};
+// Compat: TELECABLE_CONTENT_MAP se sigue exponiendo (algunos lugares lo leen).
+const TELECABLE_CONTENT_MAP = Object.fromEntries(
+  Object.entries(TELECABLE_CHANNEL_MATCHERS).map(([pid, m]) => [pid, m.contentIds[0]])
+);
+
+// Caché global de la última playlist Telecable resuelta (para /api/telecable/channels).
+let lastTelecablePlaylist = { fetchedAt: 0, channels: [] };
 
 const telecableSourceMode = new Map();   // pid → 'scraping' | 'telecable'
 const telecableState = new Map();        // pid → { phpsessid, url, expiresAt, contentId, quality, fetchedAt }
@@ -560,6 +578,9 @@ const setFoxSourceMode = (pid, mode) => {
 };
 const isTelecableMode = (pid) =>
   TELECABLE_PROCESSES.has(String(pid)) && getFoxSourceMode(pid) === 'telecable';
+// Aliases con nombre nuevo (más claros). Mantenemos los viejos por compat.
+const getTelecableSourceMode = getFoxSourceMode;
+const setTelecableSourceMode = setFoxSourceMode;
 
 // Login + playlist + busca canal por content-id. Devuelve URL firmada lista para
 // que FFmpeg la consuma. NO se cachea entre procesos: cada pid hace su login
@@ -579,8 +600,12 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   }
   telecableLastReloginAt.set(pid, Date.now());
 
-  const contentId = contentIdOverride || TELECABLE_CONTENT_MAP[pid];
-  if (!contentId) throw new Error(`Sin content-id Telecable para pid=${pid}`);
+  const matcher = TELECABLE_CHANNEL_MATCHERS[pid];
+  const explicitContentId = contentIdOverride
+    || telecableState.get(pid)?.contentId
+    || (matcher && matcher.contentIds[0])
+    || TELECABLE_CONTENT_MAP[pid];
+  if (!explicitContentId && !matcher) throw new Error(`Sin content-id Telecable para pid=${pid}`);
   const quality = qualityOverride || telecableState.get(pid)?.quality || TELECABLE_DEFAULT_QUALITY;
 
   // 1) device-login
@@ -619,8 +644,39 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   if (plJson?.status !== 1 || !Array.isArray(plJson.channels)) {
     throw new Error(`telecable playlist invalid status=${plJson?.status}`);
   }
-  const channel = plJson.channels.find(c => c.id === contentId);
-  if (!channel?.url) throw new Error(`telecable channel not found: ${contentId}`);
+  // Cachear playlist para el endpoint /api/telecable/channels (debug/discovery).
+  lastTelecablePlaylist = {
+    fetchedAt: Math.floor(Date.now() / 1000),
+    channels: plJson.channels.map(c => ({
+      contentId: c.id,
+      name: c.name || c.title || null,
+      quality: c.quality || null,
+    })),
+  };
+  // 1) intento por content-id exacto (override → caché → primer candidato del matcher)
+  const candidateIds = contentIdOverride
+    ? [contentIdOverride]
+    : (matcher?.contentIds || [explicitContentId]);
+  let channel = null;
+  let resolvedContentId = null;
+  for (const cid of candidateIds) {
+    const found = plJson.channels.find(c => c.id === cid);
+    if (found?.url) { channel = found; resolvedContentId = cid; break; }
+  }
+  // 2) fallback por patrones de nombre
+  if (!channel && matcher?.namePatterns?.length) {
+    for (const re of matcher.namePatterns) {
+      const found = plJson.channels.find(c => {
+        const n = (c.name || c.title || '').toString();
+        return n && re.test(n);
+      });
+      if (found?.url) { channel = found; resolvedContentId = found.id; break; }
+    }
+  }
+  if (!channel?.url) {
+    throw new Error(`telecable channel not found: tried ${candidateIds.join(',')}${matcher?.namePatterns?.length ? ' + patterns' : ''}`);
+  }
+  const contentId = resolvedContentId;
 
   // Extraer expiración del query string de la URL firmada
   let expiresAt = 0;
@@ -2293,13 +2349,13 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
   const fallbackUrl = CHANNEL_FALLBACK_URLS[process_id];
   const rememberedState = getRememberedStreamState(process_id);
 
-  // ── FOX URL (25) en modo Telecable: relogin y URL fresca, sin scraping TDMax.
+  // ── Modo Telecable (cualquier pid): relogin y URL fresca, sin scraping TDMax.
   //    Si el login falla, el flujo cae al circuit breaker existente.
-  if (String(process_id) === '25' && isTelecableMode('25')) {
+  if (isTelecableMode(process_id)) {
     sendLog(process_id, 'info',
       `🔄 AUTO-RECOVERY ${channelName} (intento #${attempts}) — Telecable: refrescando URL firmada...`);
     try {
-      const st = await safeTelecableResolve('25');
+      const st = await safeTelecableResolve(process_id);
       newUrl = st.url;
     } catch (e) {
       sendLog(process_id, 'error', `❌ AUTO-RECOVERY Telecable falló: ${e.message}`);
@@ -2987,30 +3043,30 @@ app.post('/api/emit', async (req, res) => {
       // effectiveSourceM3u8 ya viene del request — no sobrescribir.
     }
 
-    // ── FOX URL (25) — TELECABLE / SCRAPING ────────────────────────────
+    // ── TELECABLE (pids en TELECABLE_PROCESSES) ────────────────────────
     //    'telecable' = login directo desde el VPS a la API de Telecable;
     //    se resuelve URL HLS firmada y se reemplaza effectiveSourceM3u8.
     //    El FFmpeg sale por la IP del VPS (NO por túnel CR), porque la
     //    firma del CDN está atada a esa IP.
-    if (process_id === '25' && !is_recovery && (source_mode === 'telecable' || source_mode === 'scraping')) {
-      setFoxSourceMode('25', source_mode);
-      sendLog('25', 'info', `🎛️ Modo FOX URL seleccionado: ${source_mode.toUpperCase()}`);
-      telecableFailureCount.set('25', 0);
+    if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && source_mode === 'telecable') {
+      setTelecableSourceMode(process_id, 'telecable');
+      sendLog(process_id, 'info', `🎛️ Modo TELECABLE activado (pid ${process_id})`);
+      telecableFailureCount.set(String(process_id), 0);
+    } else if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && source_mode && source_mode !== 'telecable') {
+      // Cualquier otro source_mode (scraping/official) desactiva Telecable.
+      setTelecableSourceMode(process_id, 'scraping');
     }
-    if (process_id === '25' && isTelecableMode('25')) {
+    if (isTelecableMode(process_id)) {
       try {
-        // Cache hit si la URL todavía está fresca (>1h hasta expirar) y este
-        // es un retry inmediato; si no, relogin (cubre cold-start + recovery).
-        const cached = telecableState.get('25');
+        const cached = telecableState.get(String(process_id));
         const stillFresh = cached?.expiresAt &&
           (cached.expiresAt - Math.floor(Date.now() / 1000) > TELECABLE_REFRESH_MARGIN_S) &&
-          is_recovery; // en recovery preferimos reusar URL caché si sigue válida
-        const st = stillFresh ? cached : await safeTelecableResolve('25');
+          is_recovery;
+        const st = stillFresh ? cached : await safeTelecableResolve(process_id);
         effectiveSourceM3u8 = st.url;
-        sendLog('25', 'info', `📡 FOX URL Telecable → consumiendo HLS firmado (IP VPS)`);
+        sendLog(process_id, 'info', `📡 Telecable → consumiendo HLS firmado (IP VPS)`);
       } catch (e) {
-        // Si falla, devolvemos error claro al cliente y NO arrancamos FFmpeg.
-        sendLog('25', 'error', `❌ No se pudo obtener URL Telecable: ${e.message}`);
+        sendLog(process_id, 'error', `❌ No se pudo obtener URL Telecable: ${e.message}`);
         return res.status(502).json({ error: `Telecable: ${e.message}` });
       }
     }
@@ -3067,10 +3123,10 @@ app.post('/api/emit', async (req, res) => {
     // OPTIMIZACIÓN #1: si el caller (Quick Retry) ya scrapeó hace <10s, reusar la
     // URL recibida y saltar este refresh para evitar doble scrape (que duplica
     // sesiones en Streann y desincroniza el token con la conexión FFmpeg).
-    // En modo Telecable (pid 25), la URL firmada ya viene resuelta por login directo
-    // desde el VPS — NO se debe scrapear vía Pi5/TDMax. Saltar el refresh JIT.
-    const isFoxTelecable = process_id === '25' && isTelecableMode('25');
-    if (!isTigoHdmiProcess && !isFoxTelecable && PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
+    // En modo Telecable (cualquier pid), la URL firmada ya viene resuelta por login
+    // directo desde el VPS — NO se debe scrapear vía Pi5/TDMax. Saltar el refresh JIT.
+    const isAnyTelecable = isTelecableMode(process_id);
+    if (!isTigoHdmiProcess && !isAnyTelecable && PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
       const cached = scrapeSessionCache.get(process_id);
       const cacheAgeMs = cached?.timestamp ? Date.now() - cached.timestamp : Infinity;
       const skipRefresh = is_recovery && cacheAgeMs < 10000;
@@ -4151,9 +4207,8 @@ app.post('/api/emit', async (req, res) => {
     // Mantiene caliente la sesión nimblesessionid para evitar que el CDN
     // la marque como idle y rote (causa probable de los reloads ciegos de 2-3s).
     // En modo HDMI no hay sesión CDN que mantener viva.
-    // En modo Telecable (pid 25) el upstream es Telecable HLS firmado, no el
-    // CDN de Tigo/TDMax con sesión nimble — NO necesita keepalive vía Pi5.
-    const skipKeepAliveForTelecable = String(process_id) === '25' && isTelecableMode('25');
+    // En modo Telecable (cualquier pid) el upstream es HLS firmado: NO keepalive.
+    const skipKeepAliveForTelecable = isTelecableMode(process_id);
     if (PROXY_PROCESSES.has(String(process_id)) && !isTigoHdmiMode && !skipKeepAliveForTelecable) {
       startTigoKeepAlive(process_id, effectiveSourceM3u8, sessionUserAgent);
     }
@@ -6359,13 +6414,12 @@ app.get('/api/canal6/source-mode', (req, res) => {
   res.json({ mode: getCanal6SourceMode('15') });
 });
 
-// ───── FOX URL (25) — modo Telecable / Scraping ─────
-app.get('/api/fox/source-mode', (req, res) => {
-  const pid = '25';
-  const mode = getFoxSourceMode(pid);
-  const st = telecableState.get(pid);
-  res.json({
-    mode,
+// ───── TELECABLE — endpoints genéricos por pid ─────
+// Funciona para cualquier pid en TELECABLE_PROCESSES (FUTV/Teletica/TDMas1/Canal6/FOX+/FOX).
+const telecableSourceModePayload = (pid) => {
+  const st = telecableState.get(String(pid));
+  return {
+    mode: getTelecableSourceMode(pid),
     telecable: st
       ? {
           content_id: st.contentId,
@@ -6375,34 +6429,81 @@ app.get('/api/fox/source-mode', (req, res) => {
           expires_in_s: st.expiresAt ? Math.max(0, st.expiresAt - Math.floor(Date.now() / 1000)) : null,
         }
       : null,
-    last_login_failure_count: telecableFailureCount.get(pid) || 0,
-  });
+    last_login_failure_count: telecableFailureCount.get(String(pid)) || 0,
+  };
+};
+
+app.get('/api/telecable/:pid/source-mode', (req, res) => {
+  const pid = String(req.params.pid);
+  if (!TELECABLE_PROCESSES.has(pid)) return res.status(404).json({ error: `pid ${pid} no soporta Telecable` });
+  res.json(telecableSourceModePayload(pid));
 });
 
-app.post('/api/fox/source-mode', (req, res) => {
+app.post('/api/telecable/:pid/source-mode', (req, res) => {
+  const pid = String(req.params.pid);
+  if (!TELECABLE_PROCESSES.has(pid)) return res.status(404).json({ error: `pid ${pid} no soporta Telecable` });
   const requested = req.body?.mode;
   if (requested !== 'telecable' && requested !== 'scraping') {
-    return res.status(400).json({ error: 'Modo FOX inválido' });
+    return res.status(400).json({ error: 'Modo inválido (telecable|scraping)' });
   }
-  const mode = setFoxSourceMode('25', requested);
+  const mode = setTelecableSourceMode(pid, requested);
   res.json({ ok: true, mode });
 });
 
-// Forzar relogin (debug / botón "Refrescar URL ahora" del dashboard).
-// NO reinicia FFmpeg — solo actualiza el caché de URL firmada.
-app.post('/api/fox/refresh-telecable', async (req, res) => {
+app.post('/api/telecable/:pid/refresh', async (req, res) => {
+  const pid = String(req.params.pid);
+  if (!TELECABLE_PROCESSES.has(pid)) return res.status(404).json({ error: `pid ${pid} no soporta Telecable` });
   try {
-    setFoxSourceMode('25', 'telecable');
-    const st = await safeTelecableResolve('25');
+    setTelecableSourceMode(pid, 'telecable');
+    const st = await safeTelecableResolve(pid);
     res.json({
       ok: true,
       url: st.url,
+      content_id: st.contentId,
       expires_at: st.expiresAt,
       expires_in_s: st.expiresAt ? Math.max(0, st.expiresAt - Math.floor(Date.now() / 1000)) : null,
     });
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
+});
+
+// Discovery: lista TODOS los canales que devuelve la playlist Telecable.
+// Útil para ajustar TELECABLE_CHANNEL_MATCHERS si los content-id reales no matchean.
+app.get('/api/telecable/channels', async (req, res) => {
+  try {
+    // Si tenemos caché reciente (<5 min) y no se pide force, devolvemos esa.
+    const cacheAge = Math.floor(Date.now() / 1000) - lastTelecablePlaylist.fetchedAt;
+    if (!req.query.force && lastTelecablePlaylist.channels.length > 0 && cacheAge < 300) {
+      return res.json({ ok: true, cached: true, age_s: cacheAge, channels: lastTelecablePlaylist.channels });
+    }
+    // Forzar un resolve con cualquier pid existente (usa el primero del set).
+    const anyPid = [...TELECABLE_PROCESSES][0];
+    await telecableLoginAndResolve(anyPid).catch(() => {}); // ignoramos error de "channel not found"
+    res.json({ ok: true, cached: false, age_s: 0, channels: lastTelecablePlaylist.channels });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// ── ALIASES legacy (FOX URL pid 25) ── mantenidos para no romper clientes viejos.
+app.get('/api/fox/source-mode', (req, res) => res.json(telecableSourceModePayload('25')));
+app.post('/api/fox/source-mode', (req, res) => {
+  const requested = req.body?.mode;
+  if (requested !== 'telecable' && requested !== 'scraping') {
+    return res.status(400).json({ error: 'Modo FOX inválido' });
+  }
+  res.json({ ok: true, mode: setTelecableSourceMode('25', requested) });
+});
+app.post('/api/fox/refresh-telecable', async (req, res) => {
+  try {
+    setTelecableSourceMode('25', 'telecable');
+    const st = await safeTelecableResolve('25');
+    res.json({
+      ok: true, url: st.url, expires_at: st.expiresAt,
+      expires_in_s: st.expiresAt ? Math.max(0, st.expiresAt - Math.floor(Date.now() / 1000)) : null,
+    });
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 // ============= CR TUNNEL HEALTH =============

@@ -460,9 +460,16 @@ export default function EmisorM3U8Panel() {
               (rawProfile === 'normal' || rawProfile === 'balanced' || rawProfile === 'optimized' || rawProfile === 'passthrough') &&
               row.id >= 0 && row.id < NUM_PROCESSES
             ) {
-              setOutputProfiles((prev) =>
-                prev[row.id] === rawProfile ? prev : { ...prev, [row.id]: rawProfile },
-              );
+              // Si el usuario cambió el perfil localmente hace <PROFILE_WRITE_GUARD_MS,
+              // ignoramos el realtime para evitar flicker (el row puede traer el
+              // valor viejo si el UPDATE no fue causado por output_profile).
+              const lastLocal = pendingProfileWritesRef.current[row.id] || 0;
+              const fresh = Date.now() - lastLocal < PROFILE_WRITE_GUARD_MS;
+              if (!fresh) {
+                setOutputProfiles((prev) =>
+                  prev[row.id] === rawProfile ? prev : { ...prev, [row.id]: rawProfile },
+                );
+              }
             }
             setProcesses(prev => {
               const newProcesses = [...prev];
@@ -610,56 +617,67 @@ export default function EmisorM3U8Panel() {
     return () => clearInterval(interval);
   }, []);
 
-  // ── FOX URL (25): toggle Scraping (TDMax+CR) / Telecable (login directo VPS).
-  //    El modo Telecable hace login a la API de Telecable desde el VPS y
-  //    consume HLS firmado sin pasar por el túnel CR.
-  const [foxMode, setFoxMode] = useState<'scraping' | 'telecable'>(() => {
-    try {
-      const v = localStorage.getItem('fox_25_source_mode');
-      return v === 'telecable' ? 'telecable' : 'scraping';
-    } catch {
-      return 'scraping';
+  // ── TELECABLE: modo alterno por pid (FUTV/Teletica/TDMas1/Canal6/FOX+/FOX).
+  //    'telecable' = login directo a la API de Telecable desde el VPS (sin túnel CR).
+  //    'scraping'  = flujo histórico del canal (TDMax+Pi5 o lo que aplique).
+  const TELECABLE_PIDS = useMemo(() => new Set<number>([11, 13, 14, 15, 24, 25]), []);
+  type TelecableMode = 'scraping' | 'telecable';
+  type TelecableInfo = { expires_at: number | null; expires_in_s: number | null; last_login_failure_count: number } | null;
+  const [telecableModes, setTelecableModes] = useState<Record<number, TelecableMode>>(() => {
+    const init: Record<number, TelecableMode> = {};
+    for (const pid of [11, 13, 14, 15, 24, 25]) {
+      try {
+        const v = localStorage.getItem(`telecable_${pid}_source_mode`);
+        init[pid] = v === 'telecable' ? 'telecable' : 'scraping';
+      } catch { init[pid] = 'scraping'; }
     }
+    return init;
   });
-  const handleFoxModeChange = useCallback((mode: 'scraping' | 'telecable') => {
-    setFoxMode(mode);
-    try { localStorage.setItem('fox_25_source_mode', mode); } catch {}
-    void fetch('/api/fox/source-mode', {
+  const [telecableInfos, setTelecableInfos] = useState<Record<number, TelecableInfo>>({});
+  const handleTelecableModeChange = useCallback((pid: number, mode: TelecableMode) => {
+    setTelecableModes(prev => ({ ...prev, [pid]: mode }));
+    try { localStorage.setItem(`telecable_${pid}_source_mode`, mode); } catch {}
+    void fetch(`/api/telecable/${pid}/source-mode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode }),
     }).catch(() => {});
   }, []);
-  const [foxTelecableInfo, setFoxTelecableInfo] = useState<{
-    expires_at: number | null;
-    expires_in_s: number | null;
-    last_login_failure_count: number;
-  } | null>(null);
+  // Compat alias para el resto del archivo que aún refiere foxMode (pid 25).
+  const foxMode = telecableModes[25] || 'scraping';
+  const handleFoxModeChange = useCallback((mode: TelecableMode) => handleTelecableModeChange(25, mode), [handleTelecableModeChange]);
+  const foxTelecableInfo = telecableInfos[25] || null;
+  // Poll por pid del estado real en el servidor.
   useEffect(() => {
-    let lastServerMode: 'scraping' | 'telecable' | null = null;
+    const lastSeen: Record<number, TelecableMode | null> = {};
     const tick = async () => {
-      try {
-        const r = await fetch('/api/fox/source-mode');
-        if (!r.ok) return;
-        const j = await r.json();
-        if (j.mode === 'telecable' || j.mode === 'scraping') {
-          if (lastServerMode === null) { lastServerMode = j.mode; }
-          else if (j.mode !== lastServerMode) {
-            lastServerMode = j.mode;
-            setFoxMode(prev => (prev !== j.mode ? j.mode : prev));
+      await Promise.all(Array.from(TELECABLE_PIDS).map(async (pid) => {
+        try {
+          const r = await fetch(`/api/telecable/${pid}/source-mode`);
+          if (!r.ok) return;
+          const j = await r.json();
+          if (j.mode === 'telecable' || j.mode === 'scraping') {
+            if (lastSeen[pid] === undefined) lastSeen[pid] = j.mode;
+            else if (j.mode !== lastSeen[pid]) {
+              lastSeen[pid] = j.mode;
+              setTelecableModes(prev => (prev[pid] !== j.mode ? { ...prev, [pid]: j.mode } : prev));
+            }
           }
-        }
-        setFoxTelecableInfo({
-          expires_at: j.telecable?.expires_at ?? null,
-          expires_in_s: j.telecable?.expires_in_s ?? null,
-          last_login_failure_count: j.last_login_failure_count ?? 0,
-        });
-      } catch {}
+          setTelecableInfos(prev => ({
+            ...prev,
+            [pid]: {
+              expires_at: j.telecable?.expires_at ?? null,
+              expires_in_s: j.telecable?.expires_in_s ?? null,
+              last_login_failure_count: j.last_login_failure_count ?? 0,
+            },
+          }));
+        } catch {}
+      }));
     };
     tick();
     const interval = setInterval(tick, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [TELECABLE_PIDS]);
 
   // ── Salida CR vía Pi5 (WireGuard) — set + poll de health del túnel.
   const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([15, 24, 25]), []);
@@ -716,11 +734,19 @@ export default function EmisorM3U8Panel() {
     sessionStorage.setItem("emisor-output-profiles", JSON.stringify(outputProfiles));
   }, [outputProfiles]);
 
+  // Marca por pid de "el usuario acaba de cambiar el perfil localmente". Sirve para
+  // ignorar updates del realtime/DB que llegan con el valor viejo y producen flicker
+  // visual al pulsar Emitir (el realtime UPDATE de is_emitting incluye output_profile
+  // del row, que aún no contiene el nuevo valor — se reescribiría el viejo encima).
+  const pendingProfileWritesRef = useRef<Record<number, number>>({});
+  const PROFILE_WRITE_GUARD_MS = 8000;
+
   const getOutputProfile = (processIndex: number): OutputProfile =>
     outputProfiles[processIndex] || getDefaultOutputProfile(processIndex);
 
   const setOutputProfile = (processIndex: number, profile: OutputProfile) => {
     setOutputProfiles((prev) => ({ ...prev, [processIndex]: profile }));
+    pendingProfileWritesRef.current[processIndex] = Date.now();
     // Sincroniza el perfil en la DB para que TODOS los dispositivos
     // (móvil, computadora, otra pestaña) vean el mismo valor que
     // realmente está usando el servidor. Sin esto, cada navegador
@@ -1462,9 +1488,14 @@ export default function EmisorM3U8Panel() {
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString(),
           output_profile: selectedProfile,
-          ...(processIndex === TELETICA_URL_INDEX ? { source_mode: teleticaMode } : {}),
-          ...(processIndex === CANAL6_URL_INDEX ? { source_mode: canal6Mode } : {}),
-          ...(processIndex === FOX_URL_INDEX ? { source_mode: foxMode } : {}),
+          // Telecable gana sobre el modo histórico cuando está activo. Para
+          // los pids no-Telecable, se mantiene la lógica original (teletica/canal6).
+          ...(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable'
+            ? { source_mode: 'telecable' as const }
+            : processIndex === TELETICA_URL_INDEX ? { source_mode: teleticaMode }
+            : processIndex === CANAL6_URL_INDEX ? { source_mode: canal6Mode }
+            : processIndex === FOX_URL_INDEX ? { source_mode: foxMode }
+            : {}),
           ...(isM3uFileProcess && m3uPayload ? {
             // passthrough_mode: 'transcode' → usa el perfil estándar 720p CBR 2000k
             // (mismo que Disney 7 ID 0). Resuelve el "video crudo no va bien" en Xui/IPTV.
@@ -1782,7 +1813,7 @@ export default function EmisorM3U8Panel() {
             <h2 className="text-lg font-medium mb-4 text-accent">
               {processIndex === FILE_UPLOAD_INDEX ? "Archivos Locales" : "Fuente y Cabeceras"} - {channelConfig.name}
             </h2>
-            {CR_TUNNEL_CHANNELS.has(processIndex) && !(processIndex === FOX_URL_INDEX && foxMode === 'telecable') && (
+            {CR_TUNNEL_CHANNELS.has(processIndex) && !(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') && (
               <div className="mb-4 -mt-2">
                 {crTunnelHealth.wg_up && crTunnelHealth.cr_ip ? (
                   <span
@@ -2032,59 +2063,68 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
-                {processIndex === FOX_URL_INDEX && (
-                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
-                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
-                      Fuente FOX URL
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleFoxModeChange('scraping')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          foxMode === 'scraping'
-                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
-                            : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
-                        title="Scraping TDMax + salida por túnel CR (Pi5)"
-                      >
-                        🔐 Scraping (TDMax+CR)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleFoxModeChange('telecable')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          foxMode === 'telecable'
-                            ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                            : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
-                        title="Login directo a Telecable desde el VPS (sin CR)"
-                      >
-                        📡 Telecable (VPS)
-                      </button>
-                    </div>
-                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-                      {foxMode === 'telecable'
-                        ? 'Login automático a la API de Telecable desde el VPS. URL HLS firmada se refresca proactivamente. No usa túnel CR.'
-                        : 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'}
-                    </p>
-                    {foxMode === 'telecable' && foxTelecableInfo && (
-                      <div className="mt-2 flex items-center gap-2 text-[11px]">
-                        <span className="text-muted-foreground">
-                          {foxTelecableInfo.expires_in_s !== null && foxTelecableInfo.expires_in_s > 0
-                            ? `🟢 URL vence en ${Math.floor(foxTelecableInfo.expires_in_s / 3600)}h ${Math.floor((foxTelecableInfo.expires_in_s % 3600) / 60)}m`
-                            : '⚪ Sin URL cacheada todavía'}
-                          {foxTelecableInfo.last_login_failure_count > 0 && (
-                            <span className="ml-2 text-red-400">· ⚠️ {foxTelecableInfo.last_login_failure_count} fallo(s)</span>
-                          )}
-                        </span>
+                {TELECABLE_PIDS.has(processIndex) && (() => {
+                  const tMode = telecableModes[processIndex] || 'scraping';
+                  const tInfo = telecableInfos[processIndex] || null;
+                  const isFox = processIndex === FOX_URL_INDEX;
+                  const scrapingLabel = isFox ? '🔐 Scraping (TDMax+CR)' : '🔐 Modo histórico';
+                  const scrapingHelp = isFox
+                    ? 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'
+                    : 'Usa el flujo histórico de este canal (TDMax/scraping, etc).';
+                  return (
+                    <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
+                      <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                        Fuente alterna — Telecable
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleTelecableModeChange(processIndex, 'scraping')}
+                          disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                          className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                            tMode === 'scraping'
+                              ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                              : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
+                          } disabled:opacity-60 disabled:cursor-not-allowed`}
+                          title="Usar el modo histórico del canal"
+                        >
+                          {scrapingLabel}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTelecableModeChange(processIndex, 'telecable')}
+                          disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                          className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                            tMode === 'telecable'
+                              ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                              : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
+                          } disabled:opacity-60 disabled:cursor-not-allowed`}
+                          title="Login directo a Telecable desde el VPS (sin CR)"
+                        >
+                          📡 Telecable (VPS)
+                        </button>
                       </div>
-                    )}
-                  </div>
-                )}
-                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && !(processIndex === FOX_URL_INDEX && foxMode === 'telecable') && (
+                      <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                        {tMode === 'telecable'
+                          ? 'Login automático a la API de Telecable desde el VPS. URL HLS firmada se refresca proactivamente. No usa túnel CR.'
+                          : scrapingHelp}
+                      </p>
+                      {tMode === 'telecable' && tInfo && (
+                        <div className="mt-2 flex items-center gap-2 text-[11px]">
+                          <span className="text-muted-foreground">
+                            {tInfo.expires_in_s !== null && tInfo.expires_in_s > 0
+                              ? `🟢 URL vence en ${Math.floor(tInfo.expires_in_s / 3600)}h ${Math.floor((tInfo.expires_in_s % 3600) / 60)}m`
+                              : '⚪ Sin URL cacheada todavía'}
+                            {tInfo.last_login_failure_count > 0 && (
+                              <span className="ml-2 text-red-400">· ⚠️ {tInfo.last_login_failure_count} fallo(s)</span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && !(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
@@ -2135,13 +2175,13 @@ export default function EmisorM3U8Panel() {
                           : 'border-border'
                     }`}
                   />
-                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
+                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && !(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') && (
                     <button
                       onClick={async () => {
-                        if (processIndex === FOX_URL_INDEX && foxMode === 'telecable') {
+                        if (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') {
                           setFetchingChannel(processIndex);
                           try {
-                            const r = await fetch('/api/fox/refresh-telecable', { method: 'POST' });
+                            const r = await fetch(`/api/telecable/${processIndex}/refresh`, { method: 'POST' });
                             const j = await r.json().catch(() => ({}));
                             if (r.ok) {
                               if (j.url) updateProcess(processIndex, { m3u8: j.url });

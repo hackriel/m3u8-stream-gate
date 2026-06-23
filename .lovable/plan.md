@@ -1,103 +1,93 @@
 ## Objetivo
 
-Agregar una **tercera fuente alternativa** ("Telecable") al canal **FOX URL (pid 25)**, sin tocar nada del scraping CR actual. Si Telecable cae y `always_on` está activo, el sistema debe relogarse, traer un URL fresco y reiniciar FFmpeg automáticamente.
+1. Replicar el toggle **Telecable (VPS)** que hoy tiene FOX URL (pid 25) en estos 5 canales, como modo **alterno** (sin quitar el modo actual):
+   - Teletica URL (pid 13)
+   - TDMas 1 URL (pid 14)
+   - FUTV URL (pid 11)
+   - Canal 6 URL (pid 15)
+   - FOX+ URL (pid 24)
+2. Descubrir los `content-id` de Telecable para cada canal de forma automática (no los tengo confirmados).
+3. Arreglar el flicker del perfil de salida al pulsar **Emitir**.
 
-```text
-FOX URL (pid 25)
-├── Tab "Scraping" (actual, sale por túnel CR Pi5) ← intacto
-└── Tab "Telecable" (nuevo, sale por IP del VPS)   ← se construye
-```
+---
 
-## Alcance del piloto
+## Backend (`server.js`)
 
-Solo pid 25 (FOX). Si funciona limpio, se replica en Canal 6, Teletica, FUTV, FOX+, TDmax (tabla `TELECABLE_CONTENT_MAP` ya queda preparada para extender).
-
-## Cambios
-
-### 1. Edge function nueva: `telecable-stream`
-
-`supabase/functions/telecable-stream/index.ts`
-
-- Input: `{ content_id: 'FOX', quality?: 40 }`
-- Hace `GET /api/device-login` con `TELECABLE_DEVICE_ID` + `TELECABLE_DEVICE_PASSWORD` (env)
-- Hace `GET /api/playlist?PHPSESSID=…&quality=…`
-- Busca canal por `content_id`, devuelve:
-  ```json
-  { "url": "https://stream.srv.telecable…", "expires_at": 1782799260, "phpsessid": "…" }
+### Generalización del módulo Telecable
+- Cambiar `TELECABLE_PROCESSES = new Set(['25'])` → incluir `['11','13','14','15','24','25']`.
+- Cambiar `TELECABLE_CONTENT_MAP` de mapeo fijo a **mapeo por patrones de nombre** (resilient a cambios de content-id):
+  ```js
+  const TELECABLE_CHANNEL_MATCHERS = {
+    '11': { contentIds: ['FUTV'], namePatterns: [/futv/i] },
+    '13': { contentIds: ['TELETICA','CANAL7','TELE7'], namePatterns: [/teletica/i, /canal\s*7/i] },
+    '14': { contentIds: ['TDMAS','TDMAS1','TDMAS_1'], namePatterns: [/td\s*m[aá]s\s*1?/i] },
+    '15': { contentIds: ['CANAL6','REPRETEL6'], namePatterns: [/canal\s*6/i, /repretel/i] },
+    '24': { contentIds: ['FOXPLUS','FOX_PLUS','FOXMAS','FOX+'], namePatterns: [/fox\s*\+/i, /fox\s*plus/i, /foxm[aá]s/i] },
+    '25': { contentIds: ['FOX'], namePatterns: [/^fox$/i] },
+  };
   ```
-- 401/status:0 → `{ error: 'login_failed' }` con HTTP 502 para que el VPS sepa diferenciar de error de red.
+- Refactor `telecableLoginAndResolve(pid)`: si el `content-id` exacto no aparece en `/api/playlist`, recorre `namePatterns` contra el campo `name`/`title` de cada canal y usa el primer match. Guarda el `content-id` resuelto en `telecableState` para reusarlo.
+- Mantener compatibilidad de `TELECABLE_CONTENT_MAP` como fallback simple.
 
-### 2. `server.js` (VPS)
+### Endpoint de descubrimiento (nuevo)
+- `GET /api/telecable/channels` — fuerza un login (rate-limited) y devuelve `[{ contentId, name, quality }]` de toda la playlist. Sirve para verificar/corregir mapeos sin tener que ssh al VPS.
 
-**Estado en memoria + persistencia (replica patrón Teletica):**
-```js
-const foxSourceMode = new Map(); // '25' → 'scraping' | 'telecable'
-const TELECABLE_CONTENT_MAP = { '25': 'FOX' }; // extensible
-const TELECABLE_REFRESH_MARGIN_S = 3600;       // refresh 1h antes de expirar
-```
+### Endpoints por canal (generalizar `/api/fox/*`)
+- Renombrar internamente a `/api/telecable/:pid/source-mode` y `/api/telecable/:pid/refresh`.
+- Mantener `/api/fox/source-mode` y `/api/fox/refresh-telecable` como **alias** que llaman a los genéricos con `pid=25` (no rompe nada que ya funciona).
 
-**`/api/emit` (pid 25):**
-- Acepta `source_mode in {scraping, telecable}` y `telecable_quality` (default 40).
-- Persiste en `emission_processes.source_mode`.
-- Si `telecable`: invoca edge function, guarda URL firmado y `expires_at` en memoria (NO en DB — la firma es efímera y atada a IP), arranca FFmpeg directo sin pasar por wrapper `croute`.
+### Persistencia y auto-recovery
+- Generalizar el bloque `if (String(process_id) === '25' && isTelecableMode('25'))` en `autoRecoverChannel` a `if (isTelecableMode(process_id))`.
+- Idem en `POST /api/emit`: el bloque que resuelve URL Telecable y salta el túnel CR (`isFoxTelecable`) pasa a chequear `isTelecableMode(process_id)` para cualquier pid.
+- `wrapFfmpegSpawn` ya respeta `isTelecableMode(pid)` → false en `isViaCrTunnel`, así que sirve sin cambios.
+- Keep-alive: extender el `skipKeepAliveForTelecable` a cualquier pid en modo Telecable.
+- Persistir `source_mode` en `emission_processes` para los 5 pids nuevos (ya hay infraestructura).
 
-**Auto-recuperación (3 puntos del recovery loop existente):**
-- Si modo `telecable` y FFmpeg sale con código de error, o stall del watchdog, o quedan <30 min de firma → **forzar relogin** (nueva llamada edge function), reemplazar URL, restart FFmpeg.
-- Si edge function falla 3x seguidas (con backoff 30s): `emit_status='error'`, `emit_msg='Telecable login falló'`. El circuit breaker existente (max 6 fallos) detiene el ciclo. NO se cae a `scraping` automáticamente: el usuario elige.
+---
 
-**Refresh proactivo:**
-- Loop `setInterval(60_000)` revisa procesos con `source_mode='telecable'` activos. Si `expires_at - now < TELECABLE_REFRESH_MARGIN_S` → relogin + restart suave (sin contar como recovery).
+## Frontend (`src/components/EmisorM3U8Panel.tsx`)
 
-**FFmpeg:**
-- Mismo perfil 720p CBR 2000k 29.97fps actual.
-- Headers `User-Agent` iOS app + `Cookie: PHPSESSID=…`. (Confirmado funcional desde shell del sandbox.)
+### Hook genérico
+- Reemplazar `foxMode`/`foxTelecableInfo`/`handleFoxModeChange` por un hook reutilizable `useTelecableMode(pid, defaultMode)` que encapsule:
+  - State `mode` + setter con POST a `/api/telecable/:pid/source-mode`.
+  - Polling de `GET /api/telecable/:pid/source-mode` cada 10s.
+  - `refresh()` que llama `POST /api/telecable/:pid/refresh`.
+- Instanciar el hook una vez por canal Telecable (FUTV, Teletica, TDMas1, Canal6, FOX+, FOX).
 
-**No tocar:**
-- Wrapper `croute` / CHANNELS_VIA_PI_WG (sigue aplicando cuando modo = `scraping`).
-- `scrape-channel` edge function (sigue siendo el flujo TDMax).
+### UI por canal
+- Extraer el bloque visual actual del toggle FOX (líneas ~2035-2085) a un componente `<TelecableModeSelector pid={...} info={...} mode={...} onChange={...} onRefresh={...} alternateLabel="..." />` y reusarlo en los 6 paneles.
+- Para Teletica/Canal 6 que ya tienen toggle `oficial / scraping`, agregar **una tercera opción**: `Telecable (VPS)`. Estado se vuelve `'official' | 'scraping' | 'telecable'`.
+- Reglas de UI condicional ya existentes (mostrar/ocultar input URL, botón Obtener, badge CR) se generalizan checkeando `mode === 'telecable'` por pid.
 
-### 3. UI — `EmisorM3U8Panel.tsx`
+### Persistencia
+- `localStorage` keys: `telecableMode:<pid>` para cada uno.
+- En Supabase: usar el mismo `emission_processes.source_mode` que ya existe para los 3 canales con toggle.
 
-Dentro de la card FOX URL (pid 25):
+---
 
-```text
-┌─ Fuente ────────────────────────────┐
-│ [ Scraping ] [ Telecable ]          │ ← tabs estables, memoized
-└─────────────────────────────────────┘
+## Fix del flicker del perfil de salida
 
-Si tab = Telecable:
-  Calidad: [ 40 ▼ ]   (10, 20, 30, 40, 50)
-  Botón "Refrescar URL ahora"          (opcional, debug)
-  Badge: "🟢 Vence en 23h 14m"
-```
+- Diagnóstico: al pulsar **Emitir**, el panel resetea el `outputProfile` local momentáneamente porque el efecto que sincroniza con el servidor lee el valor antes de que el POST `/api/emit` confirme. Mientras tanto se pinta "Balanceado" (default) y luego vuelve al perfil real.
+- Fix: en el `onClick` del botón Emitir, congelar `optimisticProfile` durante la transición (`isEmitting` flag) y omitir el setter del efecto de sync cuando `isEmitting === true`. Sin cambios en backend.
 
-- Estado `foxSourceMode` (key localStorage `fox_25_source_mode`).
-- Poll `/api/fox/source-mode` cada 5s con patrón anti-overwrite (mismo de Teletica).
-- Tokens semánticos para colores (sin hardcode).
+---
 
-### 4. Memoria
+## Verificación
 
-Crear `mem://features/fox-url-telecable.md`: piloto pid 25, login VPS-direct (no CR), refresh @ expire-1h, mutex con tab Scraping (un solo modo activo).
+1. Tras desplegar al VPS y `./update.sh`:
+   - `curl http://VPS/api/telecable/channels` → revisar nombres reales y ajustar `TELECABLE_CHANNEL_MATCHERS` si algún patrón no matchea.
+   - En el dashboard, cambiar cada canal a modo Telecable y emitir → un solo FFmpeg, sin túnel CR, log `📡 Telecable URL obtenida (contentId=...)`.
+2. Click rápido en **Emitir** → el badge del perfil ya no parpadea.
 
-Actualizar `mem://index.md` con la nueva referencia.
+---
 
-## Lo que NO se construye en este piloto
+## Archivos a modificar
 
-- Replicar Telecable en otros canales (queda para fase 2 tras validar FOX).
-- Selector de URL alterna manual (Telecable siempre auto-loguea).
-- Caché de PHPSESSID compartida entre procesos (cada canal hace su login propio — son <100ms y evita interferencia).
+- `server.js` — generalización Telecable + endpoint discovery + alias FOX.
+- `src/components/EmisorM3U8Panel.tsx` — hook `useTelecableMode`, componente `<TelecableModeSelector>`, integración en 5 canales nuevos, fix flicker.
+- `.lovable/memory/features/fox-url-telecable.md` — actualizar para reflejar que ya no es exclusivo de FOX.
 
-## Detalles técnicos clave
+## Riesgos
 
-- **IP de firma**: la URL viene atada a `signature-ip`. El sandbox Lovable y el VPS tienen IPs distintas → la edge function debe correr en el contexto donde luego se consume. ✅ Cumplido: edge function corre en infra Supabase (IP estable), el FFmpeg consume desde VPS. Mientras la firma sea válida para *cualquier IP del cliente HTTP del CDN*, funciona. **Riesgo a verificar en el piloto**: si el CDN exige que el GET venga desde la misma IP que vio la API, la edge function deberá ser llamada *desde el VPS hacia el VPS* (server.js implementa el login él mismo en vez de invocar edge function). Plan B ya previsto: si en pruebas falla, mover la lógica de login a `server.js` (10 líneas, mismo `fetch`).
-- **Secrets**: `TELECABLE_DEVICE_ID`, `TELECABLE_DEVICE_PASSWORD` ya guardados.
-- **Rate limit**: máximo 1 relogin cada 20s por proceso para no parecer abuso.
-- **Logging**: prefijo `[telecable:25]` en stderr para filtrar.
-
-## Orden de implementación
-
-1. Crear edge function `telecable-stream` y probarla con curl.
-2. Wiring en `server.js` (estado + /api/emit + recovery hooks + refresh loop).
-3. UI: tabs + selector calidad + badge expiración.
-4. Memoria + README.
-5. Verificación end-to-end con FOX URL en preview.
+- **ContentIds incorrectos**: mitigado con el endpoint `/api/telecable/channels` + matcher por nombre. Si un canal no aparece en la playlist (no contratado en la cuenta secundaria), el modo Telecable falla con error claro y el usuario puede volver al modo actual.
+- **Rate-limit del login**: 1 login compartido para todos los canales (la sesión Telecable es global). Voy a deduplicar para que múltiples pids reusen el mismo `phpsessid` cuando aún no expiró.
