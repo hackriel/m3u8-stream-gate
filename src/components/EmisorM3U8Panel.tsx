@@ -1458,6 +1458,7 @@ export default function EmisorM3U8Panel() {
           output_profile: selectedProfile,
           ...(processIndex === TELETICA_URL_INDEX ? { source_mode: teleticaMode } : {}),
           ...(processIndex === CANAL6_URL_INDEX ? { source_mode: canal6Mode } : {}),
+          ...(processIndex === FOX_URL_INDEX ? { source_mode: foxMode } : {}),
           ...(isM3uFileProcess && m3uPayload ? {
             // passthrough_mode: 'transcode' → usa el perfil estándar 720p CBR 2000k
             // (mismo que Disney 7 ID 0). Resuelve el "video crudo no va bien" en Xui/IPTV.
