@@ -6359,16 +6359,24 @@ app.get('/api/fox/source-mode', (req, res) => {
   });
 });
 
+app.post('/api/fox/source-mode', (req, res) => {
+  const requested = req.body?.mode;
+  if (requested !== 'telecable' && requested !== 'scraping') {
+    return res.status(400).json({ error: 'Modo FOX inválido' });
+  }
+  const mode = setFoxSourceMode('25', requested);
+  res.json({ ok: true, mode });
+});
+
 // Forzar relogin (debug / botón "Refrescar URL ahora" del dashboard).
 // NO reinicia FFmpeg — solo actualiza el caché de URL firmada.
 app.post('/api/fox/refresh-telecable', async (req, res) => {
   try {
-    if (!isTelecableMode('25')) {
-      return res.status(400).json({ error: 'FOX URL no está en modo telecable' });
-    }
+    setFoxSourceMode('25', 'telecable');
     const st = await safeTelecableResolve('25');
     res.json({
       ok: true,
+      url: st.url,
       expires_at: st.expiresAt,
       expires_in_s: st.expiresAt ? Math.max(0, st.expiresAt - Math.floor(Date.now() / 1000)) : null,
     });
