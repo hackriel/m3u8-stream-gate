@@ -798,6 +798,8 @@ const getProxyAgent = () => undefined;
 // MISMA IP (proxychains4/SOCKS5) para mantener la sesión caliente.
 // El resultado se descarta — solo importa que el CDN vea actividad.
 const tigoKeepAliveIntervals = new Map(); // process_id → intervalId
+// Set de pids con un POST /api/emit en vuelo — evita doble spawn por doble click.
+const emitInFlight = new Set();
 
 const startTigoKeepAlive = (process_id, playlistUrl, userAgent) => {
   // Limpiar interval previo si existe (recovery/restart)
