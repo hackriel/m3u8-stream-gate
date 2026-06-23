@@ -727,11 +727,19 @@ export default function EmisorM3U8Panel() {
     sessionStorage.setItem("emisor-output-profiles", JSON.stringify(outputProfiles));
   }, [outputProfiles]);
 
+  // Marca por pid de "el usuario acaba de cambiar el perfil localmente". Sirve para
+  // ignorar updates del realtime/DB que llegan con el valor viejo y producen flicker
+  // visual al pulsar Emitir (el realtime UPDATE de is_emitting incluye output_profile
+  // del row, que aún no contiene el nuevo valor — se reescribiría el viejo encima).
+  const pendingProfileWritesRef = useRef<Record<number, number>>({});
+  const PROFILE_WRITE_GUARD_MS = 8000;
+
   const getOutputProfile = (processIndex: number): OutputProfile =>
     outputProfiles[processIndex] || getDefaultOutputProfile(processIndex);
 
   const setOutputProfile = (processIndex: number, profile: OutputProfile) => {
     setOutputProfiles((prev) => ({ ...prev, [processIndex]: profile }));
+    pendingProfileWritesRef.current[processIndex] = Date.now();
     // Sincroniza el perfil en la DB para que TODOS los dispositivos
     // (móvil, computadora, otra pestaña) vean el mismo valor que
     // realmente está usando el servidor. Sin esto, cada navegador
