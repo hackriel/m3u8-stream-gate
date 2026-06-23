@@ -3055,7 +3055,7 @@ app.post('/api/emit', async (req, res) => {
     // sesiones en Streann y desincroniza el token con la conexión FFmpeg).
     // En modo Telecable (pid 25), la URL firmada ya viene resuelta por login directo
     // desde el VPS — NO se debe scrapear vía Pi5/TDMax. Saltar el refresh JIT.
-    const isFoxTelecable = process_id === '25' && isFoxTelecableMode('25');
+    const isFoxTelecable = process_id === '25' && isTelecableMode('25');
     if (!isTigoHdmiProcess && !isFoxTelecable && PROXY_PROCESSES.has(process_id) && CHANNEL_MAP[process_id]) {
       const cached = scrapeSessionCache.get(process_id);
       const cacheAgeMs = cached?.timestamp ? Date.now() - cached.timestamp : Infinity;
