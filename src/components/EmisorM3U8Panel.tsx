@@ -2382,8 +2382,6 @@ export default function EmisorM3U8Panel() {
                   🔄 Reiniciar
                 </button>
               )}
-              {(processIndex === FOXMAS_URL_INDEX || processIndex === FOX_URL_INDEX) && process.isEmitiendo && (
-              {false && null}
             </div>
 
             {/* Always-On Toggle (excluye solo subida de archivo) */}
