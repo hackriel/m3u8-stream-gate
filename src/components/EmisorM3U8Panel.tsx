@@ -2043,59 +2043,68 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
-                {processIndex === FOX_URL_INDEX && (
-                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
-                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
-                      Fuente FOX URL
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleFoxModeChange('scraping')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          foxMode === 'scraping'
-                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
-                            : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
-                        title="Scraping TDMax + salida por túnel CR (Pi5)"
-                      >
-                        🔐 Scraping (TDMax+CR)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleFoxModeChange('telecable')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          foxMode === 'telecable'
-                            ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                            : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
-                        title="Login directo a Telecable desde el VPS (sin CR)"
-                      >
-                        📡 Telecable (VPS)
-                      </button>
-                    </div>
-                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-                      {foxMode === 'telecable'
-                        ? 'Login automático a la API de Telecable desde el VPS. URL HLS firmada se refresca proactivamente. No usa túnel CR.'
-                        : 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'}
-                    </p>
-                    {foxMode === 'telecable' && foxTelecableInfo && (
-                      <div className="mt-2 flex items-center gap-2 text-[11px]">
-                        <span className="text-muted-foreground">
-                          {foxTelecableInfo.expires_in_s !== null && foxTelecableInfo.expires_in_s > 0
-                            ? `🟢 URL vence en ${Math.floor(foxTelecableInfo.expires_in_s / 3600)}h ${Math.floor((foxTelecableInfo.expires_in_s % 3600) / 60)}m`
-                            : '⚪ Sin URL cacheada todavía'}
-                          {foxTelecableInfo.last_login_failure_count > 0 && (
-                            <span className="ml-2 text-red-400">· ⚠️ {foxTelecableInfo.last_login_failure_count} fallo(s)</span>
-                          )}
-                        </span>
+                {TELECABLE_PIDS.has(processIndex) && (() => {
+                  const tMode = telecableModes[processIndex] || 'scraping';
+                  const tInfo = telecableInfos[processIndex] || null;
+                  const isFox = processIndex === FOX_URL_INDEX;
+                  const scrapingLabel = isFox ? '🔐 Scraping (TDMax+CR)' : '🔐 Modo histórico';
+                  const scrapingHelp = isFox
+                    ? 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'
+                    : 'Usa el flujo histórico de este canal (TDMax/scraping, etc).';
+                  return (
+                    <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
+                      <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                        Fuente alterna — Telecable
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleTelecableModeChange(processIndex, 'scraping')}
+                          disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                          className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                            tMode === 'scraping'
+                              ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                              : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
+                          } disabled:opacity-60 disabled:cursor-not-allowed`}
+                          title="Usar el modo histórico del canal"
+                        >
+                          {scrapingLabel}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTelecableModeChange(processIndex, 'telecable')}
+                          disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                          className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                            tMode === 'telecable'
+                              ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                              : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
+                          } disabled:opacity-60 disabled:cursor-not-allowed`}
+                          title="Login directo a Telecable desde el VPS (sin CR)"
+                        >
+                          📡 Telecable (VPS)
+                        </button>
                       </div>
-                    )}
-                  </div>
-                )}
-                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && !(processIndex === FOX_URL_INDEX && foxMode === 'telecable') && (
+                      <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                        {tMode === 'telecable'
+                          ? 'Login automático a la API de Telecable desde el VPS. URL HLS firmada se refresca proactivamente. No usa túnel CR.'
+                          : scrapingHelp}
+                      </p>
+                      {tMode === 'telecable' && tInfo && (
+                        <div className="mt-2 flex items-center gap-2 text-[11px]">
+                          <span className="text-muted-foreground">
+                            {tInfo.expires_in_s !== null && tInfo.expires_in_s > 0
+                              ? `🟢 URL vence en ${Math.floor(tInfo.expires_in_s / 3600)}h ${Math.floor((tInfo.expires_in_s % 3600) / 60)}m`
+                              : '⚪ Sin URL cacheada todavía'}
+                            {tInfo.last_login_failure_count > 0 && (
+                              <span className="ml-2 text-red-400">· ⚠️ {tInfo.last_login_failure_count} fallo(s)</span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && !(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
