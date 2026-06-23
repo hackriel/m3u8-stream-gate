@@ -621,9 +621,15 @@ export default function EmisorM3U8Panel() {
       return 'scraping';
     }
   });
-  useEffect(() => {
-    try { localStorage.setItem('fox_25_source_mode', foxMode); } catch {}
-  }, [foxMode]);
+  const handleFoxModeChange = useCallback((mode: 'scraping' | 'telecable') => {
+    setFoxMode(mode);
+    try { localStorage.setItem('fox_25_source_mode', mode); } catch {}
+    void fetch('/api/fox/source-mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    }).catch(() => {});
+  }, []);
   const [foxTelecableInfo, setFoxTelecableInfo] = useState<{
     expires_at: number | null;
     expires_in_s: number | null;
@@ -2034,7 +2040,7 @@ export default function EmisorM3U8Panel() {
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => setFoxMode('scraping')}
+                        onClick={() => handleFoxModeChange('scraping')}
                         disabled={process.isEmitiendo || process.emitStatus === 'starting'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           foxMode === 'scraping'
@@ -2047,7 +2053,7 @@ export default function EmisorM3U8Panel() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setFoxMode('telecable')}
+                        onClick={() => handleFoxModeChange('telecable')}
                         disabled={process.isEmitiendo || process.emitStatus === 'starting'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           foxMode === 'telecable'
