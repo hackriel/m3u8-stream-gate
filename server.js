@@ -537,13 +537,14 @@ const TELECABLE_MIN_RELOGIN_INTERVAL_MS = 20_000;    // anti-abuse rate-limit
 const TELECABLE_PROCESSES = new Set(['11','13','14','15','24','25']);
 // Matchers: probamos primero content-id exacto; si no aparece en la playlist,
 // caemos a patrones por nombre. Tolerante a renombres del CDN Telecable.
+// IDs fijos confirmados por el usuario contra /api/telecable/channels.
 const TELECABLE_CHANNEL_MATCHERS = {
-  '11': { contentIds: ['FUTV'],                                  namePatterns: [/futv/i] },
-  '13': { contentIds: ['TELETICA','CANAL7','TELE7'],             namePatterns: [/teletica/i, /canal\s*7/i] },
-  '14': { contentIds: ['TDMAS','TDMAS1','TDMAS_1','TDMASUNO'],   namePatterns: [/td\s*m[aá]s\s*1?\b/i] },
-  '15': { contentIds: ['CANAL6','REPRETEL6','REPRETEL_6'],       namePatterns: [/canal\s*6/i, /repretel/i] },
-  '24': { contentIds: ['FOXPLUS','FOX_PLUS','FOXMAS','FOX+'],    namePatterns: [/fox\s*\+/i, /fox\s*plus/i, /foxm[aá]s/i] },
-  '25': { contentIds: ['FOX'],                                   namePatterns: [/^fox$/i] },
+  '11': { contentIds: ['FUTV'],      namePatterns: [/^futv$/i] },
+  '13': { contentIds: ['TELETICA7'], namePatterns: [/teletica\s*7/i] },
+  '14': { contentIds: ['TDMAS'],     namePatterns: [/^td\s*\+?$/i, /tdm[aá]s/i] },
+  '15': { contentIds: ['REPRETEL6'], namePatterns: [/repretel\s*6/i] },
+  '24': { contentIds: ['FOXPLUS'],   namePatterns: [/^fox\+$/i, /fox\s*plus/i] },
+  '25': { contentIds: ['FOX'],       namePatterns: [/^fox$/i] },
 };
 // Compat: TELECABLE_CONTENT_MAP se sigue exponiendo (algunos lugares lo leen).
 const TELECABLE_CONTENT_MAP = Object.fromEntries(
