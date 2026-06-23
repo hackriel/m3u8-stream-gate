@@ -2924,6 +2924,18 @@ app.post('/api/emit', async (req, res) => {
       output_profile = null,
       source_mode = null, // Teletica URL (13): 'official' | 'scraping'
     } = req.body;
+    // Anti-doble-emit: si llega un segundo POST /api/emit para el mismo pid
+    // mientras el primero todavía está arrancando, devolvemos 409 y NO
+    // spawneamos otro FFmpeg en paralelo (causaba dos procesos con perfiles
+    // distintos compitiendo por la misma salida HLS).
+    const _dedupePid = String(rawProcessId);
+    if (emitInFlight.has(_dedupePid)) {
+      sendLog(_dedupePid, 'warn', `⏸️ /api/emit ignorado: ya hay una solicitud en curso para este pid`);
+      return res.status(409).json({ error: 'Emit en curso, ignorando duplicado' });
+    }
+    emitInFlight.add(_dedupePid);
+    res.on('finish', () => emitInFlight.delete(_dedupePid));
+    res.on('close', () => emitInFlight.delete(_dedupePid));
     // Normalizar el modo. Compat: si llega `passthrough: true` sin `passthrough_mode`,
     // asumimos 'copy' (comportamiento histórico). Si llega 'transcode', desactivamos
     // el flag para que NO se ejecute el bloque de strip de transcoding.
