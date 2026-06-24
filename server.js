@@ -3449,6 +3449,11 @@ app.post('/api/emit', async (req, res) => {
         '-fflags', '+genpts'
       );
       sendLog(process_id, 'info', `🛡️ RANDOM Disney 7 HLS resiliente: max_reload=1000, hold=1000`);
+    } else if (isTelecableSource) {
+      // Telecable: NO agregamos -http_seekable, -max_reload ni +genpts.
+      // Exactamente el mismo perfil minimal con el que Canal 8/2 funcionan
+      // sin colgarse. El demuxer HLS interno maneja todo.
+      sendLog(process_id, 'info', `🛡️ Telecable HLS: perfil minimal (igual que Canal 8/2)`);
     } else if (isManualProcess || needsTdmaxLikePinning) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
@@ -3469,7 +3474,9 @@ app.post('/api/emit', async (req, res) => {
     // Los reloads deben mitigarse fijando la variante HLS final antes de FFmpeg,
     // no dejando el master playlist completo al analizador interno.
     // ID 19 (RANDOM Disney 7) hereda -re de Disney 7 para pacing HLS correcto.
-    const usesReFlag = RE_FLAG_PROCESSES.has(String(process_id)) || String(process_id) === '19';
+    // Telecable NUNCA usa -re: el CDN ya pacing por segmentos y -re causa
+    // que FFmpeg se quede esperando datos que el CDN no envía hasta EOF.
+    const usesReFlag = !isTelecableSource && (RE_FLAG_PROCESSES.has(String(process_id)) || String(process_id) === '19');
     if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
       sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
