@@ -707,9 +707,11 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
 }
 
 // Wrapper que registra fallo + log. Usado por /api/emit y autoRecoverChannel.
-async function safeTelecableResolve(processId) {
+// `contentIdOverride` permite que el frontend pase un content-id dinámico
+// (caso Disney 7 pid 0, dropdown del usuario).
+async function safeTelecableResolve(processId, contentIdOverride = null) {
   try {
-    const st = await telecableLoginAndResolve(processId);
+    const st = await telecableLoginAndResolve(processId, contentIdOverride);
     sendLog(processId, 'success',
       `📡 Telecable URL obtenida (contentId=${st.contentId}, quality=${st.quality}, expira en ${
         st.expiresAt ? Math.floor((st.expiresAt - Date.now() / 1000) / 3600) + 'h' : '?'
