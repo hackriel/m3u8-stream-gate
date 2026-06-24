@@ -2031,7 +2031,9 @@ export default function EmisorM3U8Panel() {
                           {telecableChannelsLoading
                             ? 'Cargando lista Telecable...'
                             : telecableChannels.length === 0
-                              ? '(sin canales — pulsá Refrescar)'
+                              ? (telecableChannelsError
+                                  ? '(sin conexión al VPS — pulsá 🔄)'
+                                  : '(sin canales — pulsá Refrescar)')
                               : '— Elegí un canal —'}
                         </option>
                         {telecableChannels.map(c => (
@@ -2050,8 +2052,10 @@ export default function EmisorM3U8Panel() {
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                       {telecableChannels.length > 0
-                        ? `${telecableChannels.length} canales disponibles. Al pulsar Scrapear, el VPS resuelve la URL HLS firmada de Telecable.`
-                        : 'La lista se carga automáticamente al entrar a este tab.'}
+                        ? `${telecableChannels.length} canales disponibles. Elegí uno y pulsá Emitir HLS — el VPS resuelve la URL Telecable automáticamente (no hace falta Scrapear).`
+                        : telecableChannelsError
+                          ? `No se pudo cargar la lista (${telecableChannelsError}). Esto es normal en el preview de Lovable: el endpoint /api/telecable/channels solo existe en el VPS de producción. En el VPS funciona normal.`
+                          : 'La lista se carga automáticamente al entrar a este tab.'}
                     </p>
                   </div>
                 )}
