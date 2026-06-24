@@ -733,6 +733,55 @@ export default function EmisorM3U8Panel() {
   const [m3uPayloads, setM3uPayloads] = useState<Record<number, M3uPayload>>({});
   // Texto pegado del contenido M3U (RANDOM Disney 7) — alternativa a subir archivo
   const [m3uPasteText, setM3uPasteText] = useState<Record<number, string>>({});
+
+  // ── Disney 7 (pid 0): selector "Oficial | Telecable" + dropdown de canales.
+  //    'official' = flujo histórico (archivo M3U pegado, perfil VLC-like).
+  //    'telecable' = login Telecable + dropdown de canales (TUDN, ESPN, etc.).
+  type Disney7Mode = 'official' | 'telecable';
+  const [disney7Mode, setDisney7Mode] = useState<Disney7Mode>(() => {
+    try {
+      const v = localStorage.getItem('disney7_0_source_mode');
+      return v === 'telecable' ? 'telecable' : 'official';
+    } catch { return 'official'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('disney7_0_source_mode', disney7Mode); } catch {}
+    setTelecableModes(prev => ({ ...prev, [0]: disney7Mode === 'telecable' ? 'telecable' : 'scraping' }));
+  }, [disney7Mode]);
+  type TelecableChannel = { contentId: string; name: string | null };
+  const [telecableChannels, setTelecableChannels] = useState<TelecableChannel[]>([]);
+  const [telecableChannelsLoading, setTelecableChannelsLoading] = useState(false);
+  const [disney7ContentId, setDisney7ContentId] = useState<string>(() => {
+    try { return localStorage.getItem('disney7_0_telecable_content_id') || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('disney7_0_telecable_content_id', disney7ContentId); } catch {}
+  }, [disney7ContentId]);
+  const loadTelecableChannels = useCallback(async (force = false) => {
+    setTelecableChannelsLoading(true);
+    try {
+      const r = await fetch(`/api/telecable/channels${force ? '?force=1' : ''}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      if (Array.isArray(j.channels)) {
+        const list: TelecableChannel[] = j.channels
+          .filter((c: any) => c && c.contentId)
+          .map((c: any) => ({ contentId: String(c.contentId), name: c.name || c.contentId }));
+        list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        setTelecableChannels(list);
+      }
+    } catch (e: any) {
+      toast.error(`No se pudo cargar lista Telecable: ${e?.message || e}`);
+    } finally {
+      setTelecableChannelsLoading(false);
+    }
+  }, []);
+  // Cargar la lista cuando el usuario entra al tab Disney 7 en modo telecable.
+  useEffect(() => {
+    if (activeTab === '0' && disney7Mode === 'telecable' && telecableChannels.length === 0 && !telecableChannelsLoading) {
+      loadTelecableChannels(false);
+    }
+  }, [activeTab, disney7Mode, telecableChannels.length, telecableChannelsLoading, loadTelecableChannels]);
   // Modo de salida para procesos M3U file (RANDOM Disney 7).
   // 'copy' = -c copy puro · 'smart' = copy compatible con fallback · 'transcode' = perfil estándar 2000k
   // RANDOM Disney 7 (ID 19) ahora usa un único modo "rawvideo": video crudo
