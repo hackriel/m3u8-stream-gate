@@ -426,7 +426,7 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26']);
+const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 // FUTV (11), FUTV ALTERNO (17) y FUTV SRT (18) comparten slug 'futv' a propósito:
 // los 3 emiten al MISMO destino HLS local (/live/futv/playlist.m3u8) por métodos distintos
@@ -439,7 +439,7 @@ const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '
 // Disney 7 (ID 0) — M3U file passthrough con perfil VLC-like — también emite al slug 'Disney7'.
 // FOX+ URL (24), FOX+ SRT (22) y FOX+ ALTERNO (26) comparten slug 'foxmas' → mutex automático por slug HLS.
 // FOX URL (25) y FOX SRT (23) comparten slug 'fox' → mutex automático por slug HLS.
-const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox', '24': 'foxmas', '25': 'fox', '26': 'foxmas' };
+const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox', '24': 'foxmas', '25': 'fox', '26': 'foxmas', '27': 'Canal8', '28': 'Canal2' };
 
 // ───────────────────────────────────────────────────────────────────────
 // TELETICA URL (ID 13) — selector de fuente: 'official' | 'scraping'
