@@ -814,7 +814,7 @@ export default function EmisorM3U8Panel() {
   // visual al pulsar Emitir (el realtime UPDATE de is_emitting incluye output_profile
   // del row, que aún no contiene el nuevo valor — se reescribiría el viejo encima).
   const pendingProfileWritesRef = useRef<Record<number, number>>({});
-  const PROFILE_WRITE_GUARD_MS = 8000;
+  const PROFILE_WRITE_GUARD_MS = 60000;
 
   const getOutputProfile = (processIndex: number): OutputProfile =>
     outputProfiles[processIndex] || getDefaultOutputProfile(processIndex);
