@@ -2231,7 +2231,7 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
-                {TELECABLE_PIDS.has(processIndex) && (() => {
+                {TELECABLE_PIDS.has(processIndex) && !isDisney7Tab && !isTelecableOnlyTab && (() => {
                   const tMode = telecableModes[processIndex] || 'scraping';
                   const tInfo = telecableInfos[processIndex] || null;
                   const isFox = processIndex === FOX_URL_INDEX;
