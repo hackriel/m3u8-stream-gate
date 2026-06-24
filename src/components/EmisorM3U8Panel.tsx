@@ -277,6 +277,8 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "FOX+ URL", scrapeFn: "scrape-channel", channelId: "6a10a6a2350cb5151ab6ca8c", fetchLabel: "🔄 FOX+" },
   { name: "FOX URL", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 FOX" },
   { name: "FOX+ ALTERNO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer de URL" },
+  { name: "Canal 8 URL", scrapeFn: null, channelId: null, fetchLabel: "📡 Telecable" },
+  { name: "Canal 2 URL", scrapeFn: null, channelId: null, fetchLabel: "📡 Telecable" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
