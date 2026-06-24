@@ -692,7 +692,9 @@ export default function EmisorM3U8Panel() {
   }, [TELECABLE_PIDS]);
 
   // ── Salida CR vía Pi5 (WireGuard) — set + poll de health del túnel.
-  const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([15, 24, 25]), []);
+  // Canal 6 (15) salió del túnel CR: ahora usa Telecable directo desde VPS,
+  // mismo flujo limpio que Canal 8 (27) / Canal 2 (28).
+  const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([24, 25]), []);
   const [crTunnelHealth, setCrTunnelHealth] = useState<{ wg_up: boolean; cr_ip: string | null }>({
     wg_up: false,
     cr_ip: null,
