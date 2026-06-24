@@ -628,7 +628,9 @@ export default function EmisorM3U8Panel() {
   // pids 27/28 (Canal 8 / Canal 2 URL) son TELECABLE-only (sin toggle).
   const TELECABLE_PIDS = useMemo(() => new Set<number>([0, 11, 13, 14, 15, 24, 25, 27, 28]), []);
   // pids cuyo único modo permitido es TELECABLE (sin selector visible).
-  const TELECABLE_ONLY_PIDS = useMemo(() => new Set<number>([27, 28]), []);
+  // 15 (Canal 6 URL) entra acá: el flujo histórico TDMax+Pi5 quedó descartado,
+  // ahora se resuelve igual que Canal 8/Canal 2 (Telecable directo desde VPS).
+  const TELECABLE_ONLY_PIDS = useMemo(() => new Set<number>([15, 27, 28]), []);
   type TelecableMode = 'scraping' | 'telecable';
   type TelecableInfo = { expires_at: number | null; expires_in_s: number | null; last_login_failure_count: number } | null;
   const [telecableModes, setTelecableModes] = useState<Record<number, TelecableMode>>(() => {
@@ -636,8 +638,8 @@ export default function EmisorM3U8Panel() {
     for (const pid of [0, 11, 13, 14, 15, 24, 25, 27, 28]) {
       try {
         const v = localStorage.getItem(`telecable_${pid}_source_mode`);
-        // Canal 8 / Canal 2 son telecable-only.
-        const forceTelecable = pid === 27 || pid === 28;
+        // Canal 6 (15) / Canal 8 (27) / Canal 2 (28) son telecable-only.
+        const forceTelecable = pid === 15 || pid === 27 || pid === 28;
         init[pid] = (forceTelecable || v === 'telecable') ? 'telecable' : 'scraping';
       } catch { init[pid] = 'scraping'; }
     }
@@ -690,7 +692,9 @@ export default function EmisorM3U8Panel() {
   }, [TELECABLE_PIDS]);
 
   // ── Salida CR vía Pi5 (WireGuard) — set + poll de health del túnel.
-  const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([15, 24, 25]), []);
+  // Canal 6 (15) salió del túnel CR: ahora usa Telecable directo desde VPS,
+  // mismo flujo limpio que Canal 8 (27) / Canal 2 (28).
+  const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([24, 25]), []);
   const [crTunnelHealth, setCrTunnelHealth] = useState<{ wg_up: boolean; cr_ip: string | null }>({
     wg_up: false,
     cr_ip: null,
@@ -814,7 +818,7 @@ export default function EmisorM3U8Panel() {
   // visual al pulsar Emitir (el realtime UPDATE de is_emitting incluye output_profile
   // del row, que aún no contiene el nuevo valor — se reescribiría el viejo encima).
   const pendingProfileWritesRef = useRef<Record<number, number>>({});
-  const PROFILE_WRITE_GUARD_MS = 8000;
+  const PROFILE_WRITE_GUARD_MS = 60000;
 
   const getOutputProfile = (processIndex: number): OutputProfile =>
     outputProfiles[processIndex] || getDefaultOutputProfile(processIndex);
@@ -2211,46 +2215,9 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
-                {processIndex === CANAL6_URL_INDEX && (
-                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
-                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
-                      Fuente Canal 6
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setCanal6Mode('official')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          canal6Mode === 'official'
-                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                            : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40'
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
-                        title="Pegá tu propia URL (sin scraping). El FFmpeg igual sale por IP CR vía Pi5."
-                      >
-                        🏛️ Oficial (URL pegada)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCanal6Mode('scraping')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          canal6Mode === 'scraping'
-                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
-                            : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
-                        title="Login TDMax + token de 60s (flujo histórico)"
-                      >
-                        🔐 Scraping (TDMax)
-                      </button>
-                    </div>
-                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-                      {canal6Mode === 'official'
-                        ? 'Usá la URL que pegues en el input. Sin login, sin scraping. El consumo igual sale por IP de Costa Rica vía Pi5.'
-                        : 'Scraping TDMax (cuenta info@media.cr) + token de 60s. El servidor renueva automáticamente.'}
-                    </p>
-                  </div>
-                )}
+                {/* Canal 6 URL (15) es Telecable-only: el toggle Oficial/Scraping
+                    quedó descartado junto con la salida CR vía Pi5. Ver
+                    TELECABLE_ONLY_PIDS arriba. */}
                 {TELECABLE_PIDS.has(processIndex) && !isDisney7Tab && !isTelecableOnlyTab && (() => {
                   const tMode = telecableModes[processIndex] || 'scraping';
                   const tInfo = telecableInfos[processIndex] || null;
