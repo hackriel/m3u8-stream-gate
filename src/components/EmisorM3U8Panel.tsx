@@ -1557,14 +1557,18 @@ export default function EmisorM3U8Panel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          source_m3u8: process.m3u8,
+          source_m3u8: process.m3u8 || '',
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString(),
           output_profile: selectedProfile,
           // Telecable gana sobre el modo histórico cuando está activo. Para
           // los pids no-Telecable, se mantiene la lógica original (teletica/canal6).
           ...(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable'
-            ? { source_mode: 'telecable' as const }
+            ? {
+                source_mode: 'telecable' as const,
+                ...(processIndex === 0 && disney7ContentId ? { telecable_content_id: disney7ContentId } : {}),
+              }
+            : processIndex === 0 ? { source_mode: 'scraping' as const }
             : processIndex === TELETICA_URL_INDEX ? { source_mode: teleticaMode }
             : processIndex === CANAL6_URL_INDEX ? { source_mode: canal6Mode }
             : processIndex === FOX_URL_INDEX ? { source_mode: foxMode }
