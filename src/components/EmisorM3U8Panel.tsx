@@ -1415,8 +1415,19 @@ export default function EmisorM3U8Panel() {
 
     // Procesos M3U8 -> RTMP o HLS local
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
-    const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex);
+    // Disney 7 (pid 0) en modo Telecable NO usa archivo M3U — usa contentId del dropdown.
+    const isDisney7Telecable = processIndex === 0 && disney7Mode === 'telecable';
+    const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex) && !isDisney7Telecable;
     const m3uPayload = isM3uFileProcess ? m3uPayloads[processIndex] : null;
+
+    // Disney 7 Telecable: validar que el usuario eligió un canal del dropdown
+    if (isDisney7Telecable && !disney7ContentId) {
+      updateProcess(processIndex, {
+        emitStatus: "error",
+        emitMsg: "Seleccioná un canal del dropdown Telecable primero",
+      });
+      return;
+    }
 
     // RANDOM Disney 7 (19) requiere que se haya cargado un archivo M3U
     if (isM3uFileProcess && !m3uPayload) {
