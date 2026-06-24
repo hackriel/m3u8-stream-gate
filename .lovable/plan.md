@@ -1,93 +1,72 @@
-## Objetivo
 
-1. Replicar el toggle **Telecable (VPS)** que hoy tiene FOX URL (pid 25) en estos 5 canales, como modo **alterno** (sin quitar el modo actual):
-   - Teletica URL (pid 13)
-   - TDMas 1 URL (pid 14)
-   - FUTV URL (pid 11)
-   - Canal 6 URL (pid 15)
-   - FOX+ URL (pid 24)
-2. Descubrir los `content-id` de Telecable para cada canal de forma automática (no los tengo confirmados).
-3. Arreglar el flicker del perfil de salida al pulsar **Emitir**.
+## 1. Nuevos tabs "Canal 8 URL" y "Canal 2 URL" (solo Telecable)
 
----
+- Subir `NUM_PROCESSES` de 27 a 29.
+- IDs nuevos:
+  - `CANAL8_URL_INDEX = 27` → contentId `MULTIMEDIOS` ("MULTIMEDIOS"), slug HLS `Canal8`.
+  - `CANAL2_URL_INDEX = 28` → contentId `CDR` ("CDR"), slug HLS `Canal2`.
+- Como son canales **solo Telecable**, no se muestra el toggle "scraping vs telecable" — el modo queda fijado en `telecable` y se oculta el bloque de fuente alterna (igual que un canal normal pero sin opción de cambiar).
+- URL m3u8 para compartir (igual que los demás):
+  - Canal 8: `http://167.17.69.116:3001/live/Canal8/playlist.m3u8`
+  - Canal 2: `http://167.17.69.116:3001/live/Canal2/playlist.m3u8`
 
-## Backend (`server.js`)
+### Cambios en código
+- `EmisorM3U8Panel.tsx`:
+  - `NUM_PROCESSES = 29`, agregar `CANAL8_URL_INDEX`, `CANAL2_URL_INDEX`.
+  - Agregar entradas en `CHANNEL_CONFIGS`, `HLS_OUTPUT_PROCESSES`, mapa `hlsSlugs`, `TELECABLE_PIDS` (set base y array de defaults `localStorage`), default `telecableModes` = `'telecable'` para estos pids.
+  - Forzar `telecable` (no permitir cambiar) en el bloque de selector y en el envío de `source_mode` al backend.
+- `server.js`:
+  - `TELECABLE_PROCESSES` += `'27','28'`.
+  - `TELECABLE_CHANNEL_MATCHERS['27'] = { contentIds: ['MULTIMEDIOS'], namePatterns: [/multimedios/i] }`.
+  - `TELECABLE_CHANNEL_MATCHERS['28'] = { contentIds: ['CDR'], namePatterns: [/^cdr$/i] }`.
+  - `HLS_OUTPUT_PROCESSES.add('27','28')`.
+  - `HLS_SLUG_MAP['27'] = 'Canal8'`, `HLS_SLUG_MAP['28'] = 'Canal2'`.
+  - Agregar labels en los 2 `channelLabels` (líneas 3828 y 7015–7017).
 
-### Generalización del módulo Telecable
-- Cambiar `TELECABLE_PROCESSES = new Set(['25'])` → incluir `['11','13','14','15','24','25']`.
-- Cambiar `TELECABLE_CONTENT_MAP` de mapeo fijo a **mapeo por patrones de nombre** (resilient a cambios de content-id):
-  ```js
-  const TELECABLE_CHANNEL_MATCHERS = {
-    '11': { contentIds: ['FUTV'], namePatterns: [/futv/i] },
-    '13': { contentIds: ['TELETICA','CANAL7','TELE7'], namePatterns: [/teletica/i, /canal\s*7/i] },
-    '14': { contentIds: ['TDMAS','TDMAS1','TDMAS_1'], namePatterns: [/td\s*m[aá]s\s*1?/i] },
-    '15': { contentIds: ['CANAL6','REPRETEL6'], namePatterns: [/canal\s*6/i, /repretel/i] },
-    '24': { contentIds: ['FOXPLUS','FOX_PLUS','FOXMAS','FOX+'], namePatterns: [/fox\s*\+/i, /fox\s*plus/i, /foxm[aá]s/i] },
-    '25': { contentIds: ['FOX'], namePatterns: [/^fox$/i] },
-  };
-  ```
-- Refactor `telecableLoginAndResolve(pid)`: si el `content-id` exacto no aparece en `/api/playlist`, recorre `namePatterns` contra el campo `name`/`title` de cada canal y usa el primer match. Guarda el `content-id` resuelto en `telecableState` para reusarlo.
-- Mantener compatibilidad de `TELECABLE_CONTENT_MAP` como fallback simple.
+## 2. Canal 6: cambiar de `.ts` passthrough a `.m3u8`
 
-### Endpoint de descubrimiento (nuevo)
-- `GET /api/telecable/channels` — fuerza un login (rate-limited) y devuelve `[{ contentId, name, quality }]` de toda la playlist. Sirve para verificar/corregir mapeos sin tener que ssh al VPS.
+- El usuario ya tiene URL `.ts` (endpoint `/canal6.ts`). Como los demás canales se comparten como `.m3u8`, vamos a:
+  - **Mantener** el endpoint `/canal6.ts` por compatibilidad temporal (no romper XUI existentes) pero
+  - Mostrar como URL principal compartible en el UI: `http://167.17.69.116:3001/live/Canal6/playlist.m3u8` (ya está así para pid 15 en `hlsSlugs`). Esto ya es el comportamiento default actual — verifico que no haya nada que sobrescriba a `.ts` en el UI; si lo hay se quita.
+- Confirmar que `CANAL6_URL_INDEX` arranca en modo `telecable` por default (como pediste, "ya sabes el contentId de telecable"): cambiar default a `telecable` y `TELECABLE_CHANNEL_MATCHERS['15']` ya tiene `REPRETEL6`, OK.
 
-### Endpoints por canal (generalizar `/api/fox/*`)
-- Renombrar internamente a `/api/telecable/:pid/source-mode` y `/api/telecable/:pid/refresh`.
-- Mantener `/api/fox/source-mode` y `/api/fox/refresh-telecable` como **alias** que llaman a los genéricos con `pid=25` (no rompe nada que ya funciona).
+## 3. Disney 7 (ID 0): nuevo modo "Telecable" con dropdown de canales
 
-### Persistencia y auto-recovery
-- Generalizar el bloque `if (String(process_id) === '25' && isTelecableMode('25'))` en `autoRecoverChannel` a `if (isTelecableMode(process_id))`.
-- Idem en `POST /api/emit`: el bloque que resuelve URL Telecable y salta el túnel CR (`isFoxTelecable`) pasa a chequear `isTelecableMode(process_id)` para cualquier pid.
-- `wrapFfmpegSpawn` ya respeta `isTelecableMode(pid)` → false en `isViaCrTunnel`, así que sirve sin cambios.
-- Keep-alive: extender el `skipKeepAliveForTelecable` a cualquier pid en modo Telecable.
-- Persistir `source_mode` en `emission_processes` para los 5 pids nuevos (ya hay infraestructura).
+Hoy Disney 7 (ID 0) es un passthrough de archivo M3U pegado por el usuario, slug HLS `Disney7`. Vamos a agregar un selector arriba del input:
 
----
+- **Oficial** (default): el flujo actual exactamente igual (archivo M3U + perfil VLC-like).
+- **Telecable**: muestra un `<select>` (dropdown) poblado por `GET /api/telecable/channels` (que ya existe) listando todas las señales `{ contentId, name }`. El usuario elige (ej. "TUDN"), oprime "Scrapear", el backend hace login Telecable y devuelve la URL HLS firmada. Se emite al **mismo slug `Disney7`** (la URL pública para compartir no cambia).
 
-## Frontend (`src/components/EmisorM3U8Panel.tsx`)
+### Backend (`server.js`)
+- Agregar pid `'0'` a `TELECABLE_PROCESSES` como pid especial:
+  - `TELECABLE_CHANNEL_MATCHERS['0']` no se fija — el contentId viene dinámico desde el front (override).
+  - Nuevo endpoint `POST /api/telecable/0/resolve` con body `{ contentId }` que llama `telecableLoginAndResolve(0, contentId)` y devuelve `{ success, url }`.
+  - En el `start` handler, cuando `process_id === 0` y `source_mode === 'telecable'`, leer `telecable_contentId` del body, pasarlo a `telecableLoginAndResolve` y arrancar FFmpeg HLS hacia slug `Disney7` con el mismo perfil que Disney 7 SRT (re-encode normal — no el VLC M3U-file passthrough).
+- Mutex: `Disney7` slug ya está compartido entre IDs 0/16/19. El mutex existente sigue funcionando — al arrancar Disney 7 en modo Telecable se cierran los otros 2 automáticamente. ✅ Sin conflicto adicional.
 
-### Hook genérico
-- Reemplazar `foxMode`/`foxTelecableInfo`/`handleFoxModeChange` por un hook reutilizable `useTelecableMode(pid, defaultMode)` que encapsule:
-  - State `mode` + setter con POST a `/api/telecable/:pid/source-mode`.
-  - Polling de `GET /api/telecable/:pid/source-mode` cada 10s.
-  - `refresh()` que llama `POST /api/telecable/:pid/refresh`.
-- Instanciar el hook una vez por canal Telecable (FUTV, Teletica, TDMas1, Canal6, FOX+, FOX).
+### Frontend (`EmisorM3U8Panel.tsx`)
+- Para `processIndex === 0`, mostrar bloque "Modo Disney 7": botones **Oficial** | **Telecable**.
+- Si Telecable: ocultar el input de archivo M3U y mostrar `<select>` con channels (cargados al cambiar a modo Telecable o al abrir el tab) + botón "🔄 Refrescar lista". Guardar `contentId` elegido en local state y enviarlo en el `start` payload.
+- Si Oficial: UI actual sin cambios.
+- Persistir modo en `localStorage` con key `disney7_0_source_mode`.
 
-### UI por canal
-- Extraer el bloque visual actual del toggle FOX (líneas ~2035-2085) a un componente `<TelecableModeSelector pid={...} info={...} mode={...} onChange={...} onRefresh={...} alternateLabel="..." />` y reusarlo en los 6 paneles.
-- Para Teletica/Canal 6 que ya tienen toggle `oficial / scraping`, agregar **una tercera opción**: `Telecable (VPS)`. Estado se vuelve `'official' | 'scraping' | 'telecable'`.
-- Reglas de UI condicional ya existentes (mostrar/ocultar input URL, botón Obtener, badge CR) se generalizan checkeando `mode === 'telecable'` por pid.
+## 4. Layout de tabs: filas de 10 en desktop, scroll horizontal en mobile
 
-### Persistencia
-- `localStorage` keys: `telecableMode:<pid>` para cada uno.
-- En Supabase: usar el mismo `emission_processes.source_mode` que ya existe para los 3 canales con toggle.
+En `TabsList` (línea 2680):
+```text
+mobile: inline-flex flex-nowrap min-w-max (scroll horizontal — se mantiene)
+desktop (md:+): grid grid-cols-10 gap-1 min-w-0
+```
 
----
+Cambio concreto: reemplazar las clases md de `TabsList` por `md:grid md:grid-cols-10 md:gap-1` (en vez de `md:flex-wrap`), y quitar `md:justify-center` del wrapper para que el grid ocupe todo el ancho disponible. El tab UPTIME y los demás se insertan en orden y wrapean a la siguiente fila a partir del 11.
 
-## Fix del flicker del perfil de salida
+## Detalles técnicos
 
-- Diagnóstico: al pulsar **Emitir**, el panel resetea el `outputProfile` local momentáneamente porque el efecto que sincroniza con el servidor lee el valor antes de que el POST `/api/emit` confirme. Mientras tanto se pinta "Balanceado" (default) y luego vuelve al perfil real.
-- Fix: en el `onClick` del botón Emitir, congelar `optimisticProfile` durante la transición (`isEmitting` flag) y omitir el setter del efecto de sync cuando `isEmitting === true`. Sin cambios en backend.
+- **Mutex**: ningún slug nuevo colisiona — `Canal8` y `Canal2` son inéditos; Disney 7 Telecable reusa `Disney7` que ya tiene mutex multi-pid funcionando.
+- **Recovery**: para pid 0 en modo Telecable, el auto-recovery debe re-resolver la URL usando el `contentId` cacheado en `telecableState.get('0')` (ya lo hace `telecableLoginAndResolve` por la lógica de `cached.contentId`). No requiere cambios adicionales.
+- **Memoria**: actualizar `mem://index.md` y `.lovable/memory/` con notas sobre Canal 8/Canal 2 (Telecable-only) y Disney 7 dropdown Telecable.
+- **No tocar**: `pi5-cr-gateway`, edge functions, output-profiles.json.
 
----
+## Confirmación necesaria
 
-## Verificación
-
-1. Tras desplegar al VPS y `./update.sh`:
-   - `curl http://VPS/api/telecable/channels` → revisar nombres reales y ajustar `TELECABLE_CHANNEL_MATCHERS` si algún patrón no matchea.
-   - En el dashboard, cambiar cada canal a modo Telecable y emitir → un solo FFmpeg, sin túnel CR, log `📡 Telecable URL obtenida (contentId=...)`.
-2. Click rápido en **Emitir** → el badge del perfil ya no parpadea.
-
----
-
-## Archivos a modificar
-
-- `server.js` — generalización Telecable + endpoint discovery + alias FOX.
-- `src/components/EmisorM3U8Panel.tsx` — hook `useTelecableMode`, componente `<TelecableModeSelector>`, integración en 5 canales nuevos, fix flicker.
-- `.lovable/memory/features/fox-url-telecable.md` — actualizar para reflejar que ya no es exclusivo de FOX.
-
-## Riesgos
-
-- **ContentIds incorrectos**: mitigado con el endpoint `/api/telecable/channels` + matcher por nombre. Si un canal no aparece en la playlist (no contratado en la cuenta secundaria), el modo Telecable falla con error claro y el usuario puede volver al modo actual.
-- **Rate-limit del login**: 1 login compartido para todos los canales (la sesión Telecable es global). Voy a deduplicar para que múltiples pids reusen el mismo `phpsessid` cuando aún no expiró.
+Antes de implementar: ¿el modo Telecable de Disney 7 debe usar el **mismo perfil de encoding** que Disney 7 SRT (normal 720p CBR 2000k), o querés mantener el perfil VLC-like del modo Oficial? Por defecto voy con **normal** (mejor para HLS Telecable firmada). Avisame si preferís otra cosa.
