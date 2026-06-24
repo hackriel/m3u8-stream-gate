@@ -17,7 +17,7 @@ import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 27;
+const NUM_PROCESSES = 29;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
@@ -36,6 +36,8 @@ const FOX_SRT_INDEX = 23;    // FOX SRT:  ingest SRT desde Pi5 por puerto 9006
 const FOXMAS_URL_INDEX = 24; // FOX+ URL: scraping TDMax vía edge function (mismo patrón que TELETICA URL)
 const FOX_URL_INDEX = 25;    // FOX URL: scraping TDMax vía edge function (canal FOX, mismo patrón que FOX+ URL)
 const FOXMAS_ALTERNO_INDEX = 26; // FOX+ ALTERNO: URL eventual pegada (mismo patrón que FUTV ALTERNO, slug 'foxmas')
+const CANAL8_URL_INDEX = 27; // Canal 8 URL: TELECABLE-only (contentId MULTIMEDIOS), slug HLS Canal8
+const CANAL2_URL_INDEX = 28; // Canal 2 URL: TELECABLE-only (contentId CDR), slug HLS Canal2
 
 // Procesos que usan la cuenta TDMax 'pi' (info@media.cr) en vez de la principal.
 // Debe coincidir con PI_ACCOUNT_PROCESSES en server.js.
@@ -121,7 +123,7 @@ const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 19]);
 // Procesos que emiten HLS local (sin RTMP)
 // ID 0 (Disney 7) ahora emite HLS al slug 'Disney7' (igual que RANDOM Disney 7).
 // Disney 8 (ID 10) NO está aquí: usa RTMP destino manual pegado por el usuario.
-const HLS_OUTPUT_PROCESSES = new Set([0, FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX, FOXMAS_SRT_INDEX, FOX_SRT_INDEX, FOXMAS_URL_INDEX, FOX_URL_INDEX, FOXMAS_ALTERNO_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([0, FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX, FOXMAS_SRT_INDEX, FOX_SRT_INDEX, FOXMAS_URL_INDEX, FOX_URL_INDEX, FOXMAS_ALTERNO_INDEX, CANAL8_URL_INDEX, CANAL2_URL_INDEX]);
 // Procesos que reciben SRT desde OBS (entrada manual interna)
 const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX, FUTV_SRT_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX, FOXMAS_SRT_INDEX, FOX_SRT_INDEX]);
 // Procesos eventuales que aceptan URL pegada del usuario y necesitan scraping dinámico
@@ -275,6 +277,8 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "FOX+ URL", scrapeFn: "scrape-channel", channelId: "6a10a6a2350cb5151ab6ca8c", fetchLabel: "🔄 FOX+" },
   { name: "FOX URL", scrapeFn: "scrape-channel", channelId: "664237788f085ac1f2a15f81", fetchLabel: "🔄 FOX" },
   { name: "FOX+ ALTERNO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer de URL" },
+  { name: "Canal 8 URL", scrapeFn: null, channelId: null, fetchLabel: "📡 Telecable" },
+  { name: "Canal 2 URL", scrapeFn: null, channelId: null, fetchLabel: "📡 Telecable" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -620,15 +624,21 @@ export default function EmisorM3U8Panel() {
   // ── TELECABLE: modo alterno por pid (FUTV/Teletica/TDMas1/Canal6/FOX+/FOX).
   //    'telecable' = login directo a la API de Telecable desde el VPS (sin túnel CR).
   //    'scraping'  = flujo histórico del canal (TDMax+Pi5 o lo que aplique).
-  const TELECABLE_PIDS = useMemo(() => new Set<number>([11, 13, 14, 15, 24, 25]), []);
+  // pid 0 (Disney 7) usa selector dedicado "Oficial | Telecable" con dropdown.
+  // pids 27/28 (Canal 8 / Canal 2 URL) son TELECABLE-only (sin toggle).
+  const TELECABLE_PIDS = useMemo(() => new Set<number>([0, 11, 13, 14, 15, 24, 25, 27, 28]), []);
+  // pids cuyo único modo permitido es TELECABLE (sin selector visible).
+  const TELECABLE_ONLY_PIDS = useMemo(() => new Set<number>([27, 28]), []);
   type TelecableMode = 'scraping' | 'telecable';
   type TelecableInfo = { expires_at: number | null; expires_in_s: number | null; last_login_failure_count: number } | null;
   const [telecableModes, setTelecableModes] = useState<Record<number, TelecableMode>>(() => {
     const init: Record<number, TelecableMode> = {};
-    for (const pid of [11, 13, 14, 15, 24, 25]) {
+    for (const pid of [0, 11, 13, 14, 15, 24, 25, 27, 28]) {
       try {
         const v = localStorage.getItem(`telecable_${pid}_source_mode`);
-        init[pid] = v === 'telecable' ? 'telecable' : 'scraping';
+        // Canal 8 / Canal 2 son telecable-only.
+        const forceTelecable = pid === 27 || pid === 28;
+        init[pid] = (forceTelecable || v === 'telecable') ? 'telecable' : 'scraping';
       } catch { init[pid] = 'scraping'; }
     }
     return init;
@@ -723,6 +733,55 @@ export default function EmisorM3U8Panel() {
   const [m3uPayloads, setM3uPayloads] = useState<Record<number, M3uPayload>>({});
   // Texto pegado del contenido M3U (RANDOM Disney 7) — alternativa a subir archivo
   const [m3uPasteText, setM3uPasteText] = useState<Record<number, string>>({});
+
+  // ── Disney 7 (pid 0): selector "Oficial | Telecable" + dropdown de canales.
+  //    'official' = flujo histórico (archivo M3U pegado, perfil VLC-like).
+  //    'telecable' = login Telecable + dropdown de canales (TUDN, ESPN, etc.).
+  type Disney7Mode = 'official' | 'telecable';
+  const [disney7Mode, setDisney7Mode] = useState<Disney7Mode>(() => {
+    try {
+      const v = localStorage.getItem('disney7_0_source_mode');
+      return v === 'telecable' ? 'telecable' : 'official';
+    } catch { return 'official'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('disney7_0_source_mode', disney7Mode); } catch {}
+    setTelecableModes(prev => ({ ...prev, [0]: disney7Mode === 'telecable' ? 'telecable' : 'scraping' }));
+  }, [disney7Mode]);
+  type TelecableChannel = { contentId: string; name: string | null };
+  const [telecableChannels, setTelecableChannels] = useState<TelecableChannel[]>([]);
+  const [telecableChannelsLoading, setTelecableChannelsLoading] = useState(false);
+  const [disney7ContentId, setDisney7ContentId] = useState<string>(() => {
+    try { return localStorage.getItem('disney7_0_telecable_content_id') || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('disney7_0_telecable_content_id', disney7ContentId); } catch {}
+  }, [disney7ContentId]);
+  const loadTelecableChannels = useCallback(async (force = false) => {
+    setTelecableChannelsLoading(true);
+    try {
+      const r = await fetch(`/api/telecable/channels${force ? '?force=1' : ''}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      if (Array.isArray(j.channels)) {
+        const list: TelecableChannel[] = j.channels
+          .filter((c: any) => c && c.contentId)
+          .map((c: any) => ({ contentId: String(c.contentId), name: c.name || c.contentId }));
+        list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        setTelecableChannels(list);
+      }
+    } catch (e: any) {
+      toast.error(`No se pudo cargar lista Telecable: ${e?.message || e}`);
+    } finally {
+      setTelecableChannelsLoading(false);
+    }
+  }, []);
+  // Cargar la lista cuando el usuario entra al tab Disney 7 en modo telecable.
+  useEffect(() => {
+    if (activeTab === '0' && disney7Mode === 'telecable' && telecableChannels.length === 0 && !telecableChannelsLoading) {
+      loadTelecableChannels(false);
+    }
+  }, [activeTab, disney7Mode, telecableChannels.length, telecableChannelsLoading, loadTelecableChannels]);
   // Modo de salida para procesos M3U file (RANDOM Disney 7).
   // 'copy' = -c copy puro · 'smart' = copy compatible con fallback · 'transcode' = perfil estándar 2000k
   // RANDOM Disney 7 (ID 19) ahora usa un único modo "rawvideo": video crudo
@@ -1356,8 +1415,19 @@ export default function EmisorM3U8Panel() {
 
     // Procesos M3U8 -> RTMP o HLS local
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
-    const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex);
+    // Disney 7 (pid 0) en modo Telecable NO usa archivo M3U — usa contentId del dropdown.
+    const isDisney7Telecable = processIndex === 0 && disney7Mode === 'telecable';
+    const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex) && !isDisney7Telecable;
     const m3uPayload = isM3uFileProcess ? m3uPayloads[processIndex] : null;
+
+    // Disney 7 Telecable: validar que el usuario eligió un canal del dropdown
+    if (isDisney7Telecable && !disney7ContentId) {
+      updateProcess(processIndex, {
+        emitStatus: "error",
+        emitMsg: "Seleccioná un canal del dropdown Telecable primero",
+      });
+      return;
+    }
 
     // RANDOM Disney 7 (19) requiere que se haya cargado un archivo M3U
     if (isM3uFileProcess && !m3uPayload) {
@@ -1460,7 +1530,10 @@ export default function EmisorM3U8Panel() {
       }
     }
 
-    if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
+    // En Disney 7 Telecable y en TELECABLE-only pids (Canal 8/2), el `m3u8`
+    // del input puede estar vacío — la URL la resuelve el backend.
+    const requiresM3u8Input = !isDisney7Telecable && !TELECABLE_ONLY_PIDS.has(processIndex);
+    if ((requiresM3u8Input && !process.m3u8) || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
         emitMsg: isHlsOutput
@@ -1484,14 +1557,18 @@ export default function EmisorM3U8Panel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          source_m3u8: process.m3u8,
+          source_m3u8: process.m3u8 || '',
           target_rtmp: isHlsOutput ? 'hls-local' : process.rtmp,
           process_id: processIndex.toString(),
           output_profile: selectedProfile,
           // Telecable gana sobre el modo histórico cuando está activo. Para
           // los pids no-Telecable, se mantiene la lógica original (teletica/canal6).
           ...(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable'
-            ? { source_mode: 'telecable' as const }
+            ? {
+                source_mode: 'telecable' as const,
+                ...(processIndex === 0 && disney7ContentId ? { telecable_content_id: disney7ContentId } : {}),
+              }
+            : processIndex === 0 ? { source_mode: 'scraping' as const }
             : processIndex === TELETICA_URL_INDEX ? { source_mode: teleticaMode }
             : processIndex === CANAL6_URL_INDEX ? { source_mode: canal6Mode }
             : processIndex === FOX_URL_INDEX ? { source_mode: foxMode }
@@ -1792,6 +1869,8 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-red-600", text: "text-red-500", stroke: "#dc2626", name: "FOX+ URL" },
       { bg: "bg-red-800", text: "text-red-400", stroke: "#991b1b", name: "FOX URL" },
       { bg: "bg-rose-700", text: "text-rose-400", stroke: "#be123c", name: "FOX+ ALTERNO" },
+      { bg: "bg-orange-400", text: "text-orange-300", stroke: "#fb923c", name: "Canal 8 URL" },
+      { bg: "bg-sky-600", text: "text-sky-400", stroke: "#0284c7", name: "Canal 2 URL" },
     ];
     return colors[processIndex];
   };
@@ -1804,6 +1883,11 @@ export default function EmisorM3U8Panel() {
       ? Math.max(0, Math.floor((clockNow - process.startTime) / 1000))
       : process.elapsed;
     const outputProfile = getOutputProfile(processIndex);
+    const isDisney7Tab = processIndex === 0;
+    const isDisney7TelecableActive = isDisney7Tab && disney7Mode === 'telecable';
+    const isTelecableOnlyTab = TELECABLE_ONLY_PIDS.has(processIndex);
+    // Pids cuya UI de input m3u8 NO se muestra (URL resuelta por backend).
+    const hideM3u8Input = isDisney7TelecableActive || isTelecableOnlyTab;
 
     return (
       <div className="space-y-6">
@@ -1875,8 +1959,92 @@ export default function EmisorM3U8Panel() {
             ) : (
               // Procesos M3U8 normales
               <>
+                {isDisney7Tab && (
+                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
+                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                      Modo Disney 7
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setDisney7Mode('official')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          disney7Mode === 'official'
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Pegá un archivo M3U con headers (flujo histórico VLC-like)"
+                      >
+                        🏛️ Oficial (M3U pegado)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDisney7Mode('telecable')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          disney7Mode === 'telecable'
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Elegí cualquier canal de la playlist Telecable y emitilo en la URL Disney 7"
+                      >
+                        📡 Telecable (dropdown)
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      {disney7Mode === 'telecable'
+                        ? 'Elegí un canal de la lista Telecable y dale Scrapear. La señal sale en la misma URL HLS de Disney 7 (slug Disney7).'
+                        : 'Pegá el archivo M3U con headers (mismo perfil VLC-like de siempre).'}
+                    </p>
+                  </div>
+                )}
+                {isDisney7TelecableActive && (
+                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-amber-400/30">
+                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                      Canal Telecable
+                    </label>
+                    <div className="flex gap-2">
+                      <select
+                        value={disney7ContentId}
+                        onChange={(e) => setDisney7ContentId(e.target.value)}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || telecableChannelsLoading}
+                        className="flex-1 bg-background border-2 border-amber-400/40 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-60"
+                      >
+                        <option value="">
+                          {telecableChannelsLoading
+                            ? 'Cargando lista Telecable...'
+                            : telecableChannels.length === 0
+                              ? '(sin canales — pulsá Refrescar)'
+                              : '— Elegí un canal —'}
+                        </option>
+                        {telecableChannels.map(c => (
+                          <option key={c.contentId} value={c.contentId}>{c.name || c.contentId}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => loadTelecableChannels(true)}
+                        disabled={telecableChannelsLoading}
+                        className="px-3 py-2 rounded-lg bg-card border border-border hover:bg-muted text-xs font-medium disabled:opacity-60"
+                        title="Refrescar lista de canales Telecable"
+                      >
+                        🔄
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      {telecableChannels.length > 0
+                        ? `${telecableChannels.length} canales disponibles. Al pulsar Scrapear, el VPS resuelve la URL HLS firmada de Telecable.`
+                        : 'La lista se carga automáticamente al entrar a este tab.'}
+                    </p>
+                  </div>
+                )}
                 <label className="block text-sm mb-2 text-muted-foreground">
-                  {M3U_FILE_PROCESSES.has(processIndex)
+                  {isDisney7TelecableActive
+                    ? 'URL HLS Telecable resuelta'
+                    : isTelecableOnlyTab
+                      ? 'URL HLS Telecable resuelta'
+                      : M3U_FILE_PROCESSES.has(processIndex)
                     ? 'Archivo M3U (con headers)'
                     : OBS_INGEST_PROCESSES.has(processIndex)
                     ? 'Entrada SRT (OBS)'
@@ -1884,7 +2052,7 @@ export default function EmisorM3U8Panel() {
                       ? 'URL del player TDMax (pega aquí)'
                       : 'URL M3U8 (fuente)'}
                 </label>
-                {M3U_FILE_PROCESSES.has(processIndex) && (
+                {M3U_FILE_PROCESSES.has(processIndex) && !isDisney7TelecableActive && (
                   <div className="mb-3">
                     <textarea
                       placeholder={"#EXTM3U\n#EXTVLCOPT:http-referrer=https://...\n#EXTVLCOPT:http-user-agent=Mozilla/5.0 ...\n#EXTINF:-1,Canal\nhttps://servidor.com/stream.m3u8"}
@@ -2063,7 +2231,7 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
-                {TELECABLE_PIDS.has(processIndex) && (() => {
+                {TELECABLE_PIDS.has(processIndex) && !isDisney7Tab && !isTelecableOnlyTab && (() => {
                   const tMode = telecableModes[processIndex] || 'scraping';
                   const tInfo = telecableInfos[processIndex] || null;
                   const isFox = processIndex === FOX_URL_INDEX;
@@ -2145,7 +2313,9 @@ export default function EmisorM3U8Panel() {
                   <input
                     type="url"
                     placeholder={
-                      processIndex === TIGO_URL_INDEX
+                      hideM3u8Input
+                        ? 'La URL se resuelve automáticamente desde Telecable'
+                        : processIndex === TIGO_URL_INDEX
                         ? TIGO_OBS_INGEST_URL
                         : processIndex === DISNEY7_URL_INDEX
                           ? DISNEY7_OBS_INGEST_URL
@@ -2165,23 +2335,31 @@ export default function EmisorM3U8Panel() {
                     }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    readOnly={PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official')}
+                    readOnly={hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official')}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
                         ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.4)]'
-                        : PASTE_URL_PROCESSES.has(processIndex)
+                        : (hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex))
                           ? 'border-border bg-muted/40'
                           : 'border-border'
                     }`}
                   />
-                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
+                  {(channelConfig.scrapeFn || hideM3u8Input) && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
                     <button
                       onClick={async () => {
-                        if (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') {
+                        if (hideM3u8Input || (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable')) {
                           setFetchingChannel(processIndex);
                           try {
-                            const r = await fetch(`/api/telecable/${processIndex}/refresh`, { method: 'POST' });
+                            const refreshBody: Record<string, string> = {};
+                            if (processIndex === 0 && disney7ContentId) {
+                              refreshBody.content_id = disney7ContentId;
+                            }
+                            const r = await fetch(`/api/telecable/${processIndex}/refresh`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(refreshBody),
+                            });
                             const j = await r.json().catch(() => ({}));
                             if (r.ok) {
                               if (j.url) updateProcess(processIndex, { m3u8: j.url });
@@ -2198,7 +2376,7 @@ export default function EmisorM3U8Panel() {
                         }
                         fetchChannelUrl(processIndex);
                       }}
-                      disabled={fetchingChannel !== null}
+                      disabled={fetchingChannel !== null || (processIndex === 0 && disney7Mode === 'telecable' && !disney7ContentId)}
                       className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
                       title={`Obtener URL ${channelConfig.name} automáticamente`}
                     >
@@ -2208,7 +2386,7 @@ export default function EmisorM3U8Panel() {
                           Obteniendo...
                         </span>
                       ) : (
-                        channelConfig.fetchLabel
+                        channelConfig.fetchLabel || '📡 Scrapear Telecable'
                       )}
                     </button>
                   )}
@@ -2264,6 +2442,8 @@ export default function EmisorM3U8Panel() {
                 [FOXMAS_URL_INDEX]: 'foxmas',
                 [FOX_URL_INDEX]: 'fox',
                 [FOXMAS_ALTERNO_INDEX]: 'foxmas',
+                [CANAL8_URL_INDEX]: 'Canal8',
+                [CANAL2_URL_INDEX]: 'Canal2',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
@@ -2676,8 +2856,8 @@ export default function EmisorM3U8Panel() {
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="mb-6 px-1 overflow-x-auto scrollbar-hide md:flex md:justify-center">
-            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border inline-flex flex-nowrap gap-1 min-w-max md:flex-wrap md:min-w-0">
+          <div className="mb-6 px-1 overflow-x-auto scrollbar-hide md:overflow-visible">
+            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border inline-flex flex-nowrap gap-1 min-w-max md:grid md:[grid-template-columns:repeat(10,minmax(0,1fr))] md:gap-1.5 md:min-w-0 md:w-full md:h-auto">
               {/* Tab UPTIME — vista resumen de señales activas con cronómetro y telemetría */}
               {(() => {
                 const activeCount = VISIBLE_PROCESSES.filter(i => processes[i]?.isEmitiendo).length;

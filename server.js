@@ -426,7 +426,7 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26']);
+const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 // FUTV (11), FUTV ALTERNO (17) y FUTV SRT (18) comparten slug 'futv' a propósito:
 // los 3 emiten al MISMO destino HLS local (/live/futv/playlist.m3u8) por métodos distintos
@@ -439,7 +439,7 @@ const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '
 // Disney 7 (ID 0) — M3U file passthrough con perfil VLC-like — también emite al slug 'Disney7'.
 // FOX+ URL (24), FOX+ SRT (22) y FOX+ ALTERNO (26) comparten slug 'foxmas' → mutex automático por slug HLS.
 // FOX URL (25) y FOX SRT (23) comparten slug 'fox' → mutex automático por slug HLS.
-const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox', '24': 'foxmas', '25': 'fox', '26': 'foxmas' };
+const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox', '24': 'foxmas', '25': 'fox', '26': 'foxmas', '27': 'Canal8', '28': 'Canal2' };
 
 // ───────────────────────────────────────────────────────────────────────
 // TELETICA URL (ID 13) — selector de fuente: 'official' | 'scraping'
@@ -534,17 +534,24 @@ const TELECABLE_REFRESH_MARGIN_S = 24 * 3600;        // refrescar URL cuando le 
 const TELECABLE_MIN_RELOGIN_INTERVAL_MS = 20_000;    // anti-abuse rate-limit
 // Canales con modo alterno Telecable (login directo VPS, sin túnel CR).
 // pid 25 fue el piloto; ampliado a FUTV/Teletica/TDMas1/Canal6/FOX+ tras validación.
-const TELECABLE_PROCESSES = new Set(['11','13','14','15','24','25']);
+// pid '0' (Disney 7) acepta content-id DINÁMICO desde el frontend (dropdown);
+// pid '27' (Canal 8 URL) = MULTIMEDIOS y pid '28' (Canal 2 URL) = CDR son
+// canales TELECABLE-ONLY (sin modo histórico).
+const TELECABLE_PROCESSES = new Set(['0','11','13','14','15','24','25','27','28']);
 // Matchers: probamos primero content-id exacto; si no aparece en la playlist,
 // caemos a patrones por nombre. Tolerante a renombres del CDN Telecable.
 // IDs fijos confirmados por el usuario contra /api/telecable/channels.
 const TELECABLE_CHANNEL_MATCHERS = {
-  '11': { contentIds: ['FUTV'],      namePatterns: [/^futv$/i] },
-  '13': { contentIds: ['TELETICA7'], namePatterns: [/teletica\s*7/i] },
-  '14': { contentIds: ['TDMAS'],     namePatterns: [/^td\s*\+?$/i, /tdm[aá]s/i] },
-  '15': { contentIds: ['REPRETEL6'], namePatterns: [/repretel\s*6/i] },
-  '24': { contentIds: ['FOXPLUS'],   namePatterns: [/^fox\+$/i, /fox\s*plus/i] },
-  '25': { contentIds: ['FOX'],       namePatterns: [/^fox$/i] },
+  // pid '0' NO tiene matcher fijo: el contentId lo elige el usuario en el
+  // dropdown del tab Disney 7 (modo Telecable) y se pasa como override.
+  '11': { contentIds: ['FUTV'],        namePatterns: [/^futv$/i] },
+  '13': { contentIds: ['TELETICA7'],   namePatterns: [/teletica\s*7/i] },
+  '14': { contentIds: ['TDMAS'],       namePatterns: [/^td\s*\+?$/i, /tdm[aá]s/i] },
+  '15': { contentIds: ['REPRETEL6'],   namePatterns: [/repretel\s*6/i] },
+  '24': { contentIds: ['FOXPLUS'],     namePatterns: [/^fox\+$/i, /fox\s*plus/i] },
+  '25': { contentIds: ['FOX'],         namePatterns: [/^fox$/i] },
+  '27': { contentIds: ['MULTIMEDIOS'], namePatterns: [/multimedios/i] },
+  '28': { contentIds: ['CDR'],         namePatterns: [/^cdr$/i] },
 };
 // Compat: TELECABLE_CONTENT_MAP se sigue exponiendo (algunos lugares lo leen).
 const TELECABLE_CONTENT_MAP = Object.fromEntries(
@@ -700,9 +707,11 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
 }
 
 // Wrapper que registra fallo + log. Usado por /api/emit y autoRecoverChannel.
-async function safeTelecableResolve(processId) {
+// `contentIdOverride` permite que el frontend pase un content-id dinámico
+// (caso Disney 7 pid 0, dropdown del usuario).
+async function safeTelecableResolve(processId, contentIdOverride = null) {
   try {
-    const st = await telecableLoginAndResolve(processId);
+    const st = await telecableLoginAndResolve(processId, contentIdOverride);
     sendLog(processId, 'success',
       `📡 Telecable URL obtenida (contentId=${st.contentId}, quality=${st.quality}, expira en ${
         st.expiresAt ? Math.floor((st.expiresAt - Date.now() / 1000) / 3600) + 'h' : '?'
@@ -2982,6 +2991,7 @@ app.post('/api/emit', async (req, res) => {
       user_agent: customUserAgent = null,
       output_profile = null,
       source_mode = null, // Teletica URL (13): 'official' | 'scraping'
+      telecable_content_id = null, // Disney 7 pid 0: contentId elegido en dropdown
     } = req.body;
     // Anti-doble-emit: si llega un segundo POST /api/emit para el mismo pid
     // mientras el primero todavía está arrancando, devolvemos 409 y NO
@@ -3060,10 +3070,22 @@ app.post('/api/emit', async (req, res) => {
     if (isTelecableMode(process_id)) {
       try {
         const cached = telecableState.get(String(process_id));
+        // Disney 7 (pid 0): el contentId puede cambiar entre arranques (dropdown).
+        // Si llegó override y difiere del cacheado, forzamos re-resolve.
+        const overrideCid = process_id === '0' && telecable_content_id ? String(telecable_content_id) : null;
+        if (overrideCid && cached && cached.contentId !== overrideCid) {
+          telecableState.delete(String(process_id));
+        }
+        // Si el frontend trajo override, lo persistimos en la caché para que
+        // los auto-recoveries futuros reusen el mismo canal.
+        if (overrideCid && (!cached || cached.contentId !== overrideCid)) {
+          telecableState.set(String(process_id), { contentId: overrideCid });
+        }
         const stillFresh = cached?.expiresAt &&
+          (!overrideCid || cached.contentId === overrideCid) &&
           (cached.expiresAt - Math.floor(Date.now() / 1000) > TELECABLE_REFRESH_MARGIN_S) &&
           is_recovery;
-        const st = stillFresh ? cached : await safeTelecableResolve(process_id);
+        const st = stillFresh ? cached : await safeTelecableResolve(process_id, overrideCid);
         effectiveSourceM3u8 = st.url;
         sendLog(process_id, 'info', `📡 Telecable → consumiendo HLS firmado (IP VPS)`);
       } catch (e) {
@@ -3825,7 +3847,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Nombre del proceso para logs
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT', '21': 'TELETICA SRT', '22': 'FOX+ SRT', '23': 'FOX SRT', '24': 'FOX+ URL', '25': 'FOX URL' };
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT', '21': 'TELETICA SRT', '22': 'FOX+ SRT', '23': 'FOX SRT', '24': 'FOX+ URL', '25': 'FOX URL', '26': 'FOX+ ALTERNO', '27': 'Canal 8 URL', '28': 'Canal 2 URL' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', `🎬 ${procName}: Perfil ${outputProfile.label} → ${outputProfile.width}p CBR ${outputProfile.videoBitrate} AAC${outputProfile.audioBitrate} GOP2s (preset ${outputProfile.preset || 'veryfast'}${outputProfile.x264Params ? ' +x264params' : ''})${isRecovery ? ' [recovery]' : ''}`);
 
@@ -6456,7 +6478,14 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
   if (!TELECABLE_PROCESSES.has(pid)) return res.status(404).json({ error: `pid ${pid} no soporta Telecable` });
   try {
     setTelecableSourceMode(pid, 'telecable');
-    const st = await safeTelecableResolve(pid);
+    const overrideCid = req.body?.content_id ? String(req.body.content_id) : null;
+    if (overrideCid) {
+      const prev = telecableState.get(pid);
+      if (!prev || prev.contentId !== overrideCid) {
+        telecableState.set(pid, { ...(prev || {}), contentId: overrideCid });
+      }
+    }
+    const st = await safeTelecableResolve(pid, overrideCid);
     res.json({
       ok: true,
       url: st.url,
@@ -7015,7 +7044,7 @@ const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
   '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
-  '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT', '21': 'TELETICA SRT', '22': 'FOX+ SRT', '23': 'FOX SRT', '24': 'FOX+ URL', '25': 'FOX URL', '26': 'FOX+ ALTERNO',
+  '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT', '21': 'TELETICA SRT', '22': 'FOX+ SRT', '23': 'FOX SRT', '24': 'FOX+ URL', '25': 'FOX URL', '26': 'FOX+ ALTERNO', '27': 'Canal 8 URL', '28': 'Canal 2 URL',
 };
 
 // Endpoint para toggle night_rest
