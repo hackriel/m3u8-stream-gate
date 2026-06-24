@@ -3577,6 +3577,12 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_delay_max', '15',
       ];
       sendLog(process_id, 'info', `🔧 RANDOM Disney 7: resiliencia tipo Disney 7 (reconnect 4xx/5xx, eof, 15s)`);
+    } else if (isTelecableSource) {
+      // Telecable: mismo perfil que Canal 8/2 — HLS_INPUT_RESILIENCE_ARGS estándar.
+      // -reconnect_at_eof / byte-offset reconnect rompen el demuxer HLS de Telecable
+      // (loop infinito de "Will reconnect at <offset>"), por eso usamos solo 5xx.
+      effectiveResilienceArgs = HLS_INPUT_RESILIENCE_ARGS;
+      sendLog(process_id, 'info', `🔧 Telecable: resiliencia HLS estándar (sin reconnect at byte-offset)`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
