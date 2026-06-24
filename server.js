@@ -6478,7 +6478,14 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
   if (!TELECABLE_PROCESSES.has(pid)) return res.status(404).json({ error: `pid ${pid} no soporta Telecable` });
   try {
     setTelecableSourceMode(pid, 'telecable');
-    const st = await safeTelecableResolve(pid);
+    const overrideCid = req.body?.content_id ? String(req.body.content_id) : null;
+    if (overrideCid) {
+      const prev = telecableState.get(pid);
+      if (!prev || prev.contentId !== overrideCid) {
+        telecableState.set(pid, { ...(prev || {}), contentId: overrideCid });
+      }
+    }
+    const st = await safeTelecableResolve(pid, overrideCid);
     res.json({
       ok: true,
       url: st.url,
