@@ -3070,10 +3070,22 @@ app.post('/api/emit', async (req, res) => {
     if (isTelecableMode(process_id)) {
       try {
         const cached = telecableState.get(String(process_id));
+        // Disney 7 (pid 0): el contentId puede cambiar entre arranques (dropdown).
+        // Si llegó override y difiere del cacheado, forzamos re-resolve.
+        const overrideCid = process_id === '0' && telecable_content_id ? String(telecable_content_id) : null;
+        if (overrideCid && cached && cached.contentId !== overrideCid) {
+          telecableState.delete(String(process_id));
+        }
+        // Si el frontend trajo override, lo persistimos en la caché para que
+        // los auto-recoveries futuros reusen el mismo canal.
+        if (overrideCid && (!cached || cached.contentId !== overrideCid)) {
+          telecableState.set(String(process_id), { contentId: overrideCid });
+        }
         const stillFresh = cached?.expiresAt &&
+          (!overrideCid || cached.contentId === overrideCid) &&
           (cached.expiresAt - Math.floor(Date.now() / 1000) > TELECABLE_REFRESH_MARGIN_S) &&
           is_recovery;
-        const st = stillFresh ? cached : await safeTelecableResolve(process_id);
+        const st = stillFresh ? cached : await safeTelecableResolve(process_id, overrideCid);
         effectiveSourceM3u8 = st.url;
         sendLog(process_id, 'info', `📡 Telecable → consumiendo HLS firmado (IP VPS)`);
       } catch (e) {
