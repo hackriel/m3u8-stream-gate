@@ -624,15 +624,21 @@ export default function EmisorM3U8Panel() {
   // ── TELECABLE: modo alterno por pid (FUTV/Teletica/TDMas1/Canal6/FOX+/FOX).
   //    'telecable' = login directo a la API de Telecable desde el VPS (sin túnel CR).
   //    'scraping'  = flujo histórico del canal (TDMax+Pi5 o lo que aplique).
-  const TELECABLE_PIDS = useMemo(() => new Set<number>([11, 13, 14, 15, 24, 25]), []);
+  // pid 0 (Disney 7) usa selector dedicado "Oficial | Telecable" con dropdown.
+  // pids 27/28 (Canal 8 / Canal 2 URL) son TELECABLE-only (sin toggle).
+  const TELECABLE_PIDS = useMemo(() => new Set<number>([0, 11, 13, 14, 15, 24, 25, 27, 28]), []);
+  // pids cuyo único modo permitido es TELECABLE (sin selector visible).
+  const TELECABLE_ONLY_PIDS = useMemo(() => new Set<number>([27, 28]), []);
   type TelecableMode = 'scraping' | 'telecable';
   type TelecableInfo = { expires_at: number | null; expires_in_s: number | null; last_login_failure_count: number } | null;
   const [telecableModes, setTelecableModes] = useState<Record<number, TelecableMode>>(() => {
     const init: Record<number, TelecableMode> = {};
-    for (const pid of [11, 13, 14, 15, 24, 25]) {
+    for (const pid of [0, 11, 13, 14, 15, 24, 25, 27, 28]) {
       try {
         const v = localStorage.getItem(`telecable_${pid}_source_mode`);
-        init[pid] = v === 'telecable' ? 'telecable' : 'scraping';
+        // Canal 8 / Canal 2 son telecable-only.
+        const forceTelecable = pid === 27 || pid === 28;
+        init[pid] = (forceTelecable || v === 'telecable') ? 'telecable' : 'scraping';
       } catch { init[pid] = 'scraping'; }
     }
     return init;
