@@ -2690,8 +2690,8 @@ export default function EmisorM3U8Panel() {
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="mb-6 px-1 overflow-x-auto scrollbar-hide md:flex md:justify-center">
-            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border inline-flex flex-nowrap gap-1 min-w-max md:flex-wrap md:min-w-0">
+          <div className="mb-6 px-1 overflow-x-auto scrollbar-hide md:overflow-visible">
+            <TabsList className="bg-card/60 backdrop-blur-sm p-1.5 rounded-2xl shadow-lg border border-border inline-flex flex-nowrap gap-1 min-w-max md:grid md:[grid-template-columns:repeat(10,minmax(0,1fr))] md:gap-1.5 md:min-w-0 md:w-full md:h-auto">
               {/* Tab UPTIME — vista resumen de señales activas con cronómetro y telemetría */}
               {(() => {
                 const activeCount = VISIBLE_PROCESSES.filter(i => processes[i]?.isEmitiendo).length;
