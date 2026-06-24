@@ -2991,6 +2991,7 @@ app.post('/api/emit', async (req, res) => {
       user_agent: customUserAgent = null,
       output_profile = null,
       source_mode = null, // Teletica URL (13): 'official' | 'scraping'
+      telecable_content_id = null, // Disney 7 pid 0: contentId elegido en dropdown
     } = req.body;
     // Anti-doble-emit: si llega un segundo POST /api/emit para el mismo pid
     // mientras el primero todavía está arrancando, devolvemos 409 y NO
