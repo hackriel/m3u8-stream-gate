@@ -1530,7 +1530,10 @@ export default function EmisorM3U8Panel() {
       }
     }
 
-    if (!process.m3u8 || (!process.rtmp && !isHlsOutput)) {
+    // En Disney 7 Telecable y en TELECABLE-only pids (Canal 8/2), el `m3u8`
+    // del input puede estar vacío — la URL la resuelve el backend.
+    const requiresM3u8Input = !isDisney7Telecable && !TELECABLE_ONLY_PIDS.has(processIndex);
+    if ((requiresM3u8Input && !process.m3u8) || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
         emitMsg: isHlsOutput
