@@ -751,6 +751,8 @@ export default function EmisorM3U8Panel() {
   type TelecableChannel = { contentId: string; name: string | null };
   const [telecableChannels, setTelecableChannels] = useState<TelecableChannel[]>([]);
   const [telecableChannelsLoading, setTelecableChannelsLoading] = useState(false);
+  const [telecableChannelsError, setTelecableChannelsError] = useState<string | null>(null);
+  const telecableChannelsAttemptedRef = useRef(false);
   const [disney7ContentId, setDisney7ContentId] = useState<string>(() => {
     try { return localStorage.getItem('disney7_0_telecable_content_id') || ''; } catch { return ''; }
   });
@@ -759,6 +761,8 @@ export default function EmisorM3U8Panel() {
   }, [disney7ContentId]);
   const loadTelecableChannels = useCallback(async (force = false) => {
     setTelecableChannelsLoading(true);
+    telecableChannelsAttemptedRef.current = true;
+    setTelecableChannelsError(null);
     try {
       const r = await fetch(`/api/telecable/channels${force ? '?force=1' : ''}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -771,14 +775,26 @@ export default function EmisorM3U8Panel() {
         setTelecableChannels(list);
       }
     } catch (e: any) {
-      toast.error(`No se pudo cargar lista Telecable: ${e?.message || e}`);
+      const msg = e?.message || String(e);
+      setTelecableChannelsError(msg);
+      // Solo mostrar toast en refresh manual; el auto-load silencioso evita spam.
+      if (force) toast.error(`No se pudo cargar lista Telecable: ${msg}`);
     } finally {
       setTelecableChannelsLoading(false);
     }
   }, []);
-  // Cargar la lista cuando el usuario entra al tab Disney 7 en modo telecable.
+  // Cargar la lista UNA sola vez cuando el usuario entra al tab Disney 7 en modo
+  // telecable. Si falla (p. ej. en preview de Lovable donde no hay backend VPS),
+  // NO reintentar automáticamente — evita loop infinito de 500s. El usuario
+  // puede pulsar el botón 🔄 para reintentar manualmente.
   useEffect(() => {
-    if (activeTab === '0' && disney7Mode === 'telecable' && telecableChannels.length === 0 && !telecableChannelsLoading) {
+    if (
+      activeTab === '0' &&
+      disney7Mode === 'telecable' &&
+      telecableChannels.length === 0 &&
+      !telecableChannelsLoading &&
+      !telecableChannelsAttemptedRef.current
+    ) {
       loadTelecableChannels(false);
     }
   }, [activeTab, disney7Mode, telecableChannels.length, telecableChannelsLoading, loadTelecableChannels]);
