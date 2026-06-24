@@ -1883,6 +1883,11 @@ export default function EmisorM3U8Panel() {
       ? Math.max(0, Math.floor((clockNow - process.startTime) / 1000))
       : process.elapsed;
     const outputProfile = getOutputProfile(processIndex);
+    const isDisney7Tab = processIndex === 0;
+    const isDisney7TelecableActive = isDisney7Tab && disney7Mode === 'telecable';
+    const isTelecableOnlyTab = TELECABLE_ONLY_PIDS.has(processIndex);
+    // Pids cuya UI de input m3u8 NO se muestra (URL resuelta por backend).
+    const hideM3u8Input = isDisney7TelecableActive || isTelecableOnlyTab;
 
     return (
       <div className="space-y-6">
