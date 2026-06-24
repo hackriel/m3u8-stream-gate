@@ -1802,6 +1802,8 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-red-600", text: "text-red-500", stroke: "#dc2626", name: "FOX+ URL" },
       { bg: "bg-red-800", text: "text-red-400", stroke: "#991b1b", name: "FOX URL" },
       { bg: "bg-rose-700", text: "text-rose-400", stroke: "#be123c", name: "FOX+ ALTERNO" },
+      { bg: "bg-orange-400", text: "text-orange-300", stroke: "#fb923c", name: "Canal 8 URL" },
+      { bg: "bg-sky-600", text: "text-sky-400", stroke: "#0284c7", name: "Canal 2 URL" },
     ];
     return colors[processIndex];
   };
