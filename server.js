@@ -3319,6 +3319,7 @@ app.post('/api/emit', async (req, res) => {
     let isUnivisionLikeSource = false;
     let isMediatiqueSource = false;
     let isAkamaiSource = false;
+    let isTelecableSource = false;
     try {
       const sourceUrl = new URL(effectiveSourceM3u8);
       const hostname = sourceUrl.hostname.toLowerCase();
@@ -3354,6 +3355,14 @@ app.post('/api/emit', async (req, res) => {
         isAkamaiSource = true;
         refererDomain = 'https://www.redbull.com/';
         originDomain = 'https://www.redbull.com';
+      } else if (hostname.includes('telecable') || hostname.includes('mtvreg.com')) {
+        // Telecable HLS firmado (stream.srv.telecable.i.mtvreg.com).
+        // El CDN devuelve EOF de forma "normal" entre segmentos y rechaza
+        // reconexiones a byte-offset → con -re + +genpts + -reconnect_at_eof
+        // FFmpeg queda en loop sin primer frame (Disney 7 colgaba a 47s).
+        // Tratamos esta fuente exactamente como Canal 8/Canal 2: perfil
+        // minimal VLC-like, dejar que el demuxer HLS interno haga su trabajo.
+        isTelecableSource = true;
       }
     } catch (_) {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
