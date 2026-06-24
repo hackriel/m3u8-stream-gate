@@ -2313,7 +2313,9 @@ export default function EmisorM3U8Panel() {
                   <input
                     type="url"
                     placeholder={
-                      processIndex === TIGO_URL_INDEX
+                      hideM3u8Input
+                        ? 'La URL se resuelve automáticamente desde Telecable'
+                        : processIndex === TIGO_URL_INDEX
                         ? TIGO_OBS_INGEST_URL
                         : processIndex === DISNEY7_URL_INDEX
                           ? DISNEY7_OBS_INGEST_URL
@@ -2334,7 +2336,6 @@ export default function EmisorM3U8Panel() {
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
                     readOnly={hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official')}
-                    placeholder={hideM3u8Input ? 'La URL se resuelve automáticamente desde Telecable' : undefined}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
