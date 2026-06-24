@@ -534,17 +534,24 @@ const TELECABLE_REFRESH_MARGIN_S = 24 * 3600;        // refrescar URL cuando le 
 const TELECABLE_MIN_RELOGIN_INTERVAL_MS = 20_000;    // anti-abuse rate-limit
 // Canales con modo alterno Telecable (login directo VPS, sin túnel CR).
 // pid 25 fue el piloto; ampliado a FUTV/Teletica/TDMas1/Canal6/FOX+ tras validación.
-const TELECABLE_PROCESSES = new Set(['11','13','14','15','24','25']);
+// pid '0' (Disney 7) acepta content-id DINÁMICO desde el frontend (dropdown);
+// pid '27' (Canal 8 URL) = MULTIMEDIOS y pid '28' (Canal 2 URL) = CDR son
+// canales TELECABLE-ONLY (sin modo histórico).
+const TELECABLE_PROCESSES = new Set(['0','11','13','14','15','24','25','27','28']);
 // Matchers: probamos primero content-id exacto; si no aparece en la playlist,
 // caemos a patrones por nombre. Tolerante a renombres del CDN Telecable.
 // IDs fijos confirmados por el usuario contra /api/telecable/channels.
 const TELECABLE_CHANNEL_MATCHERS = {
-  '11': { contentIds: ['FUTV'],      namePatterns: [/^futv$/i] },
-  '13': { contentIds: ['TELETICA7'], namePatterns: [/teletica\s*7/i] },
-  '14': { contentIds: ['TDMAS'],     namePatterns: [/^td\s*\+?$/i, /tdm[aá]s/i] },
-  '15': { contentIds: ['REPRETEL6'], namePatterns: [/repretel\s*6/i] },
-  '24': { contentIds: ['FOXPLUS'],   namePatterns: [/^fox\+$/i, /fox\s*plus/i] },
-  '25': { contentIds: ['FOX'],       namePatterns: [/^fox$/i] },
+  // pid '0' NO tiene matcher fijo: el contentId lo elige el usuario en el
+  // dropdown del tab Disney 7 (modo Telecable) y se pasa como override.
+  '11': { contentIds: ['FUTV'],        namePatterns: [/^futv$/i] },
+  '13': { contentIds: ['TELETICA7'],   namePatterns: [/teletica\s*7/i] },
+  '14': { contentIds: ['TDMAS'],       namePatterns: [/^td\s*\+?$/i, /tdm[aá]s/i] },
+  '15': { contentIds: ['REPRETEL6'],   namePatterns: [/repretel\s*6/i] },
+  '24': { contentIds: ['FOXPLUS'],     namePatterns: [/^fox\+$/i, /fox\s*plus/i] },
+  '25': { contentIds: ['FOX'],         namePatterns: [/^fox$/i] },
+  '27': { contentIds: ['MULTIMEDIOS'], namePatterns: [/multimedios/i] },
+  '28': { contentIds: ['CDR'],         namePatterns: [/^cdr$/i] },
 };
 // Compat: TELECABLE_CONTENT_MAP se sigue exponiendo (algunos lugares lo leen).
 const TELECABLE_CONTENT_MAP = Object.fromEntries(
