@@ -2398,7 +2398,11 @@ export default function EmisorM3U8Panel() {
                       }}
                       disabled={fetchingChannel !== null || (processIndex === 0 && disney7Mode === 'telecable' && !disney7ContentId)}
                       className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
-                      title={`Obtener URL ${channelConfig.name} automáticamente`}
+                      title={
+                        (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable')
+                          ? `Resolver URL HLS firmada de Telecable para ${channelConfig.name}`
+                          : `Obtener URL ${channelConfig.name} automáticamente`
+                      }
                     >
                       {fetchingChannel === processIndex ? (
                         <span className="flex items-center gap-2">
@@ -2406,7 +2410,9 @@ export default function EmisorM3U8Panel() {
                           Obteniendo...
                         </span>
                       ) : (
-                        channelConfig.fetchLabel || '📡 Scrapear Telecable'
+                        (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable')
+                          ? '📡 Scrapear Telecable'
+                          : (channelConfig.fetchLabel || '📡 Scrapear Telecable')
                       )}
                     </button>
                   )}
