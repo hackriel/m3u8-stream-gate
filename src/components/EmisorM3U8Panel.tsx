@@ -2333,23 +2333,32 @@ export default function EmisorM3U8Panel() {
                     }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    readOnly={PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official')}
+                    readOnly={hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official')}
+                    placeholder={hideM3u8Input ? 'La URL se resuelve automáticamente desde Telecable' : undefined}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
                         ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.4)]'
-                        : PASTE_URL_PROCESSES.has(processIndex)
+                        : (hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex))
                           ? 'border-border bg-muted/40'
                           : 'border-border'
                     }`}
                   />
-                  {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
+                  {(channelConfig.scrapeFn || hideM3u8Input) && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
                     <button
                       onClick={async () => {
-                        if (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') {
+                        if (hideM3u8Input || (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable')) {
                           setFetchingChannel(processIndex);
                           try {
-                            const r = await fetch(`/api/telecable/${processIndex}/refresh`, { method: 'POST' });
+                            const refreshBody: Record<string, string> = {};
+                            if (processIndex === 0 && disney7ContentId) {
+                              refreshBody.content_id = disney7ContentId;
+                            }
+                            const r = await fetch(`/api/telecable/${processIndex}/refresh`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(refreshBody),
+                            });
                             const j = await r.json().catch(() => ({}));
                             if (r.ok) {
                               if (j.url) updateProcess(processIndex, { m3u8: j.url });
@@ -2366,7 +2375,7 @@ export default function EmisorM3U8Panel() {
                         }
                         fetchChannelUrl(processIndex);
                       }}
-                      disabled={fetchingChannel !== null}
+                      disabled={fetchingChannel !== null || (processIndex === 0 && disney7Mode === 'telecable' && !disney7ContentId)}
                       className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
                       title={`Obtener URL ${channelConfig.name} automáticamente`}
                     >
@@ -2376,7 +2385,7 @@ export default function EmisorM3U8Panel() {
                           Obteniendo...
                         </span>
                       ) : (
-                        channelConfig.fetchLabel
+                        channelConfig.fetchLabel || '📡 Scrapear Telecable'
                       )}
                     </button>
                   )}
