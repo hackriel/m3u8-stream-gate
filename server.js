@@ -3319,6 +3319,7 @@ app.post('/api/emit', async (req, res) => {
     let isUnivisionLikeSource = false;
     let isMediatiqueSource = false;
     let isAkamaiSource = false;
+    let isTelecableSource = false;
     try {
       const sourceUrl = new URL(effectiveSourceM3u8);
       const hostname = sourceUrl.hostname.toLowerCase();
@@ -3354,6 +3355,14 @@ app.post('/api/emit', async (req, res) => {
         isAkamaiSource = true;
         refererDomain = 'https://www.redbull.com/';
         originDomain = 'https://www.redbull.com';
+      } else if (hostname.includes('telecable') || hostname.includes('mtvreg.com')) {
+        // Telecable HLS firmado (stream.srv.telecable.i.mtvreg.com).
+        // El CDN devuelve EOF de forma "normal" entre segmentos y rechaza
+        // reconexiones a byte-offset → con -re + +genpts + -reconnect_at_eof
+        // FFmpeg queda en loop sin primer frame (Disney 7 colgaba a 47s).
+        // Tratamos esta fuente exactamente como Canal 8/Canal 2: perfil
+        // minimal VLC-like, dejar que el demuxer HLS interno haga su trabajo.
+        isTelecableSource = true;
       }
     } catch (_) {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
@@ -3440,6 +3449,11 @@ app.post('/api/emit', async (req, res) => {
         '-fflags', '+genpts'
       );
       sendLog(process_id, 'info', `🛡️ RANDOM Disney 7 HLS resiliente: max_reload=1000, hold=1000`);
+    } else if (isTelecableSource) {
+      // Telecable: NO agregamos -http_seekable, -max_reload ni +genpts.
+      // Exactamente el mismo perfil minimal con el que Canal 8/2 funcionan
+      // sin colgarse. El demuxer HLS interno maneja todo.
+      sendLog(process_id, 'info', `🛡️ Telecable HLS: perfil minimal (igual que Canal 8/2)`);
     } else if (isManualProcess || needsTdmaxLikePinning) {
       hardenedLiveInputArgs.push(
         '-http_seekable', '0',
@@ -3460,7 +3474,9 @@ app.post('/api/emit', async (req, res) => {
     // Los reloads deben mitigarse fijando la variante HLS final antes de FFmpeg,
     // no dejando el master playlist completo al analizador interno.
     // ID 19 (RANDOM Disney 7) hereda -re de Disney 7 para pacing HLS correcto.
-    const usesReFlag = RE_FLAG_PROCESSES.has(String(process_id)) || String(process_id) === '19';
+    // Telecable NUNCA usa -re: el CDN ya pacing por segmentos y -re causa
+    // que FFmpeg se quede esperando datos que el CDN no envía hasta EOF.
+    const usesReFlag = !isTelecableSource && (RE_FLAG_PROCESSES.has(String(process_id)) || String(process_id) === '19');
     if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
       sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
@@ -3561,6 +3577,12 @@ app.post('/api/emit', async (req, res) => {
         '-reconnect_delay_max', '15',
       ];
       sendLog(process_id, 'info', `🔧 RANDOM Disney 7: resiliencia tipo Disney 7 (reconnect 4xx/5xx, eof, 15s)`);
+    } else if (isTelecableSource) {
+      // Telecable: mismo perfil que Canal 8/2 — HLS_INPUT_RESILIENCE_ARGS estándar.
+      // -reconnect_at_eof / byte-offset reconnect rompen el demuxer HLS de Telecable
+      // (loop infinito de "Will reconnect at <offset>"), por eso usamos solo 5xx.
+      effectiveResilienceArgs = HLS_INPUT_RESILIENCE_ARGS;
+      sendLog(process_id, 'info', `🔧 Telecable: resiliencia HLS estándar (sin reconnect at byte-offset)`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
