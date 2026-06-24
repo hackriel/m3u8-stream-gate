@@ -1959,8 +1959,92 @@ export default function EmisorM3U8Panel() {
             ) : (
               // Procesos M3U8 normales
               <>
+                {isDisney7Tab && (
+                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
+                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                      Modo Disney 7
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setDisney7Mode('official')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          disney7Mode === 'official'
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Pegá un archivo M3U con headers (flujo histórico VLC-like)"
+                      >
+                        🏛️ Oficial (M3U pegado)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDisney7Mode('telecable')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          disney7Mode === 'telecable'
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Elegí cualquier canal de la playlist Telecable y emitilo en la URL Disney 7"
+                      >
+                        📡 Telecable (dropdown)
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      {disney7Mode === 'telecable'
+                        ? 'Elegí un canal de la lista Telecable y dale Scrapear. La señal sale en la misma URL HLS de Disney 7 (slug Disney7).'
+                        : 'Pegá el archivo M3U con headers (mismo perfil VLC-like de siempre).'}
+                    </p>
+                  </div>
+                )}
+                {isDisney7TelecableActive && (
+                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-amber-400/30">
+                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                      Canal Telecable
+                    </label>
+                    <div className="flex gap-2">
+                      <select
+                        value={disney7ContentId}
+                        onChange={(e) => setDisney7ContentId(e.target.value)}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || telecableChannelsLoading}
+                        className="flex-1 bg-background border-2 border-amber-400/40 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-60"
+                      >
+                        <option value="">
+                          {telecableChannelsLoading
+                            ? 'Cargando lista Telecable...'
+                            : telecableChannels.length === 0
+                              ? '(sin canales — pulsá Refrescar)'
+                              : '— Elegí un canal —'}
+                        </option>
+                        {telecableChannels.map(c => (
+                          <option key={c.contentId} value={c.contentId}>{c.name || c.contentId}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => loadTelecableChannels(true)}
+                        disabled={telecableChannelsLoading}
+                        className="px-3 py-2 rounded-lg bg-card border border-border hover:bg-muted text-xs font-medium disabled:opacity-60"
+                        title="Refrescar lista de canales Telecable"
+                      >
+                        🔄
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      {telecableChannels.length > 0
+                        ? `${telecableChannels.length} canales disponibles. Al pulsar Scrapear, el VPS resuelve la URL HLS firmada de Telecable.`
+                        : 'La lista se carga automáticamente al entrar a este tab.'}
+                    </p>
+                  </div>
+                )}
                 <label className="block text-sm mb-2 text-muted-foreground">
-                  {M3U_FILE_PROCESSES.has(processIndex)
+                  {isDisney7TelecableActive
+                    ? 'URL HLS Telecable resuelta'
+                    : isTelecableOnlyTab
+                      ? 'URL HLS Telecable resuelta'
+                      : M3U_FILE_PROCESSES.has(processIndex)
                     ? 'Archivo M3U (con headers)'
                     : OBS_INGEST_PROCESSES.has(processIndex)
                     ? 'Entrada SRT (OBS)'
@@ -1968,7 +2052,7 @@ export default function EmisorM3U8Panel() {
                       ? 'URL del player TDMax (pega aquí)'
                       : 'URL M3U8 (fuente)'}
                 </label>
-                {M3U_FILE_PROCESSES.has(processIndex) && (
+                {M3U_FILE_PROCESSES.has(processIndex) && !isDisney7TelecableActive && (
                   <div className="mb-3">
                     <textarea
                       placeholder={"#EXTM3U\n#EXTVLCOPT:http-referrer=https://...\n#EXTVLCOPT:http-user-agent=Mozilla/5.0 ...\n#EXTINF:-1,Canal\nhttps://servidor.com/stream.m3u8"}
