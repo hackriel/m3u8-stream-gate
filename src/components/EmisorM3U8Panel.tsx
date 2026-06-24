@@ -2215,46 +2215,9 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
-                {processIndex === CANAL6_URL_INDEX && (
-                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
-                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
-                      Fuente Canal 6
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setCanal6Mode('official')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          canal6Mode === 'official'
-                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                            : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40'
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
-                        title="Pegá tu propia URL (sin scraping). El FFmpeg igual sale por IP CR vía Pi5."
-                      >
-                        🏛️ Oficial (URL pegada)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCanal6Mode('scraping')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          canal6Mode === 'scraping'
-                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
-                            : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
-                        title="Login TDMax + token de 60s (flujo histórico)"
-                      >
-                        🔐 Scraping (TDMax)
-                      </button>
-                    </div>
-                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-                      {canal6Mode === 'official'
-                        ? 'Usá la URL que pegues en el input. Sin login, sin scraping. El consumo igual sale por IP de Costa Rica vía Pi5.'
-                        : 'Scraping TDMax (cuenta info@media.cr) + token de 60s. El servidor renueva automáticamente.'}
-                    </p>
-                  </div>
-                )}
+                {/* Canal 6 URL (15) es Telecable-only: el toggle Oficial/Scraping
+                    quedó descartado junto con la salida CR vía Pi5. Ver
+                    TELECABLE_ONLY_PIDS arriba. */}
                 {TELECABLE_PIDS.has(processIndex) && !isDisney7Tab && !isTelecableOnlyTab && (() => {
                   const tMode = telecableModes[processIndex] || 'scraping';
                   const tInfo = telecableInfos[processIndex] || null;
