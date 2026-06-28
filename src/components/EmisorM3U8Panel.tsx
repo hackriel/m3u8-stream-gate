@@ -2958,12 +2958,16 @@ export default function EmisorM3U8Panel() {
                         ? Math.max(0, Math.floor((clockNow - p.startTime) / 1000))
                         : p.elapsed;
                       const isSrt = SRT_INGEST_INDEXES.has(i);
-                      const fpsHealthy = live?.fps == null ? true : live.fps >= 25;
-                      const speedHealthy = live?.speed == null ? true : live.speed >= 0.95;
+                      const isPassthroughProfile = getOutputProfile(i) === 'passthrough';
+                      // En passthrough (-c copy) FFmpeg no decodifica frames, así que
+                      // fps/bitrate/q/speed salen como 0/N/A. Los marcamos como N/D
+                      // para no confundir (no es un bug — es esperado en copy mode).
+                      const fpsHealthy = isPassthroughProfile || live?.fps == null || live.fps === 0 ? true : live.fps >= 25;
+                      const speedHealthy = isPassthroughProfile || live?.speed == null ? true : live.speed >= 0.95;
                       const dropAlert = (live?.drop ?? 0) > 0;
                       const dupAlert = (live?.dup ?? 0) > 0;
                       const qValue = live?.q;
-                      const qHealthy = qValue == null ? true : qValue <= 30;
+                      const qHealthy = isPassthroughProfile || qValue == null ? true : qValue <= 30;
                       return (
                         <div
                           key={i}
@@ -2992,19 +2996,25 @@ export default function EmisorM3U8Panel() {
                             <div className="bg-background/40 rounded-lg p-2 border border-border/40">
                               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Bitrate</div>
                               <div className="font-mono font-semibold text-foreground">
-                                {live?.bitrateKbps != null ? `${live.bitrateKbps} kbps` : '—'}
+                                {isPassthroughProfile
+                                  ? <span title="Passthrough (-c copy): FFmpeg no calcula bitrate de salida">copy</span>
+                                  : live?.bitrateKbps != null ? `${live.bitrateKbps} kbps` : '—'}
                               </div>
                             </div>
                             <div className={`bg-background/40 rounded-lg p-2 border ${fpsHealthy ? 'border-border/40' : 'border-red-500/50'}`}>
                               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">FPS</div>
                               <div className={`font-mono font-semibold ${fpsHealthy ? 'text-foreground' : 'text-red-400'}`}>
-                                {live?.fps != null ? live.fps.toFixed(1) : '—'}
+                                {isPassthroughProfile
+                                  ? <span title="Passthrough: sin decode, no hay fps de salida">copy</span>
+                                  : live?.fps != null ? live.fps.toFixed(1) : '—'}
                               </div>
                             </div>
                             <div className={`bg-background/40 rounded-lg p-2 border ${speedHealthy ? 'border-border/40' : 'border-amber-500/50'}`}>
                               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Speed</div>
                               <div className={`font-mono font-semibold ${speedHealthy ? 'text-foreground' : 'text-amber-400'}`}>
-                                {live?.speed != null ? `${live.speed.toFixed(2)}x` : '—'}
+                                {isPassthroughProfile
+                                  ? <span title="Passthrough: remux a velocidad de paquete (no aplica)">copy</span>
+                                  : live?.speed != null ? `${live.speed.toFixed(2)}x` : '—'}
                               </div>
                             </div>
                             <div className={`bg-background/40 rounded-lg p-2 border ${dropAlert ? 'border-red-500/50' : 'border-border/40'}`}>
@@ -3022,7 +3032,9 @@ export default function EmisorM3U8Panel() {
                             <div className={`bg-background/40 rounded-lg p-2 border ${qHealthy ? 'border-border/40' : 'border-amber-500/50'}`}>
                               <div className="text-[10px] uppercase tracking-wider text-muted-foreground" title="Quantizer — calidad de compresión (≤30 ideal, >30 = bitrate/CPU insuficiente)">Q</div>
                               <div className={`font-mono font-semibold ${qHealthy ? 'text-foreground' : 'text-amber-400'}`}>
-                                {qValue != null ? qValue.toFixed(1) : '—'}
+                                {isPassthroughProfile
+                                  ? <span title="Passthrough: sin re-encode, no hay quantizer">copy</span>
+                                  : qValue != null ? qValue.toFixed(1) : '—'}
                               </div>
                             </div>
                           </div>
