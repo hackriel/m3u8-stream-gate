@@ -684,6 +684,16 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   if (!channel?.url) {
     throw new Error(`telecable channel not found: tried ${candidateIds.join(',')}${matcher?.namePatterns?.length ? ' + patterns' : ''}`);
   }
+  // El CDN de Telecable a veces devuelve una URL "válida" pero apuntando a
+  // /error/<lang>/<motivo>/error.m3u8 cuando la geolocalización/IP no está
+  // permitida para ese canal (ej. FUTV no autorizado desde IP del VPS).
+  // Si dejamos pasar esa URL, FFmpeg se queda en loop sin primer frame.
+  // Detectamos el patrón y devolvemos error claro para que el frontend lo muestre.
+  if (/\/error\/.+\/error\.m3u8/i.test(channel.url)) {
+    const reasonMatch = channel.url.match(/\/error\/[^/]+\/([^/]+)\/error\.m3u8/i);
+    const reason = reasonMatch ? reasonMatch[1] : 'unknown';
+    throw new Error(`telecable_channel_blocked: contentId=${resolvedContentId} motivo=${reason} (el CDN rechazó este canal para la IP/cuenta actual)`);
+  }
   const contentId = resolvedContentId;
 
   // Extraer expiración del query string de la URL firmada
@@ -753,10 +763,15 @@ const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfi
 // IDs SRT ingest (16/18/20/21/22/23): default Passthrough (sin re-encode)
 // para preservar la calidad exacta de OBS y eliminar CPU/generation-loss.
 const SRT_INGEST_DEFAULT_PASSTHROUGH_IDS = new Set(['16','18','20','21','22','23']);
+// Canales Telecable HLS de baja prioridad (Canal 8 / Canal 2): el usuario
+// los pidió en PASSTHROUGH por defecto para ahorrar CPU del VPS y mantener
+// la calidad original (no re-encode). Se permite override desde la UI.
+const HLS_DEFAULT_PASSTHROUGH_IDS = new Set(['27','28']);
 const getStoredOutputProfile = (processId) => {
   const stored = outputProfileState[String(processId)];
   if (stored) return normalizeOutputProfile(stored);
   if (SRT_INGEST_DEFAULT_PASSTHROUGH_IDS.has(String(processId))) return 'passthrough';
+  if (HLS_DEFAULT_PASSTHROUGH_IDS.has(String(processId))) return 'passthrough';
   return 'normal';
 };
 const saveOutputProfileForProcess = (processId, profile) => {
@@ -3871,7 +3886,9 @@ app.post('/api/emit', async (req, res) => {
     // Nombre del proceso para logs
     const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT', '21': 'TELETICA SRT', '22': 'FOX+ SRT', '23': 'FOX SRT', '24': 'FOX+ URL', '25': 'FOX URL', '26': 'FOX+ ALTERNO', '27': 'Canal 8 URL', '28': 'Canal 2 URL' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
-    sendLog(process_id, 'info', `🎬 ${procName}: Perfil ${outputProfile.label} → ${outputProfile.width}p CBR ${outputProfile.videoBitrate} AAC${outputProfile.audioBitrate} GOP2s (preset ${outputProfile.preset || 'veryfast'}${outputProfile.x264Params ? ' +x264params' : ''})${isRecovery ? ' [recovery]' : ''}`);
+    sendLog(process_id, 'info', outputProfile.passthrough
+      ? `🎬 ${procName}: Perfil PASSTHROUGH → -c copy (sin re-encode, calidad original del CDN)${isRecovery ? ' [recovery]' : ''}`
+      : `🎬 ${procName}: Perfil ${outputProfile.label} → ${outputProfile.width}p CBR ${outputProfile.videoBitrate} AAC${outputProfile.audioBitrate} GOP2s (preset ${outputProfile.preset || 'veryfast'}${outputProfile.x264Params ? ' +x264params' : ''})${isRecovery ? ' [recovery]' : ''}`);
 
     // Procesos CFR: usar fps nativo (29.97) + vsync cfr para cadencia constante al RTMP
     // Esto evita micro-jitter por forzar 30fps en una fuente 29.97fps (frame duplicado cada ~33s)
@@ -3931,25 +3948,38 @@ app.post('/api/emit', async (req, res) => {
         : hlsProgramIndex >= 0
         ? ['-map', `0:p:${hlsProgramIndex}:v?`, '-map', `0:p:${hlsProgramIndex}:a?`]
         : ['-map', '0:v:0?', '-map', '0:a:0?']),
-      '-c:v', 'libx264',
-      '-preset', outputProfile.preset || 'veryfast',
-      '-profile:v', 'main',
-      '-threads', '4',
-      '-b:v', outputProfile.videoBitrate,
-      '-maxrate', outputProfile.videoBitrate,
-      '-bufsize', outputProfile.bufsize,
-      ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
-      '-vf', isCanal6UrlProcess ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
-      '-r', outputFps,
-      ...(isCfrOutput || isCanal6UrlProcess ? ['-vsync', 'cfr'] : []),
-      '-g', gopSize,
-      '-keyint_min', gopSize,
-      '-sc_threshold', '0',
-      '-c:a', 'aac',
-      '-b:a', outputProfile.audioBitrate,
-      '-ar', '44100',
-      '-max_muxing_queue_size', '1024',
-      '-reset_timestamps', '1',
+      // ── Codec args: PASSTHROUGH (-c copy) o re-encode libx264 ──
+      // PASSTHROUGH: cuando el usuario elige el perfil 'passthrough' en la UI
+      // (por defecto activo en Canal 8/Canal 2), salimos con `-c copy`. Sin
+      // re-encode, CPU ~3% y calidad original del CDN preservada. Requiere
+      // que la fuente entregue H264+AAC (caso estándar Telecable).
+      ...(outputProfile.passthrough ? [
+        '-c:v', 'copy',
+        '-c:a', 'copy',
+        '-bsf:v', 'h264_mp4toannexb',
+        '-max_muxing_queue_size', '1024',
+        '-reset_timestamps', '1',
+      ] : [
+        '-c:v', 'libx264',
+        '-preset', outputProfile.preset || 'veryfast',
+        '-profile:v', 'main',
+        '-threads', '4',
+        '-b:v', outputProfile.videoBitrate,
+        '-maxrate', outputProfile.videoBitrate,
+        '-bufsize', outputProfile.bufsize,
+        ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
+        '-vf', isCanal6UrlProcess ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
+        '-r', outputFps,
+        ...(isCfrOutput || isCanal6UrlProcess ? ['-vsync', 'cfr'] : []),
+        '-g', gopSize,
+        '-keyint_min', gopSize,
+        '-sc_threshold', '0',
+        '-c:a', 'aac',
+        '-b:a', outputProfile.audioBitrate,
+        '-ar', '44100',
+        '-max_muxing_queue_size', '1024',
+        '-reset_timestamps', '1',
+      ]),
     ];
 
     // Forzar timestamps monotónicos a la salida + resync suave de audio.

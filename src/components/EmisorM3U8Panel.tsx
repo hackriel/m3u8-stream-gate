@@ -108,8 +108,20 @@ const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
 };
 // IDs SRT ingest: arrancan por defecto en Passthrough (sin re-encode).
 const SRT_INGEST_INDEXES = new Set<number>([16, 18, 20, 21, 22, 23]);
+// IDs HLS de baja prioridad (Canal 8 / Canal 2 Telecable): por petición del
+// usuario default a Passthrough — la señal sale tal cual llega del CDN
+// (sin compresión) para ahorrar CPU del VPS en canales poco vistos.
+const HLS_PASSTHROUGH_DEFAULT_INDEXES = new Set<number>([27, 28]);
+// Set unificado de procesos a los que se les muestra la opción "Passthrough"
+// en el dropdown "Formato de salida".
+const PASSTHROUGH_ALLOWED_INDEXES = new Set<number>([
+  ...Array.from(SRT_INGEST_INDEXES),
+  ...Array.from(HLS_PASSTHROUGH_DEFAULT_INDEXES),
+]);
 const getDefaultOutputProfile = (processIndex: number): OutputProfile =>
-  SRT_INGEST_INDEXES.has(processIndex) ? "passthrough" : DEFAULT_OUTPUT_PROFILE;
+  (SRT_INGEST_INDEXES.has(processIndex) || HLS_PASSTHROUGH_DEFAULT_INDEXES.has(processIndex))
+    ? "passthrough"
+    : DEFAULT_OUTPUT_PROFILE;
 
 // Procesos ocultos legacy
 // 2, 8, 9: Tigo legacy (descartados)
@@ -2398,7 +2410,7 @@ export default function EmisorM3U8Panel() {
                 disabled={process.isEmitiendo || process.emitStatus === 'starting'}
                 className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {SRT_INGEST_INDEXES.has(processIndex) && (
+                {PASSTHROUGH_ALLOWED_INDEXES.has(processIndex) && (
                   <option value="passthrough">{OUTPUT_PROFILE_LABELS.passthrough}</option>
                 )}
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
