@@ -2234,10 +2234,10 @@ export default function EmisorM3U8Panel() {
                   const tMode = telecableModes[processIndex] || 'scraping';
                   const tInfo = telecableInfos[processIndex] || null;
                   const isFox = processIndex === FOX_URL_INDEX;
-                  const scrapingLabel = isFox ? '🔐 Scraping (TDMax+CR)' : '🔐 Modo histórico';
+                  const scrapingLabel = isFox ? '🔐 Scraping (TDMax+CR)' : '🔐 TDMax';
                   const scrapingHelp = isFox
                     ? 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'
-                    : 'Usa el flujo histórico de este canal (TDMax/scraping, etc).';
+                    : 'Login TDMax + token de 60s (flujo TDMax).';
                   return (
                     <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
                       <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
@@ -2253,7 +2253,7 @@ export default function EmisorM3U8Panel() {
                               ? 'bg-blue-500/20 border-blue-500 text-blue-300'
                               : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
                           } disabled:opacity-60 disabled:cursor-not-allowed`}
-                          title="Usar el modo histórico del canal"
+                          title="Usar TDMax (login + token de 60s)"
                         >
                           {scrapingLabel}
                         </button>
