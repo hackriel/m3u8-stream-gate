@@ -753,10 +753,15 @@ const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfi
 // IDs SRT ingest (16/18/20/21/22/23): default Passthrough (sin re-encode)
 // para preservar la calidad exacta de OBS y eliminar CPU/generation-loss.
 const SRT_INGEST_DEFAULT_PASSTHROUGH_IDS = new Set(['16','18','20','21','22','23']);
+// Canales Telecable HLS de baja prioridad (Canal 8 / Canal 2): el usuario
+// los pidió en PASSTHROUGH por defecto para ahorrar CPU del VPS y mantener
+// la calidad original (no re-encode). Se permite override desde la UI.
+const HLS_DEFAULT_PASSTHROUGH_IDS = new Set(['27','28']);
 const getStoredOutputProfile = (processId) => {
   const stored = outputProfileState[String(processId)];
   if (stored) return normalizeOutputProfile(stored);
   if (SRT_INGEST_DEFAULT_PASSTHROUGH_IDS.has(String(processId))) return 'passthrough';
+  if (HLS_DEFAULT_PASSTHROUGH_IDS.has(String(processId))) return 'passthrough';
   return 'normal';
 };
 const saveOutputProfileForProcess = (processId, profile) => {
