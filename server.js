@@ -684,6 +684,16 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   if (!channel?.url) {
     throw new Error(`telecable channel not found: tried ${candidateIds.join(',')}${matcher?.namePatterns?.length ? ' + patterns' : ''}`);
   }
+  // El CDN de Telecable a veces devuelve una URL "válida" pero apuntando a
+  // /error/<lang>/<motivo>/error.m3u8 cuando la geolocalización/IP no está
+  // permitida para ese canal (ej. FUTV no autorizado desde IP del VPS).
+  // Si dejamos pasar esa URL, FFmpeg se queda en loop sin primer frame.
+  // Detectamos el patrón y devolvemos error claro para que el frontend lo muestre.
+  if (/\/error\/.+\/error\.m3u8/i.test(channel.url)) {
+    const reasonMatch = channel.url.match(/\/error\/[^/]+\/([^/]+)\/error\.m3u8/i);
+    const reason = reasonMatch ? reasonMatch[1] : 'unknown';
+    throw new Error(`telecable_channel_blocked: contentId=${resolvedContentId} motivo=${reason} (el CDN rechazó este canal para la IP/cuenta actual)`);
+  }
   const contentId = resolvedContentId;
 
   // Extraer expiración del query string de la URL firmada
