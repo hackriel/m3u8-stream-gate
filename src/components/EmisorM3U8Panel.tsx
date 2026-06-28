@@ -2410,7 +2410,7 @@ export default function EmisorM3U8Panel() {
                 disabled={process.isEmitiendo || process.emitStatus === 'starting'}
                 className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {SRT_INGEST_INDEXES.has(processIndex) && (
+                {PASSTHROUGH_ALLOWED_INDEXES.has(processIndex) && (
                   <option value="passthrough">{OUTPUT_PROFILE_LABELS.passthrough}</option>
                 )}
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
