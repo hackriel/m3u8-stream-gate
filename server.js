@@ -7740,6 +7740,11 @@ server.listen(PORT, () => {
 setInterval(async () => {
   for (const pid of TELECABLE_PROCESSES) {
     if (!isTelecableMode(pid)) continue;
+    // Solo refrescar si el proceso está realmente emitiendo en modo telecable.
+    // Evita peticiones innecesarias a la API de Telecable cuando el estado
+    // 'telecable' quedó persistido en DB pero el usuario está en otro modo
+    // o el proceso está detenido.
+    if (!ffmpegProcesses.has(String(pid))) continue;
     const st = telecableState.get(pid);
     const nowS = Math.floor(Date.now() / 1000);
     const secsLeft = st?.expiresAt ? (st.expiresAt - nowS) : 0;
