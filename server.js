@@ -3946,25 +3946,38 @@ app.post('/api/emit', async (req, res) => {
         : hlsProgramIndex >= 0
         ? ['-map', `0:p:${hlsProgramIndex}:v?`, '-map', `0:p:${hlsProgramIndex}:a?`]
         : ['-map', '0:v:0?', '-map', '0:a:0?']),
-      '-c:v', 'libx264',
-      '-preset', outputProfile.preset || 'veryfast',
-      '-profile:v', 'main',
-      '-threads', '4',
-      '-b:v', outputProfile.videoBitrate,
-      '-maxrate', outputProfile.videoBitrate,
-      '-bufsize', outputProfile.bufsize,
-      ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
-      '-vf', isCanal6UrlProcess ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
-      '-r', outputFps,
-      ...(isCfrOutput || isCanal6UrlProcess ? ['-vsync', 'cfr'] : []),
-      '-g', gopSize,
-      '-keyint_min', gopSize,
-      '-sc_threshold', '0',
-      '-c:a', 'aac',
-      '-b:a', outputProfile.audioBitrate,
-      '-ar', '44100',
-      '-max_muxing_queue_size', '1024',
-      '-reset_timestamps', '1',
+      // ── Codec args: PASSTHROUGH (-c copy) o re-encode libx264 ──
+      // PASSTHROUGH: cuando el usuario elige el perfil 'passthrough' en la UI
+      // (por defecto activo en Canal 8/Canal 2), salimos con `-c copy`. Sin
+      // re-encode, CPU ~3% y calidad original del CDN preservada. Requiere
+      // que la fuente entregue H264+AAC (caso estándar Telecable).
+      ...(outputProfile.passthrough ? [
+        '-c:v', 'copy',
+        '-c:a', 'copy',
+        '-bsf:v', 'h264_mp4toannexb',
+        '-max_muxing_queue_size', '1024',
+        '-reset_timestamps', '1',
+      ] : [
+        '-c:v', 'libx264',
+        '-preset', outputProfile.preset || 'veryfast',
+        '-profile:v', 'main',
+        '-threads', '4',
+        '-b:v', outputProfile.videoBitrate,
+        '-maxrate', outputProfile.videoBitrate,
+        '-bufsize', outputProfile.bufsize,
+        ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
+        '-vf', isCanal6UrlProcess ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
+        '-r', outputFps,
+        ...(isCfrOutput || isCanal6UrlProcess ? ['-vsync', 'cfr'] : []),
+        '-g', gopSize,
+        '-keyint_min', gopSize,
+        '-sc_threshold', '0',
+        '-c:a', 'aac',
+        '-b:a', outputProfile.audioBitrate,
+        '-ar', '44100',
+        '-max_muxing_queue_size', '1024',
+        '-reset_timestamps', '1',
+      ]),
     ];
 
     // Forzar timestamps monotónicos a la salida + resync suave de audio.
