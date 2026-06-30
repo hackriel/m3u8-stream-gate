@@ -841,10 +841,11 @@ function getPersistedTelecableContentId(pid) {
   const c = telecablePersistedState[String(pid)]?.contentId;
   return c || null;
 }
-// Prime telecableState en memoria con lo persistido (sin URL — eso se resuelve al primer login).
+// Prime telecableState en memoria con lo persistido. La calidad NO se persiste
+// más (Telecable solo entrega una rendition real ≈ q=40); solo conservamos contentId.
 for (const [pid, st] of Object.entries(telecablePersistedState)) {
-  if (st && (st.quality || st.contentId)) {
-    telecableState.set(pid, { quality: st.quality, contentId: st.contentId });
+  if (st && st.contentId) {
+    telecableState.set(pid, { contentId: st.contentId });
   }
 }
 
