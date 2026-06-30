@@ -6647,66 +6647,6 @@ app.get('/api/telecable/channels', async (req, res) => {
 // ── ALIASES legacy (FOX URL pid 25) ── mantenidos para no romper clientes viejos.
 app.get('/api/fox/source-mode', (req, res) => res.json(telecableSourceModePayload('25')));
 
-// ── PROBE: prueba qué bitrate/resolución devuelve Telecable para cada bucket de quality ──
-// Uso:  GET /api/telecable/:pid/probe-qualities
-//       GET /api/telecable/:pid/probe-qualities?content_id=TELETICA7&qs=10,20,30,40,50,60,70,80
-// Hace device-login una vez y luego pide /api/playlist con cada quality, resuelve la URL
-// firmada del canal, descarga el master m3u8 y reporta BANDWIDTH/RESOLUTION reales.
-app.get('/api/telecable/:pid/probe-qualities', async (req, res) => {
-  const pid = String(req.params.pid);
-  if (!TELECABLE_PROCESSES.has(pid)) {
-    return res.status(404).json({ error: `pid ${pid} no soporta Telecable` });
-  }
-  const qsList = (req.query.qs ? String(req.query.qs) : '10,20,30,40,50,60,70,80,90,100')
-    .split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n) && n >= 10 && n <= 100);
-  const cidOverride = req.query.content_id ? String(req.query.content_id) : null;
-  try {
-    const results = [];
-    for (const q of qsList) {
-      const row = { quality: q };
-      try {
-        const st = await telecableLoginAndResolve(pid, cidOverride, q);
-        row.content_id = st.contentId;
-        row.url_stream_quality = (new URL(st.url)).searchParams.get('stream-quality');
-        // Descargar el master m3u8 y parsear variantes
-        const masterResp = await fetch(st.url, { headers: { 'User-Agent': TELECABLE_UA } });
-        row.http = masterResp.status;
-        if (masterResp.ok) {
-          const txt = await masterResp.text();
-          const variants = [];
-          const lines = txt.split(/\r?\n/);
-          for (let i = 0; i < lines.length; i++) {
-            const m = lines[i].match(/^#EXT-X-STREAM-INF:(.+)$/i);
-            if (m) {
-              const attrs = m[1];
-              const bw = (attrs.match(/BANDWIDTH=(\d+)/i) || [])[1];
-              const res = (attrs.match(/RESOLUTION=(\d+x\d+)/i) || [])[1];
-              variants.push({
-                bandwidth_kbps: bw ? Math.round(parseInt(bw, 10) / 1000) : null,
-                resolution: res || null,
-              });
-            }
-          }
-          row.variants = variants;
-          // Si es media playlist (no master), reportar como única variante
-          if (variants.length === 0 && /#EXTINF/i.test(txt)) {
-            row.variants = [{ note: 'media playlist directa (sin master ABR)' }];
-          }
-        }
-      } catch (e) {
-        row.error = e.message;
-      }
-      results.push(row);
-      // Respetar rate-limit del relogin
-      await new Promise(r => setTimeout(r, 500));
-    }
-    res.json({ ok: true, pid, content_id: cidOverride || null, results });
-  } catch (e) {
-    res.status(502).json({ error: e.message });
-  }
-});
-
-app.post('/api/fox/source-mode', (req, res) => {
   const requested = req.body?.mode;
   if (requested !== 'telecable' && requested !== 'scraping') {
     return res.status(400).json({ error: 'Modo FOX inválido' });
