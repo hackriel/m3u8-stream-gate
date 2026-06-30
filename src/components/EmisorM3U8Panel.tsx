@@ -2362,11 +2362,6 @@ export default function EmisorM3U8Panel() {
                             if (processIndex === 0 && disney7ContentId) {
                               refreshBody.content_id = disney7ContentId;
                             }
-                            try {
-                              const qStr = localStorage.getItem(`telecable_${processIndex}_quality`);
-                              const q = qStr ? parseInt(qStr, 10) : NaN;
-                              if (Number.isFinite(q)) refreshBody.quality = q;
-                            } catch {}
                             const r = await fetch(`/api/telecable/${processIndex}/refresh`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
@@ -2375,7 +2370,7 @@ export default function EmisorM3U8Panel() {
                             const j = await r.json().catch(() => ({}));
                             if (r.ok) {
                               if (j.url) updateProcess(processIndex, { m3u8: j.url });
-                              toast.success(`URL Telecable q=${j.quality ?? '?'} refrescada (vence en ${Math.floor((j.expires_in_s || 0) / 3600)}h)`);
+                              toast.success(`URL Telecable refrescada (vence en ${Math.floor((j.expires_in_s || 0) / 3600)}h)`);
                             } else {
                               toast.error(j.error || 'No se pudo refrescar');
                             }
@@ -2407,25 +2402,6 @@ export default function EmisorM3U8Panel() {
                           : (channelConfig.fetchLabel || '📡 Scrapear Telecable')
                       )}
                     </button>
-                  )}
-                  {TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable' && (
-                    <select
-                      defaultValue={(() => {
-                        try { return localStorage.getItem(`telecable_${processIndex}_quality`) || '40'; } catch { return '40'; }
-                      })()}
-                      onChange={(e) => {
-                        try { localStorage.setItem(`telecable_${processIndex}_quality`, e.target.value); } catch {}
-                      }}
-                      title="Calidad Telecable (mayor = más bitrate). Aplica al siguiente Scrapear."
-                      className="px-2 py-3 rounded-xl bg-card border-2 border-border text-sm"
-                    >
-                      <option value="20">q=20</option>
-                      <option value="30">q=30</option>
-                      <option value="40">q=40</option>
-                      <option value="50">q=50</option>
-                      <option value="60">q=60</option>
-                      <option value="70">q=70</option>
-                    </select>
                   )}
                 </div>
                 </>

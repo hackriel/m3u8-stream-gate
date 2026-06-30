@@ -645,7 +645,6 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   if (!explicitContentId && !matcher) throw new Error(`Sin content-id Telecable para pid=${pid}`);
   const quality = qualityOverride
     || telecableState.get(pid)?.quality
-    || getPersistedTelecableQuality(pid)
     || TELECABLE_DEFAULT_QUALITY;
 
   // 1) device-login
@@ -842,10 +841,11 @@ function getPersistedTelecableContentId(pid) {
   const c = telecablePersistedState[String(pid)]?.contentId;
   return c || null;
 }
-// Prime telecableState en memoria con lo persistido (sin URL — eso se resuelve al primer login).
+// Prime telecableState en memoria con lo persistido. La calidad NO se persiste
+// más (Telecable solo entrega una rendition real ≈ q=40); solo conservamos contentId.
 for (const [pid, st] of Object.entries(telecablePersistedState)) {
-  if (st && (st.quality || st.contentId)) {
-    telecableState.set(pid, { quality: st.quality, contentId: st.contentId });
+  if (st && st.contentId) {
+    telecableState.set(pid, { contentId: st.contentId });
   }
 }
 
@@ -6611,18 +6611,8 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
       }
       persistTelecableField(pid, 'contentId', overrideCid);
     }
-    let qualityOverride = null;
-    const qRaw = req.body?.quality;
-    if (qRaw !== undefined && qRaw !== null && qRaw !== '') {
-      const q = parseInt(String(qRaw), 10);
-      if (Number.isFinite(q) && q >= 10 && q <= 100) {
-        qualityOverride = q;
-        const prev = telecableState.get(pid) || {};
-        telecableState.set(pid, { ...prev, quality: q });
-        persistTelecableField(pid, 'quality', q);
-      }
-    }
-    const st = await safeTelecableResolve(pid, overrideCid, qualityOverride);
+    // Calidad fija en TELECABLE_DEFAULT_QUALITY (40 = máxima real que entrega Telecable hoy).
+    const st = await safeTelecableResolve(pid, overrideCid, null);
     res.json({
       ok: true,
       url: st.url,
