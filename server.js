@@ -4867,8 +4867,17 @@ app.post('/api/emit', async (req, res) => {
       
       // Detectar diferentes tipos de mensajes
       if (output.includes('frame=') || output.includes('fps=')) {
-        // Progreso normal — actualizar watchdog
-        lastFrameTime.set(process_id, Date.now());
+        // Progreso normal — actualizar watchdog SOLO si el contador de frames avanzó.
+        // FFmpeg sigue imprimiendo "frame=N fps=X" con N congelado cuando el input
+        // se queda sin data (bitrate=N/A). Sin esto el watchdog cree que todo va
+        // bien y el canal queda "colgado vivo" hasta reinicio manual.
+        const _frameNumMatch = output.match(/frame=\s*(\d+)/);
+        const _currentFrameNum = _frameNumMatch ? parseInt(_frameNumMatch[1], 10) : null;
+        const _prevFrameNum = lastFrameNumber.get(process_id);
+        if (_currentFrameNum === null || _prevFrameNum === undefined || _currentFrameNum > _prevFrameNum) {
+          lastFrameTime.set(process_id, Date.now());
+          if (_currentFrameNum !== null) lastFrameNumber.set(process_id, _currentFrameNum);
+        }
         const currentStatus = emissionStatuses.get(process_id);
         if (currentStatus === 'starting') {
           emissionStatuses.set(process_id, 'running');
