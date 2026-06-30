@@ -782,6 +782,42 @@ const saveOutputProfileForProcess = (processId, profile) => {
 };
 
 // ───────────────────────────────────────────────────────────────────────
+// TELECABLE persistent state (sobrevive a reinicios). Guardamos por pid:
+//   - quality: calidad seleccionada por el usuario en el dropdown UI.
+//   - contentId: último contentId resuelto (útil para Disney 7 que es dinámico).
+// Se carga al boot y se vuelca a disco en cada cambio.
+// ───────────────────────────────────────────────────────────────────────
+const TELECABLE_STATE_FILE = path.join(__dirname, 'telecable-state.json');
+let telecablePersistedState = {};
+try {
+  if (fs.existsSync(TELECABLE_STATE_FILE)) {
+    telecablePersistedState = JSON.parse(fs.readFileSync(TELECABLE_STATE_FILE, 'utf8')) || {};
+  }
+} catch (err) {
+  console.warn('[telecable] No se pudo leer telecable-state.json:', err.message);
+}
+function persistTelecableField(pid, field, value) {
+  const p = String(pid);
+  if (!telecablePersistedState[p]) telecablePersistedState[p] = {};
+  telecablePersistedState[p][field] = value;
+  try { fs.writeFileSync(TELECABLE_STATE_FILE, JSON.stringify(telecablePersistedState, null, 2)); } catch (_) {}
+}
+function getPersistedTelecableQuality(pid) {
+  const q = telecablePersistedState[String(pid)]?.quality;
+  return Number.isFinite(q) ? q : null;
+}
+function getPersistedTelecableContentId(pid) {
+  const c = telecablePersistedState[String(pid)]?.contentId;
+  return c || null;
+}
+// Prime telecableState en memoria con lo persistido (sin URL — eso se resuelve al primer login).
+for (const [pid, st] of Object.entries(telecablePersistedState)) {
+  if (st && (st.quality || st.contentId)) {
+    telecableState.set(pid, { quality: st.quality, contentId: st.contentId });
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
 // El proxy enruta tanto el scraping (login/token TDMax) como el consumo
 // FFmpeg (manifiesto + segmentos HLS) por la IP residencial CR para
