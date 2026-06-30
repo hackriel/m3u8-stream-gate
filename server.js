@@ -6610,18 +6610,8 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
       }
       persistTelecableField(pid, 'contentId', overrideCid);
     }
-    let qualityOverride = null;
-    const qRaw = req.body?.quality;
-    if (qRaw !== undefined && qRaw !== null && qRaw !== '') {
-      const q = parseInt(String(qRaw), 10);
-      if (Number.isFinite(q) && q >= 10 && q <= 100) {
-        qualityOverride = q;
-        const prev = telecableState.get(pid) || {};
-        telecableState.set(pid, { ...prev, quality: q });
-        persistTelecableField(pid, 'quality', q);
-      }
-    }
-    const st = await safeTelecableResolve(pid, overrideCid, qualityOverride);
+    // Calidad fija en TELECABLE_DEFAULT_QUALITY (40 = máxima real que entrega Telecable hoy).
+    const st = await safeTelecableResolve(pid, overrideCid, null);
     res.json({
       ok: true,
       url: st.url,
