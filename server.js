@@ -221,6 +221,35 @@ const HLS_OUTPUT_DIR = path.join(__dirname, 'live');
 if (!fs.existsSync(HLS_OUTPUT_DIR)) {
   fs.mkdirSync(HLS_OUTPUT_DIR, { recursive: true });
 }
+
+// ───────────────────────────────────────────────────────────────────────
+// Limpia el directorio HLS de un pid (borra playlist.m3u8 + segmentos) para
+// que los clientes (XUI/Odin) reciban 404 y caigan a su URL de backup.
+// Guard: si OTRO pid comparte el mismo slug y está vivo, NO limpia.
+// ───────────────────────────────────────────────────────────────────────
+function clearHlsSlugForPid(pid, logTag = null) {
+  const slug = (typeof HLS_SLUG_MAP !== 'undefined') ? HLS_SLUG_MAP[String(pid)] : null;
+  if (!slug) return false;
+  // ¿Hay OTRO proceso vivo escribiendo al mismo slug?
+  for (const [otherPid, otherSlug] of Object.entries(HLS_SLUG_MAP)) {
+    if (otherPid === String(pid)) continue;
+    if (otherSlug !== slug) continue;
+    if (ffmpegProcesses && (ffmpegProcesses.has(otherPid) || ffmpegProcesses.has(Number(otherPid)))) {
+      return false; // alguien más sigue escribiendo, no limpiamos
+    }
+  }
+  const dir = path.join(HLS_OUTPUT_DIR, slug);
+  try {
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      try { sendLog(pid, 'info', `🧹 HLS /live/${slug} limpiado${logTag ? ` (${logTag})` : ''} — clientes caerán a backup`); } catch (_) {}
+      return true;
+    }
+  } catch (e) {
+    try { sendLog(pid, 'warn', `⚠️ No se pudo limpiar /live/${slug}: ${e.message}`); } catch (_) {}
+  }
+  return false;
+}
 // Servir segmentos HLS con headers correctos para XUI/IPTV
 app.use('/live', (req, res, next) => {
   // CORS permisivo para reproductores IPTV
