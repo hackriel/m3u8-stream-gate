@@ -1869,6 +1869,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Watchdog: última vez que cada proceso produjo frames (timestamp ms)
 const lastFrameTime = new Map(); // Map<processId, timestampMs>
+const lastFrameNumber = new Map(); // Map<processId, number> — último contador de frames (detectar stall real)
 const lastProgressLog = new Map(); // Map<processId, timestampMs> — throttle de logs de progreso
 const PROGRESS_LOG_INTERVAL = 5000; // Loguear progreso cada 5 segundos
 const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames en running = proceso colgado
