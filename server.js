@@ -6647,6 +6647,7 @@ app.get('/api/telecable/channels', async (req, res) => {
 // ── ALIASES legacy (FOX URL pid 25) ── mantenidos para no romper clientes viejos.
 app.get('/api/fox/source-mode', (req, res) => res.json(telecableSourceModePayload('25')));
 
+app.post('/api/fox/source-mode', (req, res) => {
   const requested = req.body?.mode;
   if (requested !== 'telecable' && requested !== 'scraping') {
     return res.status(400).json({ error: 'Modo FOX inválido' });
