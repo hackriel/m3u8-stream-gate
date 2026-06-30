@@ -1952,7 +1952,7 @@ setInterval(() => {
         const { channelId, channelName } = CHANNEL_MAP[String(processId)];
         ignoredLateCloseProcesses.add(processData.process);
         ffmpegProcesses.delete(processId);
-        lastFrameTime.delete(processId);
+        lastFrameTime.delete(processId); lastFrameNumber.delete(processId);
         emissionStatuses.set(processId, 'idle');
         scrapeSessionCache.delete(String(processId));
         quickRetryState.delete(String(processId));
@@ -2012,7 +2012,7 @@ setInterval(() => {
         console.error(`Watchdog: error matando proceso ${processId}:`, e);
       }
       
-      lastFrameTime.delete(processId);
+      lastFrameTime.delete(processId); lastFrameNumber.delete(processId);
     }
   }
 }, WATCHDOG_CHECK_INTERVAL);
@@ -5018,7 +5018,7 @@ app.post('/api/emit', async (req, res) => {
         // Limpiar handles del proceso muerto sin tocar is_emitting
         emissionStatuses.set(process_id, 'starting');
         ffmpegProcesses.delete(process_id);
-        lastFrameTime.delete(process_id);
+        lastFrameTime.delete(process_id); lastFrameNumber.delete(process_id);
         ignoredLateCloseProcesses.delete(ffmpegProcess);
         try { resetTigoSrtMetric(process_id); } catch (_) {}
 
@@ -5182,7 +5182,7 @@ app.post('/api/emit', async (req, res) => {
       // Cerrar mini-proxy de Tigo si existe (Fase 2)
       stopTigoProxy(process_id).catch(() => {});
 
-      lastFrameTime.delete(process_id); // Limpiar watchdog
+      lastFrameTime.delete(process_id); lastFrameNumber.delete(process_id); // Limpiar watchdog
 
       // ──────────────────────────────────────────────────────────────────
       // FOX / FOX+ URL (24/25): arrancar FILLER inmediatamente
@@ -5709,7 +5709,7 @@ app.post('/api/emit', async (req, res) => {
       
       emissionStatuses.set(process_id, 'error');
       ffmpegProcesses.delete(process_id);
-      lastFrameTime.delete(process_id);
+      lastFrameTime.delete(process_id); lastFrameNumber.delete(process_id);
     });
 
     // NOTA: No forzar 'running' por timeout — el watchdog y el parser de stderr
@@ -6191,7 +6191,7 @@ app.post('/api/emit/stop', async (req, res) => {
 
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
-      lastFrameTime.delete(process_id);
+      lastFrameTime.delete(process_id); lastFrameNumber.delete(process_id);
       lastProgressLog.delete(process_id);
       recoveryAttempts.delete(process_id);
       scrapeSessionCache.delete(process_id);
@@ -6335,7 +6335,7 @@ app.post('/api/emit/restart', async (req, res) => {
       await stopTigoProxy(process_id).catch(() => {});
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
-      lastFrameTime.delete(process_id);
+      lastFrameTime.delete(process_id); lastFrameNumber.delete(process_id);
       lastProgressLog.delete(process_id);
       sendLog(process_id, 'info', `🛑 FFmpeg anterior detenido para reinicio en caliente`);
     }
