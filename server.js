@@ -6575,6 +6575,7 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
       if (!prev || prev.contentId !== overrideCid) {
         telecableState.set(pid, { ...(prev || {}), contentId: overrideCid });
       }
+      persistTelecableField(pid, 'contentId', overrideCid);
     }
     let qualityOverride = null;
     const qRaw = req.body?.quality;
@@ -6584,6 +6585,7 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
         qualityOverride = q;
         const prev = telecableState.get(pid) || {};
         telecableState.set(pid, { ...prev, quality: q });
+        persistTelecableField(pid, 'quality', q);
       }
     }
     const st = await safeTelecableResolve(pid, overrideCid, qualityOverride);
