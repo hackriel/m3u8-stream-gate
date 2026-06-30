@@ -7535,7 +7535,7 @@ server.listen(PORT, () => {
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
           if (now - lastRefresh < REFRESH_GUARD_MS) continue;
 
-          sendLog(pid, 'info', `⏰ Refresh programado (${String(crHour).padStart(2, '0')}:00 CR): reiniciando con URL fresca...`);
+          sendLog(pid, 'info', `⏰ Refresh programado (${String(crHour).padStart(2, '0')}:00 CR): apagando 3 min para que XUI/Odin caigan al backup, luego URL fresca...`);
 
           // Marcar refresh ahora para evitar loops si algo falla
           await supabase
@@ -7550,7 +7550,20 @@ server.listen(PORT, () => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ process_id: pid, internal_refresh: true }),
             });
-            await new Promise(r => setTimeout(r, 3000));
+            // Asegurar que el HLS quede vacío (el stop ya lo intenta, pero
+            // re-confirmamos por si quedó algún segmento por race condition).
+            await new Promise(r => setTimeout(r, 1500));
+            clearHlsSlugForPid(pid, 'refresh 3AM');
+            // Pausa de 3 min para que XUI/Odin detecten el 404 y conmuten
+            // a su URL de backup. Durante este tiempo NO servimos HLS.
+            sendLog(pid, 'info', `⏸️ Canal apagado, esperando 3 min antes de relanzar (backup activo en XUI/Odin)...`);
+            await new Promise(r => setTimeout(r, 180_000));
+            // Limpieza final justo antes de relanzar, por si algo escribió
+            // en el directorio durante la pausa.
+            clearHlsSlugForPid(pid, 'pre-relaunch');
+            // Limpiar manualStop ya que es un refresh interno, no un stop del usuario
+            manualStopProcesses.delete(pid);
+            manualStopProcesses.delete(Number(pid));
 
             // Limpiar manualStop ya que es un refresh interno, no un stop del usuario
             manualStopProcesses.delete(pid);
