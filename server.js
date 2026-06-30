@@ -6174,6 +6174,11 @@ app.post('/api/emit/stop', async (req, res) => {
         await foxStopFillerAndWait(process_id, sendLog);
       }
 
+      // Limpiar el HLS slug para que clientes (XUI/Odin) reciban 404 y
+      // caigan a su URL de backup en vez de quedarse pegados al último
+      // segmento. Guard interno respeta slugs compartidos.
+      clearHlsSlugForPid(process_id, internal_refresh ? 'refresh' : 'stop manual');
+
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
       lastFrameTime.delete(process_id);
