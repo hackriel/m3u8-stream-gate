@@ -7565,10 +7565,6 @@ server.listen(PORT, () => {
             manualStopProcesses.delete(pid);
             manualStopProcesses.delete(Number(pid));
 
-            // Limpiar manualStop ya que es un refresh interno, no un stop del usuario
-            manualStopProcesses.delete(pid);
-            manualStopProcesses.delete(Number(pid));
-
             if (CHANNEL_MAP[pid]) {
               const { channelId, channelName } = CHANNEL_MAP[pid];
               // TELETICA URL (13) en modo OFICIAL: NO scrapear, relanzar con Bradmax.
