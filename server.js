@@ -721,7 +721,7 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
 // (caso Disney 7 pid 0, dropdown del usuario).
 async function safeTelecableResolve(processId, contentIdOverride = null) {
   try {
-    const st = await telecableLoginAndResolve(processId, contentIdOverride);
+    const st = await telecableLoginAndResolve(processId, contentIdOverride, arguments[2] || null);
     sendLog(processId, 'success',
       `📡 Telecable URL obtenida (contentId=${st.contentId}, quality=${st.quality}, expira en ${
         st.expiresAt ? Math.floor((st.expiresAt - Date.now() / 1000) / 3600) + 'h' : '?'
