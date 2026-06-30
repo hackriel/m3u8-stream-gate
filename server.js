@@ -221,6 +221,35 @@ const HLS_OUTPUT_DIR = path.join(__dirname, 'live');
 if (!fs.existsSync(HLS_OUTPUT_DIR)) {
   fs.mkdirSync(HLS_OUTPUT_DIR, { recursive: true });
 }
+
+// ───────────────────────────────────────────────────────────────────────
+// Limpia el directorio HLS de un pid (borra playlist.m3u8 + segmentos) para
+// que los clientes (XUI/Odin) reciban 404 y caigan a su URL de backup.
+// Guard: si OTRO pid comparte el mismo slug y está vivo, NO limpia.
+// ───────────────────────────────────────────────────────────────────────
+function clearHlsSlugForPid(pid, logTag = null) {
+  const slug = (typeof HLS_SLUG_MAP !== 'undefined') ? HLS_SLUG_MAP[String(pid)] : null;
+  if (!slug) return false;
+  // ¿Hay OTRO proceso vivo escribiendo al mismo slug?
+  for (const [otherPid, otherSlug] of Object.entries(HLS_SLUG_MAP)) {
+    if (otherPid === String(pid)) continue;
+    if (otherSlug !== slug) continue;
+    if (ffmpegProcesses && (ffmpegProcesses.has(otherPid) || ffmpegProcesses.has(Number(otherPid)))) {
+      return false; // alguien más sigue escribiendo, no limpiamos
+    }
+  }
+  const dir = path.join(HLS_OUTPUT_DIR, slug);
+  try {
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      try { sendLog(pid, 'info', `🧹 HLS /live/${slug} limpiado${logTag ? ` (${logTag})` : ''} — clientes caerán a backup`); } catch (_) {}
+      return true;
+    }
+  } catch (e) {
+    try { sendLog(pid, 'warn', `⚠️ No se pudo limpiar /live/${slug}: ${e.message}`); } catch (_) {}
+  }
+  return false;
+}
 // Servir segmentos HLS con headers correctos para XUI/IPTV
 app.use('/live', (req, res, next) => {
   // CORS permisivo para reproductores IPTV
@@ -614,7 +643,10 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
     || (matcher && matcher.contentIds[0])
     || TELECABLE_CONTENT_MAP[pid];
   if (!explicitContentId && !matcher) throw new Error(`Sin content-id Telecable para pid=${pid}`);
-  const quality = qualityOverride || telecableState.get(pid)?.quality || TELECABLE_DEFAULT_QUALITY;
+  const quality = qualityOverride
+    || telecableState.get(pid)?.quality
+    || getPersistedTelecableQuality(pid)
+    || TELECABLE_DEFAULT_QUALITY;
 
   // 1) device-login
   const loginUrl =
@@ -780,6 +812,42 @@ const saveOutputProfileForProcess = (processId, profile) => {
   try { fs.writeFileSync(OUTPUT_PROFILE_STATE_FILE, JSON.stringify(outputProfileState, null, 2)); } catch (_) {}
   return normalized;
 };
+
+// ───────────────────────────────────────────────────────────────────────
+// TELECABLE persistent state (sobrevive a reinicios). Guardamos por pid:
+//   - quality: calidad seleccionada por el usuario en el dropdown UI.
+//   - contentId: último contentId resuelto (útil para Disney 7 que es dinámico).
+// Se carga al boot y se vuelca a disco en cada cambio.
+// ───────────────────────────────────────────────────────────────────────
+const TELECABLE_STATE_FILE = path.join(__dirname, 'telecable-state.json');
+let telecablePersistedState = {};
+try {
+  if (fs.existsSync(TELECABLE_STATE_FILE)) {
+    telecablePersistedState = JSON.parse(fs.readFileSync(TELECABLE_STATE_FILE, 'utf8')) || {};
+  }
+} catch (err) {
+  console.warn('[telecable] No se pudo leer telecable-state.json:', err.message);
+}
+function persistTelecableField(pid, field, value) {
+  const p = String(pid);
+  if (!telecablePersistedState[p]) telecablePersistedState[p] = {};
+  telecablePersistedState[p][field] = value;
+  try { fs.writeFileSync(TELECABLE_STATE_FILE, JSON.stringify(telecablePersistedState, null, 2)); } catch (_) {}
+}
+function getPersistedTelecableQuality(pid) {
+  const q = telecablePersistedState[String(pid)]?.quality;
+  return Number.isFinite(q) ? q : null;
+}
+function getPersistedTelecableContentId(pid) {
+  const c = telecablePersistedState[String(pid)]?.contentId;
+  return c || null;
+}
+// Prime telecableState en memoria con lo persistido (sin URL — eso se resuelve al primer login).
+for (const [pid, st] of Object.entries(telecablePersistedState)) {
+  if (st && (st.quality || st.contentId)) {
+    telecableState.set(pid, { quality: st.quality, contentId: st.contentId });
+  }
+}
 
 // ───────────────────────────────────────────────────────────────────────
 // PROXY SOCKS5 (Pi 5 residencial Costa Rica) — usado SOLO para Tigo (ID 12)
@@ -6106,6 +6174,11 @@ app.post('/api/emit/stop', async (req, res) => {
         await foxStopFillerAndWait(process_id, sendLog);
       }
 
+      // Limpiar el HLS slug para que clientes (XUI/Odin) reciban 404 y
+      // caigan a su URL de backup en vez de quedarse pegados al último
+      // segmento. Guard interno respeta slugs compartidos.
+      clearHlsSlugForPid(process_id, internal_refresh ? 'refresh' : 'stop manual');
+
       detectedErrors.delete(process_id);
       quickRetryState.delete(process_id);
       lastFrameTime.delete(process_id);
@@ -6536,6 +6609,7 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
       if (!prev || prev.contentId !== overrideCid) {
         telecableState.set(pid, { ...(prev || {}), contentId: overrideCid });
       }
+      persistTelecableField(pid, 'contentId', overrideCid);
     }
     let qualityOverride = null;
     const qRaw = req.body?.quality;
@@ -6545,6 +6619,7 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
         qualityOverride = q;
         const prev = telecableState.get(pid) || {};
         telecableState.set(pid, { ...prev, quality: q });
+        persistTelecableField(pid, 'quality', q);
       }
     }
     const st = await safeTelecableResolve(pid, overrideCid, qualityOverride);
@@ -7460,7 +7535,7 @@ server.listen(PORT, () => {
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
           if (now - lastRefresh < REFRESH_GUARD_MS) continue;
 
-          sendLog(pid, 'info', `⏰ Refresh programado (${String(crHour).padStart(2, '0')}:00 CR): reiniciando con URL fresca...`);
+          sendLog(pid, 'info', `⏰ Refresh programado (${String(crHour).padStart(2, '0')}:00 CR): apagando 3 min para que XUI/Odin caigan al backup, luego URL fresca...`);
 
           // Marcar refresh ahora para evitar loops si algo falla
           await supabase
@@ -7475,8 +7550,17 @@ server.listen(PORT, () => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ process_id: pid, internal_refresh: true }),
             });
-            await new Promise(r => setTimeout(r, 3000));
-
+            // Asegurar que el HLS quede vacío (el stop ya lo intenta, pero
+            // re-confirmamos por si quedó algún segmento por race condition).
+            await new Promise(r => setTimeout(r, 1500));
+            clearHlsSlugForPid(pid, 'refresh 3AM');
+            // Pausa de 3 min para que XUI/Odin detecten el 404 y conmuten
+            // a su URL de backup. Durante este tiempo NO servimos HLS.
+            sendLog(pid, 'info', `⏸️ Canal apagado, esperando 3 min antes de relanzar (backup activo en XUI/Odin)...`);
+            await new Promise(r => setTimeout(r, 180_000));
+            // Limpieza final justo antes de relanzar, por si algo escribió
+            // en el directorio durante la pausa.
+            clearHlsSlugForPid(pid, 'pre-relaunch');
             // Limpiar manualStop ya que es un refresh interno, no un stop del usuario
             manualStopProcesses.delete(pid);
             manualStopProcesses.delete(Number(pid));

@@ -114,9 +114,17 @@ const SRT_INGEST_INDEXES = new Set<number>([16, 18, 20, 21, 22, 23]);
 const HLS_PASSTHROUGH_DEFAULT_INDEXES = new Set<number>([27, 28]);
 // Set unificado de procesos a los que se les muestra la opción "Passthrough"
 // en el dropdown "Formato de salida".
+// Incluye:
+//   - SRT_INGEST (16/18/20/21/22/23): default passthrough.
+//   - HLS_PASSTHROUGH_DEFAULT (27/28): default passthrough.
+//   - Resto de pids Telecable (0/11/13/14/15/24/25): el usuario puede elegir
+//     passthrough manualmente para ahorrar CPU cuando el HLS firmado de
+//     Telecable ya viene en buena calidad. La selección se persiste en
+//     `output-profiles.json` del VPS y sobrevive al reinicio de las 3 AM.
 const PASSTHROUGH_ALLOWED_INDEXES = new Set<number>([
   ...Array.from(SRT_INGEST_INDEXES),
   ...Array.from(HLS_PASSTHROUGH_DEFAULT_INDEXES),
+  0, 11, 13, 14, 15, 24, 25,
 ]);
 const getDefaultOutputProfile = (processIndex: number): OutputProfile =>
   (SRT_INGEST_INDEXES.has(processIndex) || HLS_PASSTHROUGH_DEFAULT_INDEXES.has(processIndex))
