@@ -614,7 +614,10 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
     || (matcher && matcher.contentIds[0])
     || TELECABLE_CONTENT_MAP[pid];
   if (!explicitContentId && !matcher) throw new Error(`Sin content-id Telecable para pid=${pid}`);
-  const quality = qualityOverride || telecableState.get(pid)?.quality || TELECABLE_DEFAULT_QUALITY;
+  const quality = qualityOverride
+    || telecableState.get(pid)?.quality
+    || getPersistedTelecableQuality(pid)
+    || TELECABLE_DEFAULT_QUALITY;
 
   // 1) device-login
   const loginUrl =
