@@ -6537,13 +6537,24 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
         telecableState.set(pid, { ...(prev || {}), contentId: overrideCid });
       }
     }
-    const st = await safeTelecableResolve(pid, overrideCid);
+    let qualityOverride = null;
+    const qRaw = req.body?.quality;
+    if (qRaw !== undefined && qRaw !== null && qRaw !== '') {
+      const q = parseInt(String(qRaw), 10);
+      if (Number.isFinite(q) && q >= 10 && q <= 100) {
+        qualityOverride = q;
+        const prev = telecableState.get(pid) || {};
+        telecableState.set(pid, { ...prev, quality: q });
+      }
+    }
+    const st = await safeTelecableResolve(pid, overrideCid, qualityOverride);
     res.json({
       ok: true,
       url: st.url,
       content_id: st.contentId,
       expires_at: st.expiresAt,
       expires_in_s: st.expiresAt ? Math.max(0, st.expiresAt - Math.floor(Date.now() / 1000)) : null,
+      quality: st.quality,
     });
   } catch (e) {
     res.status(502).json({ error: e.message });
