@@ -338,6 +338,12 @@ export default function EmisorM3U8Panel() {
   // Live stats por proceso (bitrate, fps, drops, RTT SRT...) — alimentado por /api/status
   const [liveStats, setLiveStats] = useState<Record<string, LiveStats>>({});
 
+  // Health tracker: detecta "gaps" (incrementos de drop/dup) en los últimos 60s
+  // por proceso. Si hubo ≥1 gap en 60s → "Inestable". Si no → "Sano". Se limpia
+  // automáticamente al pasar la ventana.
+  const healthRef = useRef<Record<string, { lastDrop: number; lastDup: number; gapTimes: number[] }>>({});
+  const [healthMap, setHealthMap] = useState<Record<string, { unstable: boolean; gaps60s: number }>>({});
+
   const reconcileWithServerStatus = useCallback(async () => {
     try {
       const resp = await fetch('/api/status');
