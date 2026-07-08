@@ -3451,24 +3451,72 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
-    // VALIDACIÓN: Bloqueo mutuo de slug HLS (FUTV vs FUTV ALTERNO comparten 'FUTV').
-    // Si otro proceso ya está emitiendo al mismo slug, rechazamos para no pisar la señal.
+    // GUARD de exclusividad por slug HLS:
+    // IDs que comparten slug (0/16/19 → Disney7, 11/17/18 → futv, 22/24/26 → foxmas,
+    // 23/25 → fox, 14 tdmas, 15/20 canal6, 13/21 teletica) NO pueden emitir a la vez
+    // al mismo destino. Antes rechazábamos con 409; ahora hacemos TAKEOVER:
+    // matamos cualquier otro pid con el mismo slug (ffmpeg + SRT listener si lo tiene)
+    // y limpiamos /live/<slug>/ para evitar emisiones "fantasma" con segmentos viejos.
     if (isHlsOutput) {
       const mySlug = HLS_SLUG_MAP[process_id];
       if (mySlug) {
+        const myLabel = CHANNEL_CONFIGS_SERVER[process_id] || `Proceso ${process_id}`;
         for (const [otherPid, otherSlug] of Object.entries(HLS_SLUG_MAP)) {
           if (otherPid === process_id) continue;
           if (otherSlug !== mySlug) continue;
           const otherProc = ffmpegProcesses.get(otherPid);
+          const otherSrt = srtListenerProcesses.get(String(otherPid));
+          const otherAlive = (otherProc && otherProc.process && !otherProc.process.killed) ||
+                             (otherSrt && !otherSrt.killed && otherSrt.exitCode === null);
+          if (!otherAlive) continue;
+          const otherLabel = CHANNEL_CONFIGS_SERVER[otherPid] || `Proceso ${otherPid}`;
+          sendLog(process_id, 'warn', `🔄 TAKEOVER slug "${mySlug}": deteniendo ${otherLabel} (ID ${otherPid}) para que ${myLabel} tome la salida.`);
+          // Marcar como parada manual para que su close-handler NO dispare recovery.
+          manualStopProcesses.add(String(otherPid));
+          manualStopProcesses.add(Number(otherPid));
           if (otherProc && otherProc.process && !otherProc.process.killed) {
-            const otherLabel = CHANNEL_CONFIGS_SERVER[otherPid] || `Proceso ${otherPid}`;
-            const myLabel = CHANNEL_CONFIGS_SERVER[process_id] || `Proceso ${process_id}`;
-            sendLog(process_id, 'error', `🚫 BLOQUEO: ${myLabel} no puede arrancar porque ${otherLabel} ya emite al slug "${mySlug}". Detén ${otherLabel} primero.`);
-            // Revertir is_emitting si quedó en true por el upsert previo (no llegamos a hacerlo aún, pero por seguridad)
-            return res.status(409).json({
-              error: `Conflicto de salida HLS: ${otherLabel} (ID ${otherPid}) ya emite al slug "${mySlug}". Detenlo antes de iniciar ${myLabel}.`
-            });
+            try { otherProc.process.kill('SIGTERM'); } catch (_) {}
+            try { await waitForProcessDeath(otherProc.process, 2000); } catch (_) {}
+            ffmpegProcesses.delete(otherPid);
           }
+          // Si el pid víctima tiene listener SRT persistente (16/18/20/21/22/23), también lo bajamos.
+          try { stopSrtListener(otherPid); } catch (_) {}
+          emissionStatuses.set(otherPid, 'idle');
+          // Persistir estado detenido en DB.
+          if (supabase) {
+            try {
+              await supabase.from('emission_processes').update({
+                is_active: false,
+                is_emitting: false,
+                ended_at: new Date().toISOString(),
+                emit_status: 'stopped',
+                emit_msg: `Detenido por takeover: ${myLabel} tomó el slug ${mySlug}`,
+                start_time: 0,
+                elapsed: 0,
+                ffmpeg_pid: null,
+              }).eq('id', parseInt(otherPid));
+            } catch (_) {}
+          }
+          // Limpiar flag manual tras un pequeño delay para evitar carreras con recovery inmediato.
+          setTimeout(() => {
+            manualStopProcesses.delete(String(otherPid));
+            manualStopProcesses.delete(Number(otherPid));
+          }, 3000);
+        }
+        // Limpiar /live/<slug>/ (segmentos viejos + playlist) para que ningún cliente
+        // reciba fragmentos del proceso anterior mientras arranca el nuevo.
+        try {
+          const dir = path.join(HLS_OUTPUT_DIR, mySlug);
+          if (fs.existsSync(dir)) {
+            for (const f of fs.readdirSync(dir)) {
+              if (f.endsWith('.m3u8') || f.endsWith('.ts')) {
+                try { fs.unlinkSync(path.join(dir, f)); } catch (_) {}
+              }
+            }
+            sendLog(process_id, 'info', `🧹 /live/${mySlug}/ limpiado antes de arrancar (takeover)`);
+          }
+        } catch (e) {
+          sendLog(process_id, 'warn', `⚠️ No se pudo limpiar /live/${mySlug}/: ${e.message}`);
         }
       }
     }
