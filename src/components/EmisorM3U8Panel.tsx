@@ -2238,7 +2238,7 @@ export default function EmisorM3U8Panel() {
                 {/* Canal 6 URL (15) es Telecable-only: el toggle Oficial/Scraping
                     quedó descartado junto con la salida CR vía Pi5. Ver
                     TELECABLE_ONLY_PIDS arriba. */}
-                {TELECABLE_PIDS.has(processIndex) && !isDisney7Tab && !isTelecableOnlyTab && (() => {
+                {TELECABLE_PIDS.has(processIndex) && !isDisney7Tab && !isTelecableOnlyTab && processIndex !== TELETICA_URL_INDEX && (() => {
                   const tMode = telecableModes[processIndex] || 'scraping';
                   const tInfo = telecableInfos[processIndex] || null;
                   const isFox = processIndex === FOX_URL_INDEX;
