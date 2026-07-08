@@ -360,6 +360,28 @@ export default function EmisorM3U8Panel() {
       }
       setLiveStats(nextLive);
 
+      // Health por proceso: cuenta gaps (deltas drop/dup) en ventana móvil de 60s
+      const nowTs = Date.now();
+      const nextHealth: Record<string, { unstable: boolean; gaps60s: number }> = {};
+      for (const [id, st] of Object.entries(serverProcesses)) {
+        const live = st?.live;
+        const running = Boolean(st?.process_running);
+        if (!live || !running) {
+          delete healthRef.current[id];
+          continue;
+        }
+        const prev = healthRef.current[id] || { lastDrop: 0, lastDup: 0, gapTimes: [] };
+        const drop = live.drop ?? 0;
+        const dup = live.dup ?? 0;
+        const dropDelta = Math.max(0, drop - prev.lastDrop);
+        const dupDelta = Math.max(0, dup - prev.lastDup);
+        const gapTimes = prev.gapTimes.filter((t) => nowTs - t < 60_000);
+        if (dropDelta > 0 || dupDelta > 0) gapTimes.push(nowTs);
+        healthRef.current[id] = { lastDrop: drop, lastDup: dup, gapTimes };
+        nextHealth[id] = { unstable: gapTimes.length > 0, gaps60s: gapTimes.length };
+      }
+      setHealthMap(nextHealth);
+
       setProcesses(prev => prev.map((process, index) => {
         const serverState = serverProcesses[index.toString()];
         if (!serverState) return process;
