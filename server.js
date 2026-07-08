@@ -6785,7 +6785,11 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
   const pid = String(req.params.pid);
   if (!TELECABLE_PROCESSES.has(pid)) return res.status(404).json({ error: `pid ${pid} no soporta Telecable` });
   try {
-    setTelecableSourceMode(pid, 'telecable');
+    // Preservar la variante (telecable vs telecable_vlc) — si el usuario está
+    // en VLC LIKE y toca refresh, NO queremos degradar el profile a 'default'.
+    const currentProfile = getTelecableProfile(pid);
+    const preservedMode = currentProfile === 'disney7' ? 'telecable_vlc' : 'telecable';
+    setTelecableSourceMode(pid, preservedMode);
     const overrideCid = req.body?.content_id ? String(req.body.content_id) : null;
     if (overrideCid) {
       const prev = telecableState.get(pid);
