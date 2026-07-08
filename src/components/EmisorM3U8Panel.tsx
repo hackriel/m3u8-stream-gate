@@ -2813,7 +2813,36 @@ export default function EmisorM3U8Panel() {
                     <span className="font-semibold text-lg">{process.isEmitiendo ? "🟢 Emitiendo" : "🔴 Caído"}</span>
                   </div>
                 </div>
-                
+
+                {process.isEmitiendo && (() => {
+                  const h = healthMap[process.pid.toString()];
+                  const unstable = !!h?.unstable;
+                  return (
+                    <div className="mt-2 pt-3 border-t border-border/50 flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Salud señal:</span>
+                      <span
+                        title={
+                          unstable
+                            ? `Se detectaron ${h?.gaps60s ?? 0} gap(s) (drop/dup frames) en los últimos 60s`
+                            : "Sin gaps en los últimos 60s"
+                        }
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
+                          unstable
+                            ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                            : "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                        }`}
+                      >
+                        <span
+                          className={`inline-flex h-2 w-2 rounded-full ${
+                            unstable ? "bg-amber-400 animate-pulse" : "bg-emerald-400"
+                          }`}
+                        />
+                        {unstable ? `Inestable · ${h?.gaps60s ?? 0} gap${(h?.gaps60s ?? 0) === 1 ? "" : "s"}/60s` : "Sano"}
+                      </span>
+                    </div>
+                  );
+                })()}
+
                 {process.emitStatus !== 'idle' && (
                   <div className="mt-2 pt-3 border-t border-border/50">
                     <div className="flex items-center gap-2">
