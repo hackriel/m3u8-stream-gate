@@ -594,27 +594,48 @@ const telecableSourceMode = new Map();   // pid → 'scraping' | 'telecable'
 const telecableState = new Map();        // pid → { phpsessid, url, expiresAt, contentId, quality, fetchedAt }
 const telecableLastReloginAt = new Map();// pid → Date.now() del último relogin (rate-limit)
 const telecableFailureCount = new Map(); // pid → count de fallos consecutivos de login
+// Perfil de encoding para pids en modo Telecable.
+//   'default' → perfil minimal VLC-like (detección por hostname).
+//   'disney7' → forzar el perfil AGRESIVO de Disney 7 (max_reload=1000,
+//               +genpts, reconnect_at_eof, -re) aunque el hostname sea telecable.
+//   Usado por FOX+ URL (pid 24) para el modo "VLC LIKE" (A/B test).
+const telecableProfile = new Map();      // pid → 'default' | 'disney7'
+const getTelecableProfile = (pid) =>
+  (telecableProfile.get(String(pid)) === 'disney7' ? 'disney7' : 'default');
+const setTelecableProfile = (pid, profile) => {
+  const p = profile === 'disney7' ? 'disney7' : 'default';
+  telecableProfile.set(String(pid), p);
+  return p;
+};
 
 const getFoxSourceMode = (pid) =>
   (telecableSourceMode.get(String(pid)) === 'telecable' ? 'telecable' : 'scraping');
 const setFoxSourceMode = (pid, mode) => {
-  const m = mode === 'telecable' ? 'telecable' : 'scraping';
+  // Aceptamos 'telecable_vlc' como alias de 'telecable' + profile='disney7'.
+  // Cualquier otra cosa se normaliza a 'scraping' + profile='default'.
+  const isVlc = mode === 'telecable_vlc';
+  const m = (mode === 'telecable' || isVlc) ? 'telecable' : 'scraping';
   telecableSourceMode.set(String(pid), m);
+  setTelecableProfile(pid, isVlc ? 'disney7' : 'default');
+  const persisted = isVlc ? 'telecable_vlc' : m;
   try {
     if (typeof supabase !== 'undefined' && supabase) {
       supabase
         .from('emission_processes')
-        .update({ source_mode: m })
+        .update({ source_mode: persisted })
         .eq('id', parseInt(String(pid), 10))
         .then(({ error }) => {
           if (error) console.error(`[telecableSourceMode] persist error pid=${pid}:`, error.message);
         });
     }
   } catch (_) {}
-  return m;
+  return persisted;
 };
 const isTelecableMode = (pid) =>
   TELECABLE_PROCESSES.has(String(pid)) && getFoxSourceMode(pid) === 'telecable';
+// True si el pid está en Telecable con perfil forzado Disney 7 (VLC LIKE).
+const isTelecableVlcMode = (pid) =>
+  isTelecableMode(pid) && getTelecableProfile(pid) === 'disney7';
 // Aliases con nombre nuevo (más claros). Mantenemos los viejos por compat.
 const getTelecableSourceMode = getFoxSourceMode;
 const setTelecableSourceMode = setFoxSourceMode;
