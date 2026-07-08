@@ -2814,35 +2814,6 @@ export default function EmisorM3U8Panel() {
                   </div>
                 </div>
 
-                {process.isEmitiendo && (() => {
-                  const h = healthMap[processIndex.toString()];
-                  const unstable = !!h?.unstable;
-                  return (
-                    <div className="mt-2 pt-3 border-t border-border/50 flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground">Salud señal:</span>
-                      <span
-                        title={
-                          unstable
-                            ? `Se detectaron ${h?.gaps60s ?? 0} gap(s) (drop/dup frames) en los últimos 60s`
-                            : "Sin gaps en los últimos 60s"
-                        }
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
-                          unstable
-                            ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
-                            : "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
-                        }`}
-                      >
-                        <span
-                          className={`inline-flex h-2 w-2 rounded-full ${
-                            unstable ? "bg-amber-400 animate-pulse" : "bg-emerald-400"
-                          }`}
-                        />
-                        {unstable ? `Inestable · ${h?.gaps60s ?? 0} gap${(h?.gaps60s ?? 0) === 1 ? "" : "s"}/60s` : "Sano"}
-                      </span>
-                    </div>
-                  );
-                })()}
-
                 {process.emitStatus !== 'idle' && (
                   <div className="mt-2 pt-3 border-t border-border/50">
                     <div className="flex items-center gap-2">
@@ -3172,6 +3143,9 @@ export default function EmisorM3U8Panel() {
                       const dupAlert = (live?.dup ?? 0) > 0;
                       const qValue = live?.q;
                       const qHealthy = isPassthroughProfile || qValue == null ? true : qValue <= 30;
+                      const health = healthMap[i.toString()];
+                      const unstable = !!health?.unstable;
+                      const gaps60s = health?.gaps60s ?? 0;
                       return (
                         <div
                           key={i}
@@ -3184,9 +3158,30 @@ export default function EmisorM3U8Panel() {
                                 {color.name}
                               </h3>
                             </div>
-                            <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30 flex-shrink-0">
-                              LIVE
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <span
+                                title={
+                                  unstable
+                                    ? `Inestable — ${gaps60s} gap${gaps60s === 1 ? '' : 's'} (drop/dup frames) en los últimos 60s`
+                                    : 'Sano — sin gaps en los últimos 60s'
+                                }
+                                className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${
+                                  unstable
+                                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                                }`}
+                              >
+                                <span
+                                  className={`inline-block h-1.5 w-1.5 rounded-full ${
+                                    unstable ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'
+                                  }`}
+                                />
+                                {unstable ? `Inestable · ${gaps60s}` : 'Sano'}
+                              </span>
+                              <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30">
+                                LIVE
+                              </span>
+                            </div>
                           </div>
 
                           <div className="mb-3">
