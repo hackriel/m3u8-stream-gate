@@ -651,7 +651,7 @@ export default function EmisorM3U8Panel() {
   // 15 (Canal 6 URL) entra acá: el flujo histórico TDMax+Pi5 quedó descartado,
   // ahora se resuelve igual que Canal 8/Canal 2 (Telecable directo desde VPS).
   const TELECABLE_ONLY_PIDS = useMemo(() => new Set<number>([15, 27, 28]), []);
-  type TelecableMode = 'scraping' | 'telecable';
+  type TelecableMode = 'scraping' | 'telecable' | 'telecable_vlc';
   type TelecableInfo = { expires_at: number | null; expires_in_s: number | null; last_login_failure_count: number } | null;
   const [telecableModes, setTelecableModes] = useState<Record<number, TelecableMode>>(() => {
     const init: Record<number, TelecableMode> = {};
@@ -688,7 +688,7 @@ export default function EmisorM3U8Panel() {
           const r = await fetch(`/api/telecable/${pid}/source-mode`);
           if (!r.ok) return;
           const j = await r.json();
-          if (j.mode === 'telecable' || j.mode === 'scraping') {
+          if (j.mode === 'telecable' || j.mode === 'scraping' || j.mode === 'telecable_vlc') {
             if (lastSeen[pid] === undefined) lastSeen[pid] = j.mode;
             else if (j.mode !== lastSeen[pid]) {
               lastSeen[pid] = j.mode;
