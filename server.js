@@ -6092,9 +6092,10 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         if (frameMatch && fpsMatch) {
           const now = Date.now();
           const lastLog = lastProgressLog.get(process_id) || 0;
+          healthRecordFrame(process_id, parseInt(frameMatch[1], 10));
           if (now - lastLog >= PROGRESS_LOG_INTERVAL) {
             lastProgressLog.set(process_id, now);
-            sendLog(process_id, 'info', `Progreso: frame=${frameMatch[1]}, fps=${fpsMatch[1]}`);
+            sendLog(process_id, 'info', healthFormatProgress(process_id, frameMatch[1], fpsMatch[1], null));
           }
         }
       } else if (output.includes('error') || output.includes('Error') || output.includes('failed') || output.includes('Failed')) {
