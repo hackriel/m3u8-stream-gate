@@ -4980,7 +4980,9 @@ app.post('/api/emit', async (req, res) => {
         } else if (/Opening '.*\.m3u8'/.test(output)) {
           sendLog(process_id, 'info', `📋 Reload playlist HLS`);
         } else if (/cur_seq_no|skipping \d+ segments/.test(output)) {
-          sendLog(process_id, 'info', `⚠️ Gap de segmentos detectado`);
+          healthRecordGap(process_id);
+          const sev = healthGapSeverity(process_id);
+          sendLog(process_id, 'info', `⚠️ Gap detectado — ${sev.emoji} ${sev.label} (${sev.hint})`);
         } else if (/Connection timed out|Operation timed out/.test(output) && !/frame=/.test(output)) {
           sendLog(process_id, 'info', `🌐 Jitter SOCKS5 (timeout transitorio)`);
         }
