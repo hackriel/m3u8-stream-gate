@@ -2019,7 +2019,7 @@ export default function EmisorM3U8Panel() {
                     <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
                       Modo Disney 7
                     </label>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       <button
                         type="button"
                         onClick={() => setDisney7Mode('official')}
@@ -2046,10 +2046,25 @@ export default function EmisorM3U8Panel() {
                       >
                         📡 Telecable (dropdown)
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setDisney7Mode('telecable_vlc')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          disney7Mode === 'telecable_vlc'
+                            ? 'bg-purple-500/20 border-purple-500 text-purple-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-purple-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Fuente Telecable (dropdown) + perfil Disney 7 agresivo (max_reload=1000, +genpts, reconnect_at_eof, -re)"
+                      >
+                        🎬 VLC LIKE
+                      </button>
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-                      {disney7Mode === 'telecable'
-                        ? 'Elegí un canal de la lista Telecable y dale Scrapear. La señal sale en la misma URL HLS de Disney 7 (slug Disney7).'
+                      {disney7Mode === 'telecable_vlc'
+                        ? 'Elegí un canal Telecable. Se procesa con el perfil agresivo Disney 7 (max_reload=1000, +genpts, reconnect_at_eof, -re). Sale por la misma URL HLS Disney7.'
+                        : disney7Mode === 'telecable'
+                        ? 'Elegí un canal de la lista Telecable y dale Scrapear. Perfil minimal. La señal sale en la misma URL HLS de Disney 7 (slug Disney7).'
                         : 'Pegá el archivo M3U con headers (mismo perfil VLC-like de siempre).'}
                     </p>
                   </div>
