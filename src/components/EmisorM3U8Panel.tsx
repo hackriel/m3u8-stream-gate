@@ -338,9 +338,9 @@ export default function EmisorM3U8Panel() {
   // Live stats por proceso (bitrate, fps, drops, RTT SRT...) — alimentado por /api/status
   const [liveStats, setLiveStats] = useState<Record<string, LiveStats>>({});
 
-  // Health tracker: detecta "gaps" (incrementos de drop/dup) en los últimos 60s
-  // por proceso. Si hubo ≥1 gap en 60s → "Inestable". Si no → "Sano". Se limpia
-  // automáticamente al pasar la ventana.
+  // Health tracker: cuenta gaps (incrementos de drop/dup) en los últimos 60s
+  // por proceso. Se marca "Inestable" solo si hay >5 gaps en la ventana, para
+  // evitar falsos positivos por jitter leve del CDN. Se limpia solo al bajar.
   const healthRef = useRef<Record<string, { lastDrop: number; lastDup: number; gapTimes: number[] }>>({});
   const [healthMap, setHealthMap] = useState<Record<string, { unstable: boolean; gaps60s: number }>>({});
 
@@ -378,7 +378,7 @@ export default function EmisorM3U8Panel() {
         const gapTimes = prev.gapTimes.filter((t) => nowTs - t < 60_000);
         if (dropDelta > 0 || dupDelta > 0) gapTimes.push(nowTs);
         healthRef.current[id] = { lastDrop: drop, lastDup: dup, gapTimes };
-        nextHealth[id] = { unstable: gapTimes.length > 0, gaps60s: gapTimes.length };
+        nextHealth[id] = { unstable: gapTimes.length > 5, gaps60s: gapTimes.length };
       }
       setHealthMap(nextHealth);
 
