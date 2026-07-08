@@ -3599,6 +3599,16 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
+    // ── VLC LIKE override ────────────────────────────────────────────────
+    // Si el pid está en modo Telecable + profile='disney7' (FOX+ URL VLC LIKE),
+    // NO usamos el perfil minimal — forzamos el pipeline agresivo de Disney 7
+    // (max_reload=1000, +genpts, reconnect_at_eof, -re) para A/B testing.
+    const forceDisney7Profile = isTelecableVlcMode(process_id);
+    if (forceDisney7Profile) {
+      isTelecableSource = false;
+      sendLog(process_id, 'info', `🎬 VLC LIKE: forzando perfil Disney 7 agresivo sobre URL Telecable`);
+    }
+
     // RANDOM Disney 7 (ID 19) o cualquier proceso que envíe referer custom desde el M3U:
     // sobreescribir refererDomain/originDomain con los valores que vienen del archivo M3U.
     if (customReferer && typeof customReferer === 'string') {
