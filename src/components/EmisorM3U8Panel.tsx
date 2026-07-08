@@ -735,10 +735,17 @@ export default function EmisorM3U8Panel() {
           if (!r.ok) return;
           const j = await r.json();
           if (j.mode === 'telecable' || j.mode === 'scraping' || j.mode === 'telecable_vlc') {
-            if (lastSeen[pid] === undefined) lastSeen[pid] = j.mode;
-            else if (j.mode !== lastSeen[pid]) {
+            // Siempre sincronizar contra el servidor (incluida la primera lectura):
+            // sin esto, tras un restart del backend el UI mantenía el valor de
+            // localStorage ('scraping' verde por default) aunque el server ya
+            // estuviera corriendo en modo 'telecable'.
+            if (j.mode !== lastSeen[pid]) {
               lastSeen[pid] = j.mode;
-              setTelecableModes(prev => (prev[pid] !== j.mode ? { ...prev, [pid]: j.mode } : prev));
+              setTelecableModes(prev => {
+                if (prev[pid] === j.mode) return prev;
+                try { localStorage.setItem(`telecable_${pid}_source_mode`, j.mode); } catch {}
+                return { ...prev, [pid]: j.mode };
+              });
             }
           }
           setTelecableInfos(prev => ({
