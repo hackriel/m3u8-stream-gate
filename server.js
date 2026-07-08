@@ -1897,14 +1897,24 @@ const PROGRESS_LOG_INTERVAL = 5000; // Loguear progreso cada 5 segundos
 // ─── SALUD DE STREAMS (fps instantáneo, severidad de gaps, resumen 60s) ─────
 // Reemplaza el fps acumulado (engañoso) por métricas en vivo. Se aplica a
 // TODOS los procesos (Disney, TDMax, Telecable, SRT, archivos, etc.).
-const HEALTH_WINDOW_MS = 30_000;          // ventana para fps instantáneo
+// Ventana ancha (90s) para suavizar micro-stalls del encoder cuando la fuente
+// hace pausas breves (reload de sub-playlist HLS, cambio de nimblesessionid,
+// jitter de CDN). FFmpeg congela el frame counter durante el stall y luego
+// dispara en ráfaga para recuperar → el promedio real sigue siendo ~30fps
+// pero una ventana corta (30s) mostraba 1.2 fps o 69 fps engañosos.
+const HEALTH_WINDOW_MS = 90_000;          // ventana para fps "instantáneo" suavizado
 const HEALTH_SUMMARY_INTERVAL_MS = 60_000; // "SALUD 60s"
-const HEALTH_BUFFER_MS = 90_000;          // guardar samples 90s hacia atrás
+const HEALTH_BUFFER_MS = 150_000;         // guardar samples 150s hacia atrás
 const HEALTH_SKIP_THRESHOLD = 200;        // Δframe > 200 en <5s = FFmpeg saltó segmentos
 const HEALTH_SKIP_WINDOW_MS = 5_000;
-// Umbrales fps (30fps nominal): sano ≥25, inestable 15-25, degradado <15
-const HEALTH_FPS_OK = 25;
-const HEALTH_FPS_WARN = 15;
+// Umbrales fps (30fps nominal): sano ≥22, inestable 12-22, degradado <12.
+// Bajados porque con ventana 90s solo debería marcar problemas sostenidos.
+const HEALTH_FPS_OK = 22;
+const HEALTH_FPS_WARN = 12;
+// Cap de fps mostrado: ráfagas de catch-up (>45fps sobre nominal 30) no son
+// una "buena señal", son recuperación de un stall. Las cap-eamos para no
+// mostrar picos de 58/69 fps que confunden.
+const HEALTH_FPS_DISPLAY_CAP = 45;
 // samples: Array<{t: ms, frame: number}> por pid
 // gaps: Array<ms> — timestamps de gaps detectados
 // skips: Array<{t, delta}>
@@ -1962,7 +1972,12 @@ function healthComputeFps(pid, windowMs = HEALTH_WINDOW_MS) {
   const last = inWin[inWin.length - 1];
   const dt = (last.t - first.t) / 1000;
   if (dt <= 0) return null;
-  return Math.max(0, (last.frame - first.frame) / dt);
+  // Necesitamos al menos ~20s de datos reales para que el promedio sea
+  // representativo. Con menos, devolvemos null → estado "⏳ MIDIENDO".
+  if (dt < 20) return null;
+  const raw = Math.max(0, (last.frame - first.frame) / dt);
+  // Cap ráfagas de catch-up para no reportar 58/69fps engañosos.
+  return Math.min(raw, HEALTH_FPS_DISPLAY_CAP);
 }
 
 function healthStatus(fps) {
