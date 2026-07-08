@@ -1605,9 +1605,9 @@ export default function EmisorM3U8Panel() {
           output_profile: selectedProfile,
           // Telecable gana sobre el modo histórico cuando está activo. Para
           // los pids no-Telecable, se mantiene la lógica original (teletica/canal6).
-          ...(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable'
+          ...(TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc')
             ? {
-                source_mode: 'telecable' as const,
+                source_mode: telecableModes[processIndex] as 'telecable' | 'telecable_vlc',
                 ...(processIndex === 0 && disney7ContentId ? { telecable_content_id: disney7ContentId } : {}),
               }
             : processIndex === 0 ? { source_mode: 'scraping' as const }
