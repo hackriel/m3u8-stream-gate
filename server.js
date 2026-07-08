@@ -1999,12 +1999,21 @@ function healthGapSeverity(pid) {
 }
 
 function healthFormatProgress(pid, frameNum, ffmpegFpsStr, bitrateStr) {
-  const fps = healthComputeFps(pid);
-  const st = healthStatus(fps);
-  const fpsTxt = fps === null ? '—' : fps.toFixed(1);
+  // Preferir el fps que reporta FFmpeg directamente: es promedio acumulado
+  // desde el inicio y refleja la salud real sin amplificar micro-stalls.
+  // Nuestro cálculo por deltas se usa SOLO como confirmación del estado.
+  const ffmpegFps = ffmpegFpsStr != null ? parseFloat(ffmpegFpsStr) : NaN;
+  const ourFps = healthComputeFps(pid);
+  // Estado: si ambos coinciden en "malo", marcamos degradado. Si FFmpeg
+  // reporta sano pero nosotros vemos un dip transitorio, confiamos en FFmpeg.
+  const fpsForStatus = !isNaN(ffmpegFps) ? ffmpegFps : ourFps;
+  const st = healthStatus(fpsForStatus);
+  const fpsTxt = !isNaN(ffmpegFps)
+    ? ffmpegFps.toFixed(1)
+    : (ourFps === null ? '—' : ourFps.toFixed(1));
   const parts = [
     `Progreso: frame=${frameNum}`,
-    `fps=${fpsTxt} (últimos 30s)`,
+    `fps=${fpsTxt}`,
     `${st.emoji} ${st.label}`,
   ];
   if (bitrateStr) parts.push(`bitrate=${bitrateStr}`);
