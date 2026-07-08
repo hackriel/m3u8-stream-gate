@@ -6742,8 +6742,15 @@ app.get('/api/canal6/source-mode', (req, res) => {
 // Funciona para cualquier pid en TELECABLE_PROCESSES (FUTV/Teletica/TDMas1/Canal6/FOX+/FOX).
 const telecableSourceModePayload = (pid) => {
   const st = telecableState.get(String(pid));
+  const baseMode = getTelecableSourceMode(pid);
+  const profile = getTelecableProfile(pid);
+  // El frontend distingue 'telecable' (perfil minimal) de 'telecable_vlc'
+  // (perfil Disney 7). Exponemos la variante como `mode` para que el toggle
+  // de FOX+ (24) refleje bien el estado en curso.
+  const reportedMode = baseMode === 'telecable' && profile === 'disney7' ? 'telecable_vlc' : baseMode;
   return {
-    mode: getTelecableSourceMode(pid),
+    mode: reportedMode,
+    profile,
     telecable: st
       ? {
           content_id: st.contentId,
@@ -6767,11 +6774,11 @@ app.post('/api/telecable/:pid/source-mode', (req, res) => {
   const pid = String(req.params.pid);
   if (!TELECABLE_PROCESSES.has(pid)) return res.status(404).json({ error: `pid ${pid} no soporta Telecable` });
   const requested = req.body?.mode;
-  if (requested !== 'telecable' && requested !== 'scraping') {
-    return res.status(400).json({ error: 'Modo inválido (telecable|scraping)' });
+  if (requested !== 'telecable' && requested !== 'scraping' && requested !== 'telecable_vlc') {
+    return res.status(400).json({ error: 'Modo inválido (telecable|telecable_vlc|scraping)' });
   }
   const mode = setTelecableSourceMode(pid, requested);
-  res.json({ ok: true, mode });
+  res.json({ ok: true, mode, profile: getTelecableProfile(pid) });
 });
 
 app.post('/api/telecable/:pid/refresh', async (req, res) => {
