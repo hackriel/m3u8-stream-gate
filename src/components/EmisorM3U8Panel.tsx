@@ -1471,7 +1471,7 @@ export default function EmisorM3U8Panel() {
     // Procesos M3U8 -> RTMP o HLS local
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
     // Disney 7 (pid 0) en modo Telecable NO usa archivo M3U — usa contentId del dropdown.
-    const isDisney7Telecable = processIndex === 0 && disney7Mode === 'telecable';
+    const isDisney7Telecable = processIndex === 0 && (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc');
     const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex) && !isDisney7Telecable;
     const m3uPayload = isM3uFileProcess ? m3uPayloads[processIndex] : null;
 
@@ -1939,7 +1939,7 @@ export default function EmisorM3U8Panel() {
       : process.elapsed;
     const outputProfile = getOutputProfile(processIndex);
     const isDisney7Tab = processIndex === 0;
-    const isDisney7TelecableActive = isDisney7Tab && disney7Mode === 'telecable';
+    const isDisney7TelecableActive = isDisney7Tab && (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc');
     const isTelecableOnlyTab = TELECABLE_ONLY_PIDS.has(processIndex);
     // Pids cuya UI de input m3u8 NO se muestra (URL resuelta por backend).
     const hideM3u8Input = isDisney7TelecableActive || isTelecableOnlyTab;
