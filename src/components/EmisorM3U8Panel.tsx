@@ -782,9 +782,11 @@ export default function EmisorM3U8Panel() {
       : 'scraping';
     setTelecableModes(prev => (prev[0] === mapped ? prev : { ...prev, [0]: mapped }));
   }, [disney7Mode]);
-  // Cuando el poll del server trae telecable_vlc/telecable para pid 0, sincronizar
-  // el disney7Mode del UI para que el toggle refleje la realidad tras un reinicio.
+  // Sync poll→UI SOLO entre variantes telecable (telecable ↔ telecable_vlc).
+  // NUNCA sobrescribe disney7Mode='official' — el modo Oficial es una decisión
+  // exclusiva del usuario (URL pegada), no debe flipearse por lo que traiga el server.
   useEffect(() => {
+    if (disney7Mode === 'official') return;
     const tMode = telecableModes[0];
     if (tMode === 'telecable_vlc' && disney7Mode !== 'telecable_vlc') setDisney7Mode('telecable_vlc');
     else if (tMode === 'telecable' && disney7Mode !== 'telecable') setDisney7Mode('telecable');
