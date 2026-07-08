@@ -2320,14 +2320,14 @@ export default function EmisorM3U8Panel() {
                     })()}
                   </div>
                 )}
-                {/* Canal 6 URL (15) es Telecable-only: el toggle Oficial/Scraping
-                    quedó descartado junto con la salida CR vía Pi5. Ver
-                    TELECABLE_ONLY_PIDS arriba. */}
-                {TELECABLE_PIDS.has(processIndex) && !isDisney7Tab && !isTelecableOnlyTab && processIndex !== TELETICA_URL_INDEX && (() => {
+                {/* Canal 6 URL (15), Canal 8 (27), Canal 2 (28) son Telecable-only:
+                    no muestran botón de scraping/TDMax — solo Telecable minimal + VLC LIKE. */}
+                {TELECABLE_PIDS.has(processIndex) && !isDisney7Tab && processIndex !== TELETICA_URL_INDEX && (() => {
                   const tMode = telecableModes[processIndex] || 'scraping';
                   const tInfo = telecableInfos[processIndex] || null;
                   const isFox = processIndex === FOX_URL_INDEX;
                   const isFoxMas = processIndex === FOXMAS_URL_INDEX;
+                  const isTelecableOnly = TELECABLE_ONLY_PIDS.has(processIndex);
                   // Para FOX+ (24) el primer botón deja de ser TDMax: pasa a ser
                   // "🎬 VLC LIKE" que usa fuente Telecable + perfil agresivo
                   // Disney 7 (A/B contra el Telecable minimal).
@@ -2353,9 +2353,10 @@ export default function EmisorM3U8Panel() {
                   return (
                     <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
                       <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
-                        {isFoxMas ? 'Fuente / Perfil de procesamiento' : 'Fuente alterna — Telecable'}
+                        {isFoxMas ? 'Fuente / Perfil de procesamiento' : (isTelecableOnly ? 'Perfil Telecable' : 'Fuente alterna — Telecable')}
                       </label>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-wrap">
+                        {!isTelecableOnly && (
                         <button
                           type="button"
                           onClick={() => handleTelecableModeChange(processIndex, firstMode)}
@@ -2367,6 +2368,7 @@ export default function EmisorM3U8Panel() {
                         >
                           {firstLabel}
                         </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleTelecableModeChange(processIndex, 'telecable')}
@@ -2380,10 +2382,25 @@ export default function EmisorM3U8Panel() {
                         >
                           {isFoxMas ? '📡 Telecable (minimal)' : '📡 Telecable (VPS)'}
                         </button>
+                        {!isFoxMas && (
+                          <button
+                            type="button"
+                            onClick={() => handleTelecableModeChange(processIndex, 'telecable_vlc')}
+                            disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                              tMode === 'telecable_vlc'
+                                ? 'bg-purple-500/20 border-purple-500 text-purple-300'
+                                : 'bg-background border-border text-muted-foreground hover:border-purple-500/40'
+                            } disabled:opacity-60 disabled:cursor-not-allowed`}
+                            title="Fuente Telecable + perfil Disney 7 agresivo (max_reload=1000, +genpts, reconnect_at_eof, -re)"
+                          >
+                            🎬 VLC LIKE
+                          </button>
+                        )}
                       </div>
                       <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                         {tMode === 'telecable_vlc'
-                          ? scrapingHelp
+                          ? 'Fuente Telecable + perfil agresivo Disney 7 (max_reload=1000, +genpts, reconnect_at_eof, -re). Ideal si el minimal presenta cortes.'
                           : tMode === 'telecable'
                           ? 'Login automático a la API de Telecable desde el VPS. URL HLS firmada se refresca proactivamente. No usa túnel CR.'
                           : scrapingHelp}
