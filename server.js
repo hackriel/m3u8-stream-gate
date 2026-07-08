@@ -3717,7 +3717,11 @@ app.post('/api/emit', async (req, res) => {
     // ID 19 (RANDOM Disney 7) hereda -re de Disney 7 para pacing HLS correcto.
     // Telecable NUNCA usa -re: el CDN ya pacing por segmentos y -re causa
     // que FFmpeg se quede esperando datos que el CDN no envía hasta EOF.
-    const usesReFlag = !isTelecableSource && (RE_FLAG_PROCESSES.has(String(process_id)) || String(process_id) === '19');
+    const usesReFlag = !isTelecableSource && (
+      RE_FLAG_PROCESSES.has(String(process_id)) ||
+      String(process_id) === '19' ||
+      forceDisney7Profile
+    );
     if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
       sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
