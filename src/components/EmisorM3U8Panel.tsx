@@ -660,7 +660,9 @@ export default function EmisorM3U8Panel() {
         const v = localStorage.getItem(`telecable_${pid}_source_mode`);
         // Canal 6 (15) / Canal 8 (27) / Canal 2 (28) son telecable-only.
         const forceTelecable = pid === 15 || pid === 27 || pid === 28;
-        init[pid] = (forceTelecable || v === 'telecable') ? 'telecable' : 'scraping';
+        if (forceTelecable) init[pid] = 'telecable';
+        else if (v === 'telecable' || v === 'telecable_vlc') init[pid] = v;
+        else init[pid] = 'scraping';
       } catch { init[pid] = 'scraping'; }
     }
     return init;
