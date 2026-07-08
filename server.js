@@ -7550,6 +7550,36 @@ server.listen(PORT, () => {
       }
     })();
 
+    // ====== Cargar modo Telecable (todos los TELECABLE_PROCESSES) desde DB ======
+    // Restaura 'telecable' o 'telecable_vlc' (Telecable + perfil Disney 7 forzado)
+    // para que un reinicio del server preserve la elección del usuario. Sin esto,
+    // los canales always_on volvían a 'scraping' por default tras un restart.
+    (async () => {
+      try {
+        const pids = Array.from(TELECABLE_PROCESSES).map(p => parseInt(p, 10)).filter(n => !Number.isNaN(n));
+        if (pids.length === 0) return;
+        const { data: rows } = await supabase
+          .from('emission_processes')
+          .select('id, source_mode')
+          .in('id', pids);
+        for (const row of rows || []) {
+          const pid = String(row.id);
+          const mode = row.source_mode;
+          if (mode === 'telecable_vlc' || mode === 'telecable') {
+            // setTelecableSourceMode ajusta profile ('disney7' vs 'default')
+            // pero re-persiste en DB — pasamos por los Maps directamente para
+            // evitar el UPDATE redundante al arrancar.
+            telecableSourceMode.set(pid, 'telecable');
+            setTelecableProfile(pid, mode === 'telecable_vlc' ? 'disney7' : 'default');
+            const label = mode === 'telecable_vlc' ? 'TELECABLE + VLC LIKE (Disney7)' : 'TELECABLE';
+            sendLog(pid, 'info', `🎛️ Modo restaurado desde DB: ${label}`);
+          }
+        }
+      } catch (err) {
+        console.error('Error cargando telecable source_mode desde DB:', err.message);
+      }
+    })();
+
     // ====== RECUPERACIÓN AL ARRANCAR: levantar canales con always_on=true ======
     // Espera 8s para que el servidor esté completamente listo y luego relanza
     // todas las emisiones marcadas como "Encendido siempre".
