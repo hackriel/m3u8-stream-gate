@@ -601,10 +601,13 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     try { localStorage.setItem('teletica13_source_mode', teleticaMode); } catch {}
     if (teleticaMode === 'official') {
-      // Auto-rellenar el input M3U8 del proceso 13 con la URL fija.
+      // Auto-rellenar el input M3U8 del proceso 13 con la URL fija,
+      // pero SOLO si está vacío. Si el usuario pegó/editó una URL propia,
+      // respetarla (permite probar CDNs alternos manualmente).
       setProcesses(prev => {
         const next = [...prev];
-        if (next[TELETICA_URL_INDEX] && next[TELETICA_URL_INDEX].m3u8 !== TELETICA_OFFICIAL_M3U8) {
+        const current = next[TELETICA_URL_INDEX]?.m3u8 ?? '';
+        if (next[TELETICA_URL_INDEX] && current.trim() === '') {
           next[TELETICA_URL_INDEX] = { ...next[TELETICA_URL_INDEX], m3u8: TELETICA_OFFICIAL_M3U8 };
           return next;
         }
@@ -2492,7 +2495,7 @@ export default function EmisorM3U8Panel() {
                     }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    readOnly={hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') || (TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc'))}
+                    readOnly={hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc'))}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
