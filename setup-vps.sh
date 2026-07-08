@@ -150,6 +150,31 @@ grep -q 'tcp_keepalive_time' /etc/sysctl.conf 2>/dev/null || {
 }
 ok "TCP keepalive optimizado (60s/10s/6 probes)"
 
+# ── Paso 3c: Firewall (UFW) - abrir puertos SRT/RTMP/panel ──
+echo "🛡️  [3c/8] Configurando firewall UFW (SSH + panel + RTMP + SRT)..."
+apt install -y ufw >/dev/null 2>&1 || true
+
+# TCP: SSH, panel web, RTMP (OBS), stats NGINX
+ufw allow 22/tcp    >/dev/null 2>&1 || true
+ufw allow 3001/tcp  >/dev/null 2>&1 || true
+ufw allow 1935/tcp  >/dev/null 2>&1 || true
+ufw allow 8081/tcp  >/dev/null 2>&1 || true
+
+# UDP SRT listeners:
+#   9000 = Tigo HDMI (Pi5 → VPS)
+#   9001 = Disney 7 (OBS/Pi5 → VPS)
+#   9002 = FUTV
+#   9003 = Canal 6
+#   9004 = Teletica (Pi5 → VPS)
+#   9005 = FOX+     (Pi5 → VPS)
+#   9006 = FOX      (Pi5 → VPS)
+ufw allow 9000:9010/udp >/dev/null 2>&1 || true
+
+# Habilitar UFW sin prompt (no bloquear la sesión SSH actual)
+ufw --force enable >/dev/null 2>&1 || true
+ufw reload         >/dev/null 2>&1 || true
+ok "UFW activo: 22/3001/1935/8081 TCP + 9000-9010 UDP (SRT) abiertos"
+
 # ── Paso 4: Instalar dependencias ──
 echo "📥 [4/8] Instalando dependencias del proyecto..."
 [ -f "package.json" ] || fail "No se encontró package.json. Ejecuta este script desde el directorio del proyecto."
