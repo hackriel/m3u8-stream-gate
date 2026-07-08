@@ -3600,13 +3600,19 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // ── VLC LIKE override ────────────────────────────────────────────────
-    // Si el pid está en modo Telecable + profile='disney7' (FOX+ URL VLC LIKE),
-    // NO usamos el perfil minimal — forzamos el pipeline agresivo de Disney 7
-    // (max_reload=1000, +genpts, reconnect_at_eof, -re) para A/B testing.
+    // El perfil agresivo Disney 7 (-re + +genpts + reconnect_at_eof + max_reload=1000)
+    // es INCOMPATIBLE con URLs Telecable: el CDN devuelve EOF "normal" entre segmentos
+    // y FFmpeg queda en loop de reconexión sin primer frame → watchdog kill a ~50s.
+    // Si el usuario activó VLC LIKE sobre una URL Telecable, ignoramos el override
+    // y mantenemos el perfil minimal Telecable (que ya funciona estable).
     const forceDisney7Profile = isTelecableVlcMode(process_id);
     if (forceDisney7Profile) {
-      isTelecableSource = false;
-      sendLog(process_id, 'info', `🎬 VLC LIKE: forzando perfil Disney 7 agresivo sobre URL Telecable`);
+      if (isTelecableSource) {
+        sendLog(process_id, 'warn', `⚠️ VLC LIKE ignorado: URL Telecable es incompatible con el perfil Disney 7 (EOF loop). Usando perfil minimal Telecable, que ya es estable.`);
+      } else {
+        isTelecableSource = false;
+        sendLog(process_id, 'info', `🎬 VLC LIKE: forzando perfil Disney 7 agresivo sobre URL Telecable`);
+      }
     }
 
     // RANDOM Disney 7 (ID 19) o cualquier proceso que envíe referer custom desde el M3U:
