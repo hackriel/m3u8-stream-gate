@@ -2200,13 +2200,21 @@ export default function EmisorM3U8Panel() {
                     <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
                       Fuente Teletica
                     </label>
-                    <div className="flex gap-2">
+                    {(() => {
+                      const teleTMode = telecableModes[TELETICA_URL_INDEX] || 'scraping';
+                      const teleTInfo = telecableInfos[TELETICA_URL_INDEX] || null;
+                      const isTelecableActive = teleTMode === 'telecable';
+                      const isOfficialActive = !isTelecableActive && teleticaMode === 'official';
+                      const isTdmaxActive = !isTelecableActive && teleticaMode === 'scraping';
+                      return (
+                    <>
+                    <div className="flex gap-2 flex-wrap">
                       <button
                         type="button"
-                        onClick={() => setTeleticaMode('official')}
+                        onClick={() => { setTeleticaMode('official'); handleTelecableModeChange(TELETICA_URL_INDEX, 'scraping'); }}
                         disabled={process.isEmitiendo || process.emitStatus === 'starting'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          teleticaMode === 'official'
+                          isOfficialActive
                             ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
                             : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40'
                         } disabled:opacity-60 disabled:cursor-not-allowed`}
@@ -2216,10 +2224,10 @@ export default function EmisorM3U8Panel() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setTeleticaMode('scraping')}
+                        onClick={() => { setTeleticaMode('scraping'); handleTelecableModeChange(TELETICA_URL_INDEX, 'scraping'); }}
                         disabled={process.isEmitiendo || process.emitStatus === 'starting'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          teleticaMode === 'scraping'
+                          isTdmaxActive
                             ? 'bg-blue-500/20 border-blue-500 text-blue-300'
                             : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
                         } disabled:opacity-60 disabled:cursor-not-allowed`}
@@ -2227,12 +2235,42 @@ export default function EmisorM3U8Panel() {
                       >
                         🔐 Scraping (TDMax)
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => handleTelecableModeChange(TELETICA_URL_INDEX, 'telecable')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          isTelecableActive
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Login directo a Telecable desde el VPS (sin CR)"
+                      >
+                        📡 Telecable (VPS)
+                      </button>
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-                      {teleticaMode === 'official'
-                        ? 'URL directa de la CDN de Teletica (Referer Bradmax). Si falla, el servidor reintenta hasta 2 veces más con la URL oficial y, si sigue fallando, cambia automáticamente a SCRAPING.'
-                        : 'Login TDMax + token de 60s. Si falla, NO promueve a oficial (solo manual).'}
+                      {isTelecableActive
+                        ? 'Login automático a la API de Telecable desde el VPS. URL HLS firmada se refresca proactivamente. No usa túnel CR.'
+                        : isOfficialActive
+                          ? 'URL directa de la CDN de Teletica (Referer Bradmax). Si falla, el servidor reintenta hasta 2 veces más con la URL oficial y, si sigue fallando, cambia automáticamente a SCRAPING.'
+                          : 'Login TDMax + token de 60s. Si falla, NO promueve a oficial (solo manual).'}
                     </p>
+                    {isTelecableActive && teleTInfo && (
+                      <div className="mt-2 flex items-center gap-2 text-[11px]">
+                        <span className="text-muted-foreground">
+                          {teleTInfo.expires_in_s !== null && teleTInfo.expires_in_s > 0
+                            ? `🟢 URL vence en ${Math.floor(teleTInfo.expires_in_s / 3600)}h ${Math.floor((teleTInfo.expires_in_s % 3600) / 60)}m`
+                            : '⚪ Sin URL cacheada todavía'}
+                          {teleTInfo.last_login_failure_count > 0 && (
+                            <span className="ml-2 text-red-400">· ⚠️ {teleTInfo.last_login_failure_count} fallo(s)</span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    </>
+                      );
+                    })()}
                   </div>
                 )}
                 {/* Canal 6 URL (15) es Telecable-only: el toggle Oficial/Scraping
@@ -2342,7 +2380,7 @@ export default function EmisorM3U8Panel() {
                     }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    readOnly={hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official')}
+                    readOnly={hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') || (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable')}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
