@@ -338,6 +338,12 @@ export default function EmisorM3U8Panel() {
   // Live stats por proceso (bitrate, fps, drops, RTT SRT...) — alimentado por /api/status
   const [liveStats, setLiveStats] = useState<Record<string, LiveStats>>({});
 
+  // Health tracker: detecta "gaps" (incrementos de drop/dup) en los últimos 60s
+  // por proceso. Si hubo ≥1 gap en 60s → "Inestable". Si no → "Sano". Se limpia
+  // automáticamente al pasar la ventana.
+  const healthRef = useRef<Record<string, { lastDrop: number; lastDup: number; gapTimes: number[] }>>({});
+  const [healthMap, setHealthMap] = useState<Record<string, { unstable: boolean; gaps60s: number }>>({});
+
   const reconcileWithServerStatus = useCallback(async () => {
     try {
       const resp = await fetch('/api/status');
@@ -353,6 +359,28 @@ export default function EmisorM3U8Panel() {
         if (st && st.live) nextLive[id] = st.live;
       }
       setLiveStats(nextLive);
+
+      // Health por proceso: cuenta gaps (deltas drop/dup) en ventana móvil de 60s
+      const nowTs = Date.now();
+      const nextHealth: Record<string, { unstable: boolean; gaps60s: number }> = {};
+      for (const [id, st] of Object.entries(serverProcesses)) {
+        const live = st?.live;
+        const running = Boolean(st?.process_running);
+        if (!live || !running) {
+          delete healthRef.current[id];
+          continue;
+        }
+        const prev = healthRef.current[id] || { lastDrop: 0, lastDup: 0, gapTimes: [] };
+        const drop = live.drop ?? 0;
+        const dup = live.dup ?? 0;
+        const dropDelta = Math.max(0, drop - prev.lastDrop);
+        const dupDelta = Math.max(0, dup - prev.lastDup);
+        const gapTimes = prev.gapTimes.filter((t) => nowTs - t < 60_000);
+        if (dropDelta > 0 || dupDelta > 0) gapTimes.push(nowTs);
+        healthRef.current[id] = { lastDrop: drop, lastDup: dup, gapTimes };
+        nextHealth[id] = { unstable: gapTimes.length > 0, gaps60s: gapTimes.length };
+      }
+      setHealthMap(nextHealth);
 
       setProcesses(prev => prev.map((process, index) => {
         const serverState = serverProcesses[index.toString()];
@@ -2785,7 +2813,36 @@ export default function EmisorM3U8Panel() {
                     <span className="font-semibold text-lg">{process.isEmitiendo ? "🟢 Emitiendo" : "🔴 Caído"}</span>
                   </div>
                 </div>
-                
+
+                {process.isEmitiendo && (() => {
+                  const h = healthMap[processIndex.toString()];
+                  const unstable = !!h?.unstable;
+                  return (
+                    <div className="mt-2 pt-3 border-t border-border/50 flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Salud señal:</span>
+                      <span
+                        title={
+                          unstable
+                            ? `Se detectaron ${h?.gaps60s ?? 0} gap(s) (drop/dup frames) en los últimos 60s`
+                            : "Sin gaps en los últimos 60s"
+                        }
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
+                          unstable
+                            ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                            : "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                        }`}
+                      >
+                        <span
+                          className={`inline-flex h-2 w-2 rounded-full ${
+                            unstable ? "bg-amber-400 animate-pulse" : "bg-emerald-400"
+                          }`}
+                        />
+                        {unstable ? `Inestable · ${h?.gaps60s ?? 0} gap${(h?.gaps60s ?? 0) === 1 ? "" : "s"}/60s` : "Sano"}
+                      </span>
+                    </div>
+                  );
+                })()}
+
                 {process.emitStatus !== 'idle' && (
                   <div className="mt-2 pt-3 border-t border-border/50">
                     <div className="flex items-center gap-2">
