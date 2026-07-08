@@ -2815,7 +2815,7 @@ export default function EmisorM3U8Panel() {
                 </div>
 
                 {process.isEmitiendo && (() => {
-                  const h = healthMap[process.pid.toString()];
+                  const h = healthMap[processIndex.toString()];
                   const unstable = !!h?.unstable;
                   return (
                     <div className="mt-2 pt-3 border-t border-border/50 flex items-center justify-between">
