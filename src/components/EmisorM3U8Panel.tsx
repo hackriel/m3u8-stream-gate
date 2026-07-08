@@ -1939,7 +1939,7 @@ export default function EmisorM3U8Panel() {
             <h2 className="text-lg font-medium mb-4 text-accent">
               {processIndex === FILE_UPLOAD_INDEX ? "Archivos Locales" : "Fuente y Cabeceras"} - {channelConfig.name}
             </h2>
-            {CR_TUNNEL_CHANNELS.has(processIndex) && !(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') && (
+            {CR_TUNNEL_CHANNELS.has(processIndex) && !(TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc')) && (
               <div className="mb-4 -mt-2">
                 {crTunnelHealth.wg_up && crTunnelHealth.cr_ip ? (
                   <span
@@ -2339,7 +2339,7 @@ export default function EmisorM3U8Panel() {
                     </div>
                   );
                 })()}
-                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && !(TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable') && (
+                {channelConfig.scrapeFn && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && !(TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc')) && (
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
@@ -2382,7 +2382,7 @@ export default function EmisorM3U8Panel() {
                     }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    readOnly={hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') || (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable')}
+                    readOnly={hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') || (TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc'))}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))
@@ -2395,7 +2395,7 @@ export default function EmisorM3U8Panel() {
                   {(channelConfig.scrapeFn || hideM3u8Input) && !PASTE_URL_PROCESSES.has(processIndex) && !(processIndex === TELETICA_URL_INDEX && teleticaMode === 'official') && !(processIndex === CANAL6_URL_INDEX && canal6Mode === 'official') && (
                     <button
                       onClick={async () => {
-                        if (hideM3u8Input || (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable')) {
+                        if (hideM3u8Input || (TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc'))) {
                           setFetchingChannel(processIndex);
                           try {
                             const refreshBody: Record<string, string | number> = {};
@@ -2426,7 +2426,7 @@ export default function EmisorM3U8Panel() {
                       disabled={fetchingChannel !== null || (processIndex === 0 && disney7Mode === 'telecable' && !disney7ContentId)}
                       className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
                       title={
-                        (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable')
+                        (TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc'))
                           ? `Resolver URL HLS firmada de Telecable para ${channelConfig.name}`
                           : `Obtener URL ${channelConfig.name} automáticamente`
                       }
@@ -2437,7 +2437,7 @@ export default function EmisorM3U8Panel() {
                           Obteniendo...
                         </span>
                       ) : (
-                        (TELECABLE_PIDS.has(processIndex) && telecableModes[processIndex] === 'telecable')
+                        (TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc'))
                           ? '📡 Scrapear Telecable'
                           : (channelConfig.fetchLabel || '📡 Scrapear Telecable')
                       )}
