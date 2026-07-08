@@ -88,14 +88,25 @@ async function scrapeChannelWithFallback(
   if (error) return { success: false, error: error.message };
   return data as { success: boolean; url?: string; error?: string };
 }
-const PUBLIC_HLS_BASE_URL = "http://167.17.69.116:3001";
-const TIGO_OBS_INGEST_URL = "srt://167.17.69.116:9000?streamid=tigo&latency=2000000";
-const DISNEY7_OBS_INGEST_URL = "srt://167.17.69.116:9001?streamid=disney7&latency=2000000";
-const FUTV_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9002?streamid=futv&latency=2000000";
-const CANAL6_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9003?streamid=canal6&latency=2000000";
-const TELETICA_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9004?streamid=teletica&latency=2000000";
-const FOXMAS_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9005?streamid=foxmas&latency=2000000";
-const FOX_SRT_OBS_INGEST_URL = "srt://167.17.69.116:9006?streamid=fox&latency=2000000";
+// Resolver host dinámicamente: usa el hostname/IP desde el que se sirve el panel.
+// Fallback a IP anterior sólo si se abre en localhost/preview de Lovable.
+const FALLBACK_VPS_HOST = "167.17.69.116";
+function getVpsHost(): string {
+  if (typeof window === "undefined") return FALLBACK_VPS_HOST;
+  const h = window.location.hostname;
+  if (!h || h === "localhost" || h === "127.0.0.1" || h.endsWith(".lovable.app") || h.endsWith(".lovableproject.com")) {
+    return FALLBACK_VPS_HOST;
+  }
+  return h;
+}
+const PUBLIC_HLS_BASE_URL = `http://${getVpsHost()}:3001`;
+const TIGO_OBS_INGEST_URL = `srt://${getVpsHost()}:9000?streamid=tigo&latency=2000000`;
+const DISNEY7_OBS_INGEST_URL = `srt://${getVpsHost()}:9001?streamid=disney7&latency=2000000`;
+const FUTV_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9002?streamid=futv&latency=2000000`;
+const CANAL6_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9003?streamid=canal6&latency=2000000`;
+const TELETICA_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9004?streamid=teletica&latency=2000000`;
+const FOXMAS_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9005?streamid=foxmas&latency=2000000`;
+const FOX_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9006?streamid=fox&latency=2000000`;
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
 type OutputProfile = "passthrough" | "normal" | "balanced" | "optimized";
