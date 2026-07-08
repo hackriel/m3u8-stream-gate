@@ -3289,11 +3289,12 @@ app.post('/api/emit', async (req, res) => {
     //    se resuelve URL HLS firmada y se reemplaza effectiveSourceM3u8.
     //    El FFmpeg sale por la IP del VPS (NO por túnel CR), porque la
     //    firma del CDN está atada a esa IP.
-    if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && source_mode === 'telecable') {
-      setTelecableSourceMode(process_id, 'telecable');
-      sendLog(process_id, 'info', `🎛️ Modo TELECABLE activado (pid ${process_id})`);
+    if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && (source_mode === 'telecable' || source_mode === 'telecable_vlc')) {
+      setTelecableSourceMode(process_id, source_mode);
+      const isVlc = source_mode === 'telecable_vlc';
+      sendLog(process_id, 'info', `🎛️ Modo TELECABLE${isVlc ? ' + perfil Disney7 (VLC LIKE)' : ''} activado (pid ${process_id})`);
       telecableFailureCount.set(String(process_id), 0);
-    } else if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && source_mode && source_mode !== 'telecable') {
+    } else if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && source_mode && source_mode !== 'telecable' && source_mode !== 'telecable_vlc') {
       // Cualquier otro source_mode (scraping/official) desactiva Telecable.
       setTelecableSourceMode(process_id, 'scraping');
     }
