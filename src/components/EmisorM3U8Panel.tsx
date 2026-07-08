@@ -760,20 +760,33 @@ export default function EmisorM3U8Panel() {
   // Texto pegado del contenido M3U (RANDOM Disney 7) — alternativa a subir archivo
   const [m3uPasteText, setM3uPasteText] = useState<Record<number, string>>({});
 
-  // ── Disney 7 (pid 0): selector "Oficial | Telecable" + dropdown de canales.
+  // ── Disney 7 (pid 0): selector "Oficial | Telecable | VLC LIKE" + dropdown.
   //    'official' = flujo histórico (archivo M3U pegado, perfil VLC-like).
-  //    'telecable' = login Telecable + dropdown de canales (TUDN, ESPN, etc.).
-  type Disney7Mode = 'official' | 'telecable';
+  //    'telecable' = login Telecable + dropdown (perfil minimal).
+  //    'telecable_vlc' = login Telecable + dropdown (perfil Disney 7 agresivo).
+  type Disney7Mode = 'official' | 'telecable' | 'telecable_vlc';
   const [disney7Mode, setDisney7Mode] = useState<Disney7Mode>(() => {
     try {
       const v = localStorage.getItem('disney7_0_source_mode');
-      return v === 'telecable' ? 'telecable' : 'official';
+      if (v === 'telecable' || v === 'telecable_vlc') return v;
+      return 'official';
     } catch { return 'official'; }
   });
   useEffect(() => {
     try { localStorage.setItem('disney7_0_source_mode', disney7Mode); } catch {}
-    setTelecableModes(prev => ({ ...prev, [0]: disney7Mode === 'telecable' ? 'telecable' : 'scraping' }));
+    const mapped: TelecableMode =
+      disney7Mode === 'telecable_vlc' ? 'telecable_vlc'
+      : disney7Mode === 'telecable' ? 'telecable'
+      : 'scraping';
+    setTelecableModes(prev => (prev[0] === mapped ? prev : { ...prev, [0]: mapped }));
   }, [disney7Mode]);
+  // Cuando el poll del server trae telecable_vlc/telecable para pid 0, sincronizar
+  // el disney7Mode del UI para que el toggle refleje la realidad tras un reinicio.
+  useEffect(() => {
+    const tMode = telecableModes[0];
+    if (tMode === 'telecable_vlc' && disney7Mode !== 'telecable_vlc') setDisney7Mode('telecable_vlc');
+    else if (tMode === 'telecable' && disney7Mode !== 'telecable') setDisney7Mode('telecable');
+  }, [telecableModes, disney7Mode]);
   type TelecableChannel = { contentId: string; name: string | null };
   const [telecableChannels, setTelecableChannels] = useState<TelecableChannel[]>([]);
   const [telecableChannelsLoading, setTelecableChannelsLoading] = useState(false);
