@@ -3023,13 +3023,30 @@ export default function EmisorM3U8Panel() {
               {VISIBLE_PROCESSES.map((i) => {
                 const color = getProcessColor(i);
                 const process = processes[i];
+                // Color por modalidad cuando está emitiendo: refleja el modo real
+                // (VLC LIKE=purple, Telecable=amber, resto=green).
+                let emittingClass = 'bg-green-500/20 border-2 border-green-500 text-green-400 shadow-lg shadow-green-500/50 hover:bg-green-500/30';
+                let dotClass = 'bg-green-500';
+                if (process.isEmitiendo) {
+                  const effectiveMode: string | undefined =
+                    i === 0
+                      ? disney7Mode
+                      : (TELECABLE_PIDS.has(i) ? telecableModes[i] : undefined);
+                  if (effectiveMode === 'telecable_vlc') {
+                    emittingClass = 'bg-purple-500/20 border-2 border-purple-500 text-purple-300 shadow-lg shadow-purple-500/50 hover:bg-purple-500/30';
+                    dotClass = 'bg-purple-500';
+                  } else if (effectiveMode === 'telecable') {
+                    emittingClass = 'bg-amber-500/20 border-2 border-amber-500 text-amber-300 shadow-lg shadow-amber-500/40 hover:bg-amber-500/30';
+                    dotClass = 'bg-amber-500';
+                  }
+                }
                 return (
                   <TabsTrigger 
                     key={i} 
                     value={i.toString()}
                     className={`px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl transition-all duration-200 relative flex-shrink-0 ${
                       process.isEmitiendo 
-                        ? 'bg-green-500/20 border-2 border-green-500 text-green-400 shadow-lg shadow-green-500/50 hover:bg-green-500/30' 
+                        ? emittingClass
                         : activeTab === i.toString() 
                           ? `${color.bg} text-white shadow-lg` 
                           : 'hover:bg-muted/50'
@@ -3037,7 +3054,7 @@ export default function EmisorM3U8Panel() {
                   >
                     <span className="relative flex items-center justify-center gap-1 sm:gap-1.5 text-xs sm:text-sm whitespace-nowrap">
                       {process.isEmitiendo && (
-                        <span className="inline-flex h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-green-500 animate-pulse"></span>
+                        <span className={`inline-flex h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full animate-pulse ${dotClass}`}></span>
                       )}
                       {color.name}
                     </span>
