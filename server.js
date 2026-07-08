@@ -1872,6 +1872,131 @@ const lastFrameTime = new Map(); // Map<processId, timestampMs>
 const lastFrameNumber = new Map(); // Map<processId, number> — último contador de frames (detectar stall real)
 const lastProgressLog = new Map(); // Map<processId, timestampMs> — throttle de logs de progreso
 const PROGRESS_LOG_INTERVAL = 5000; // Loguear progreso cada 5 segundos
+
+// ─── SALUD DE STREAMS (fps instantáneo, severidad de gaps, resumen 60s) ─────
+// Reemplaza el fps acumulado (engañoso) por métricas en vivo. Se aplica a
+// TODOS los procesos (Disney, TDMax, Telecable, SRT, archivos, etc.).
+const HEALTH_WINDOW_MS = 30_000;          // ventana para fps instantáneo
+const HEALTH_SUMMARY_INTERVAL_MS = 60_000; // "SALUD 60s"
+const HEALTH_BUFFER_MS = 90_000;          // guardar samples 90s hacia atrás
+const HEALTH_SKIP_THRESHOLD = 200;        // Δframe > 200 en <5s = FFmpeg saltó segmentos
+const HEALTH_SKIP_WINDOW_MS = 5_000;
+// Umbrales fps (30fps nominal): sano ≥25, inestable 15-25, degradado <15
+const HEALTH_FPS_OK = 25;
+const HEALTH_FPS_WARN = 15;
+// samples: Array<{t: ms, frame: number}> por pid
+// gaps: Array<ms> — timestamps de gaps detectados
+// skips: Array<{t, delta}>
+// lastSummaryAt: ms — última vez que se emitió "SALUD 60s"
+const streamHealth = new Map();
+
+function _getHealth(pid) {
+  const key = String(pid);
+  let h = streamHealth.get(key);
+  if (!h) {
+    h = { samples: [], gaps: [], skips: [], lastSummaryAt: 0, lastFrame: null };
+    streamHealth.set(key, h);
+  }
+  return h;
+}
+
+function healthRecordFrame(pid, frameNum) {
+  if (frameNum === null || frameNum === undefined || isNaN(frameNum)) return;
+  const h = _getHealth(pid);
+  const now = Date.now();
+  // Detectar skip (FFmpeg saltó segmentos): Δframe grande en ventana corta
+  if (h.lastFrame !== null) {
+    const recent = h.samples.filter(s => now - s.t <= HEALTH_SKIP_WINDOW_MS);
+    if (recent.length > 0) {
+      const oldest = recent[0];
+      const delta = frameNum - oldest.frame;
+      const dt = (now - oldest.t) / 1000;
+      // >200 frames en <5s con fps aparente >60 = skip forward
+      if (delta > HEALTH_SKIP_THRESHOLD && dt > 0 && (delta / dt) > 60) {
+        h.skips.push({ t: now, delta });
+      }
+    }
+  }
+  h.lastFrame = frameNum;
+  h.samples.push({ t: now, frame: frameNum });
+  // Trim buffer
+  const cutoff = now - HEALTH_BUFFER_MS;
+  while (h.samples.length > 0 && h.samples[0].t < cutoff) h.samples.shift();
+  while (h.gaps.length > 0 && h.gaps[0] < cutoff) h.gaps.shift();
+  while (h.skips.length > 0 && h.skips[0].t < cutoff) h.skips.shift();
+}
+
+function healthRecordGap(pid) {
+  const h = _getHealth(pid);
+  h.gaps.push(Date.now());
+}
+
+function healthComputeFps(pid, windowMs = HEALTH_WINDOW_MS) {
+  const h = _getHealth(pid);
+  const now = Date.now();
+  const cutoff = now - windowMs;
+  const inWin = h.samples.filter(s => s.t >= cutoff);
+  if (inWin.length < 2) return null;
+  const first = inWin[0];
+  const last = inWin[inWin.length - 1];
+  const dt = (last.t - first.t) / 1000;
+  if (dt <= 0) return null;
+  return Math.max(0, (last.frame - first.frame) / dt);
+}
+
+function healthStatus(fps) {
+  if (fps === null) return { emoji: '⏳', label: 'MIDIENDO' };
+  if (fps >= HEALTH_FPS_OK) return { emoji: '✅', label: 'SANO' };
+  if (fps >= HEALTH_FPS_WARN) return { emoji: '🟡', label: 'INESTABLE' };
+  return { emoji: '🔴', label: 'DEGRADADO' };
+}
+
+// Severidad de un gap basado en cuánto tiempo el fps instantáneo estuvo bajo
+// antes del gap. Aproximación: usar fps últimos 15s.
+function healthGapSeverity(pid) {
+  const fps15 = healthComputeFps(pid, 15_000);
+  const fps5 = healthComputeFps(pid, 5_000);
+  const worst = Math.min(fps15 ?? 30, fps5 ?? 30);
+  if (worst < 5) return { emoji: '🔴', label: 'GRAVE', hint: 'reload probable en TV' };
+  if (worst < 15) return { emoji: '🟠', label: 'MEDIO', hint: 'freeze breve posible' };
+  return { emoji: '🟢', label: 'LEVE', hint: 'invisible en TV' };
+}
+
+function healthFormatProgress(pid, frameNum, ffmpegFpsStr, bitrateStr) {
+  const fps = healthComputeFps(pid);
+  const st = healthStatus(fps);
+  const fpsTxt = fps === null ? '—' : fps.toFixed(1);
+  const parts = [
+    `Progreso: frame=${frameNum}`,
+    `fps=${fpsTxt} (últimos 30s)`,
+    `${st.emoji} ${st.label}`,
+  ];
+  if (bitrateStr) parts.push(`bitrate=${bitrateStr}`);
+  return parts.join(' | ');
+}
+
+// Emite "SALUD 60s" por cada proceso activo. Se llama por interval global.
+function healthEmitSummaries() {
+  const now = Date.now();
+  for (const [pid, status] of emissionStatuses.entries()) {
+    if (status !== 'running') continue;
+    const h = _getHealth(pid);
+    if (h.samples.length < 2) continue;
+    if (now - h.lastSummaryAt < HEALTH_SUMMARY_INTERVAL_MS - 1000) continue;
+    h.lastSummaryAt = now;
+    const fps60 = healthComputeFps(pid, 60_000);
+    const st = healthStatus(fps60);
+    const gaps60 = h.gaps.filter(t => now - t <= 60_000).length;
+    const skips60 = h.skips.filter(s => now - s.t <= 60_000).length;
+    const fpsTxt = fps60 === null ? '—' : fps60.toFixed(1);
+    sendLog(pid, 'info',
+      `📊 SALUD últimos 60s: fps_real=${fpsTxt} ${st.emoji} | gaps=${gaps60} | skips=${skips60} | ${st.label}`
+    );
+  }
+}
+setInterval(() => { try { healthEmitSummaries(); } catch (e) { console.error('healthEmitSummaries:', e); } }, 15_000);
+// ─── FIN SALUD DE STREAMS ───────────────────────────────────────────────────
+
 const WATCHDOG_STALL_TIMEOUT = 30000; // 30 segundos sin frames en running = proceso colgado
 const WATCHDOG_START_TIMEOUT = 25000; // 25 segundos en starting sin primer frame = arranque colgado
 const WATCHDOG_CHECK_INTERVAL = 10000; // Revisar cada 10 segundos
