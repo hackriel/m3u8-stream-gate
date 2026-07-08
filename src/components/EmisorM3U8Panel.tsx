@@ -2282,28 +2282,45 @@ export default function EmisorM3U8Panel() {
                   const tMode = telecableModes[processIndex] || 'scraping';
                   const tInfo = telecableInfos[processIndex] || null;
                   const isFox = processIndex === FOX_URL_INDEX;
-                  const scrapingLabel = isFox ? '🔐 Scraping (TDMax+CR)' : '🔐 TDMax';
-                  const scrapingHelp = isFox
-                    ? 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'
-                    : 'Login TDMax + token de 60s (flujo TDMax).';
+                  const isFoxMas = processIndex === FOXMAS_URL_INDEX;
+                  // Para FOX+ (24) el primer botón deja de ser TDMax: pasa a ser
+                  // "🎬 VLC LIKE" que usa fuente Telecable + perfil agresivo
+                  // Disney 7 (A/B contra el Telecable minimal).
+                  const firstMode: TelecableMode = isFoxMas ? 'telecable_vlc' : 'scraping';
+                  const firstLabel = isFoxMas
+                    ? '🎬 VLC LIKE'
+                    : (isFox ? '🔐 Scraping (TDMax+CR)' : '🔐 TDMax');
+                  const firstTitle = isFoxMas
+                    ? 'Fuente Telecable + perfil Disney 7 agresivo (max_reload=1000, +genpts, reconnect_at_eof, -re)'
+                    : 'Usar TDMax (login + token de 60s)';
+                  const firstActiveClass = isFoxMas
+                    ? 'bg-purple-500/20 border-purple-500 text-purple-300'
+                    : 'bg-blue-500/20 border-blue-500 text-blue-300';
+                  const firstIdleClass = isFoxMas
+                    ? 'bg-background border-border text-muted-foreground hover:border-purple-500/40'
+                    : 'bg-background border-border text-muted-foreground hover:border-blue-500/40';
+                  const scrapingHelp = isFoxMas
+                    ? 'URL scrapeada desde Telecable, pero procesada con el perfil agresivo de Disney 7 (max_reload=1000, +genpts, reconnect_at_eof, -re). A/B test vs Telecable normal.'
+                    : (isFox
+                        ? 'Scraping TDMax con salida vía IP de Costa Rica (Pi5). Método histórico.'
+                        : 'Login TDMax + token de 60s (flujo TDMax).');
+                  const isTelecableFamily = tMode === 'telecable' || tMode === 'telecable_vlc';
                   return (
                     <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
                       <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
-                        Fuente alterna — Telecable
+                        {isFoxMas ? 'Fuente / Perfil de procesamiento' : 'Fuente alterna — Telecable'}
                       </label>
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => handleTelecableModeChange(processIndex, 'scraping')}
+                          onClick={() => handleTelecableModeChange(processIndex, firstMode)}
                           disabled={process.isEmitiendo || process.emitStatus === 'starting'}
                           className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                            tMode === 'scraping'
-                              ? 'bg-blue-500/20 border-blue-500 text-blue-300'
-                              : 'bg-background border-border text-muted-foreground hover:border-blue-500/40'
+                            tMode === firstMode ? firstActiveClass : firstIdleClass
                           } disabled:opacity-60 disabled:cursor-not-allowed`}
-                          title="Usar TDMax (login + token de 60s)"
+                          title={firstTitle}
                         >
-                          {scrapingLabel}
+                          {firstLabel}
                         </button>
                         <button
                           type="button"
@@ -2316,15 +2333,17 @@ export default function EmisorM3U8Panel() {
                           } disabled:opacity-60 disabled:cursor-not-allowed`}
                           title="Login directo a Telecable desde el VPS (sin CR)"
                         >
-                          📡 Telecable (VPS)
+                          {isFoxMas ? '📡 Telecable (minimal)' : '📡 Telecable (VPS)'}
                         </button>
                       </div>
                       <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-                        {tMode === 'telecable'
+                        {tMode === 'telecable_vlc'
+                          ? scrapingHelp
+                          : tMode === 'telecable'
                           ? 'Login automático a la API de Telecable desde el VPS. URL HLS firmada se refresca proactivamente. No usa túnel CR.'
                           : scrapingHelp}
                       </p>
-                      {tMode === 'telecable' && tInfo && (
+                      {isTelecableFamily && tInfo && (
                         <div className="mt-2 flex items-center gap-2 text-[11px]">
                           <span className="text-muted-foreground">
                             {tInfo.expires_in_s !== null && tInfo.expires_in_s > 0
