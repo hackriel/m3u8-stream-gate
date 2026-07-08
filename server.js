@@ -594,27 +594,48 @@ const telecableSourceMode = new Map();   // pid → 'scraping' | 'telecable'
 const telecableState = new Map();        // pid → { phpsessid, url, expiresAt, contentId, quality, fetchedAt }
 const telecableLastReloginAt = new Map();// pid → Date.now() del último relogin (rate-limit)
 const telecableFailureCount = new Map(); // pid → count de fallos consecutivos de login
+// Perfil de encoding para pids en modo Telecable.
+//   'default' → perfil minimal VLC-like (detección por hostname).
+//   'disney7' → forzar el perfil AGRESIVO de Disney 7 (max_reload=1000,
+//               +genpts, reconnect_at_eof, -re) aunque el hostname sea telecable.
+//   Usado por FOX+ URL (pid 24) para el modo "VLC LIKE" (A/B test).
+const telecableProfile = new Map();      // pid → 'default' | 'disney7'
+const getTelecableProfile = (pid) =>
+  (telecableProfile.get(String(pid)) === 'disney7' ? 'disney7' : 'default');
+const setTelecableProfile = (pid, profile) => {
+  const p = profile === 'disney7' ? 'disney7' : 'default';
+  telecableProfile.set(String(pid), p);
+  return p;
+};
 
 const getFoxSourceMode = (pid) =>
   (telecableSourceMode.get(String(pid)) === 'telecable' ? 'telecable' : 'scraping');
 const setFoxSourceMode = (pid, mode) => {
-  const m = mode === 'telecable' ? 'telecable' : 'scraping';
+  // Aceptamos 'telecable_vlc' como alias de 'telecable' + profile='disney7'.
+  // Cualquier otra cosa se normaliza a 'scraping' + profile='default'.
+  const isVlc = mode === 'telecable_vlc';
+  const m = (mode === 'telecable' || isVlc) ? 'telecable' : 'scraping';
   telecableSourceMode.set(String(pid), m);
+  setTelecableProfile(pid, isVlc ? 'disney7' : 'default');
+  const persisted = isVlc ? 'telecable_vlc' : m;
   try {
     if (typeof supabase !== 'undefined' && supabase) {
       supabase
         .from('emission_processes')
-        .update({ source_mode: m })
+        .update({ source_mode: persisted })
         .eq('id', parseInt(String(pid), 10))
         .then(({ error }) => {
           if (error) console.error(`[telecableSourceMode] persist error pid=${pid}:`, error.message);
         });
     }
   } catch (_) {}
-  return m;
+  return persisted;
 };
 const isTelecableMode = (pid) =>
   TELECABLE_PROCESSES.has(String(pid)) && getFoxSourceMode(pid) === 'telecable';
+// True si el pid está en Telecable con perfil forzado Disney 7 (VLC LIKE).
+const isTelecableVlcMode = (pid) =>
+  isTelecableMode(pid) && getTelecableProfile(pid) === 'disney7';
 // Aliases con nombre nuevo (más claros). Mantenemos los viejos por compat.
 const getTelecableSourceMode = getFoxSourceMode;
 const setTelecableSourceMode = setFoxSourceMode;
@@ -3268,11 +3289,12 @@ app.post('/api/emit', async (req, res) => {
     //    se resuelve URL HLS firmada y se reemplaza effectiveSourceM3u8.
     //    El FFmpeg sale por la IP del VPS (NO por túnel CR), porque la
     //    firma del CDN está atada a esa IP.
-    if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && source_mode === 'telecable') {
-      setTelecableSourceMode(process_id, 'telecable');
-      sendLog(process_id, 'info', `🎛️ Modo TELECABLE activado (pid ${process_id})`);
+    if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && (source_mode === 'telecable' || source_mode === 'telecable_vlc')) {
+      setTelecableSourceMode(process_id, source_mode);
+      const isVlc = source_mode === 'telecable_vlc';
+      sendLog(process_id, 'info', `🎛️ Modo TELECABLE${isVlc ? ' + perfil Disney7 (VLC LIKE)' : ''} activado (pid ${process_id})`);
       telecableFailureCount.set(String(process_id), 0);
-    } else if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && source_mode && source_mode !== 'telecable') {
+    } else if (TELECABLE_PROCESSES.has(String(process_id)) && !is_recovery && source_mode && source_mode !== 'telecable' && source_mode !== 'telecable_vlc') {
       // Cualquier otro source_mode (scraping/official) desactiva Telecable.
       setTelecableSourceMode(process_id, 'scraping');
     }
@@ -3577,6 +3599,16 @@ app.post('/api/emit', async (req, res) => {
       // Mantener fallback TDMax si la URL llega incompleta o malformada
     }
 
+    // ── VLC LIKE override ────────────────────────────────────────────────
+    // Si el pid está en modo Telecable + profile='disney7' (FOX+ URL VLC LIKE),
+    // NO usamos el perfil minimal — forzamos el pipeline agresivo de Disney 7
+    // (max_reload=1000, +genpts, reconnect_at_eof, -re) para A/B testing.
+    const forceDisney7Profile = isTelecableVlcMode(process_id);
+    if (forceDisney7Profile) {
+      isTelecableSource = false;
+      sendLog(process_id, 'info', `🎬 VLC LIKE: forzando perfil Disney 7 agresivo sobre URL Telecable`);
+    }
+
     // RANDOM Disney 7 (ID 19) o cualquier proceso que envíe referer custom desde el M3U:
     // sobreescribir refererDomain/originDomain con los valores que vienen del archivo M3U.
     if (customReferer && typeof customReferer === 'string') {
@@ -3685,7 +3717,11 @@ app.post('/api/emit', async (req, res) => {
     // ID 19 (RANDOM Disney 7) hereda -re de Disney 7 para pacing HLS correcto.
     // Telecable NUNCA usa -re: el CDN ya pacing por segmentos y -re causa
     // que FFmpeg se quede esperando datos que el CDN no envía hasta EOF.
-    const usesReFlag = !isTelecableSource && (RE_FLAG_PROCESSES.has(String(process_id)) || String(process_id) === '19');
+    const usesReFlag = !isTelecableSource && (
+      RE_FLAG_PROCESSES.has(String(process_id)) ||
+      String(process_id) === '19' ||
+      forceDisney7Profile
+    );
     if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
       sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
@@ -6706,8 +6742,15 @@ app.get('/api/canal6/source-mode', (req, res) => {
 // Funciona para cualquier pid en TELECABLE_PROCESSES (FUTV/Teletica/TDMas1/Canal6/FOX+/FOX).
 const telecableSourceModePayload = (pid) => {
   const st = telecableState.get(String(pid));
+  const baseMode = getTelecableSourceMode(pid);
+  const profile = getTelecableProfile(pid);
+  // El frontend distingue 'telecable' (perfil minimal) de 'telecable_vlc'
+  // (perfil Disney 7). Exponemos la variante como `mode` para que el toggle
+  // de FOX+ (24) refleje bien el estado en curso.
+  const reportedMode = baseMode === 'telecable' && profile === 'disney7' ? 'telecable_vlc' : baseMode;
   return {
-    mode: getTelecableSourceMode(pid),
+    mode: reportedMode,
+    profile,
     telecable: st
       ? {
           content_id: st.contentId,
@@ -6731,11 +6774,11 @@ app.post('/api/telecable/:pid/source-mode', (req, res) => {
   const pid = String(req.params.pid);
   if (!TELECABLE_PROCESSES.has(pid)) return res.status(404).json({ error: `pid ${pid} no soporta Telecable` });
   const requested = req.body?.mode;
-  if (requested !== 'telecable' && requested !== 'scraping') {
-    return res.status(400).json({ error: 'Modo inválido (telecable|scraping)' });
+  if (requested !== 'telecable' && requested !== 'scraping' && requested !== 'telecable_vlc') {
+    return res.status(400).json({ error: 'Modo inválido (telecable|telecable_vlc|scraping)' });
   }
   const mode = setTelecableSourceMode(pid, requested);
-  res.json({ ok: true, mode });
+  res.json({ ok: true, mode, profile: getTelecableProfile(pid) });
 });
 
 app.post('/api/telecable/:pid/refresh', async (req, res) => {
