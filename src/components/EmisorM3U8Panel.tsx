@@ -829,7 +829,7 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     if (
       activeTab === '0' &&
-      disney7Mode === 'telecable' &&
+      (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc') &&
       telecableChannels.length === 0 &&
       !telecableChannelsLoading &&
       !telecableChannelsAttemptedRef.current
