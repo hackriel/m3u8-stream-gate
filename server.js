@@ -1972,7 +1972,12 @@ function healthComputeFps(pid, windowMs = HEALTH_WINDOW_MS) {
   const last = inWin[inWin.length - 1];
   const dt = (last.t - first.t) / 1000;
   if (dt <= 0) return null;
-  return Math.max(0, (last.frame - first.frame) / dt);
+  // Necesitamos al menos ~20s de datos reales para que el promedio sea
+  // representativo. Con menos, devolvemos null → estado "⏳ MIDIENDO".
+  if (dt < 20) return null;
+  const raw = Math.max(0, (last.frame - first.frame) / dt);
+  // Cap ráfagas de catch-up para no reportar 58/69fps engañosos.
+  return Math.min(raw, HEALTH_FPS_DISPLAY_CAP);
 }
 
 function healthStatus(fps) {
