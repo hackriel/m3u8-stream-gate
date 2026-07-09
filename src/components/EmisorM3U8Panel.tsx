@@ -705,9 +705,16 @@ export default function EmisorM3U8Panel() {
         const forceTelecable = pid === 15 || pid === 27 || pid === 28;
         if (forceTelecable) {
           init[pid] = v === 'telecable_vlc' ? 'telecable_vlc' : 'telecable';
-        } else if (v === 'telecable' || v === 'telecable_vlc') init[pid] = v;
-        else init[pid] = 'scraping';
-      } catch { init[pid] = 'scraping'; }
+        } else if (v === 'telecable' || v === 'telecable_vlc' || v === 'scraping') {
+          init[pid] = v;
+        } else {
+          // Sin valor local (p. ej. computadora nueva): asumir 'telecable' por
+          // default para que el tab arranque amarillo. El poll al server (≤5s)
+          // corrige a 'scraping' si ese pid está realmente en scraping.
+          // pid 0 (Disney 7) tiene su propio selector — se queda en 'scraping'.
+          init[pid] = pid === 0 ? 'scraping' : 'telecable';
+        }
+      } catch { init[pid] = pid === 0 ? 'scraping' : 'telecable'; }
     }
     return init;
   });
