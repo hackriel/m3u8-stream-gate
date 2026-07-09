@@ -705,9 +705,16 @@ export default function EmisorM3U8Panel() {
         const forceTelecable = pid === 15 || pid === 27 || pid === 28;
         if (forceTelecable) {
           init[pid] = v === 'telecable_vlc' ? 'telecable_vlc' : 'telecable';
-        } else if (v === 'telecable' || v === 'telecable_vlc') init[pid] = v;
-        else init[pid] = 'scraping';
-      } catch { init[pid] = 'scraping'; }
+        } else if (v === 'telecable' || v === 'telecable_vlc' || v === 'scraping') {
+          init[pid] = v;
+        } else {
+          // Sin valor local (p. ej. computadora nueva): asumir 'telecable' por
+          // default para que el tab arranque amarillo. El poll al server (≤5s)
+          // corrige a 'scraping' si ese pid está realmente en scraping.
+          // pid 0 (Disney 7) tiene su propio selector — se queda en 'scraping'.
+          init[pid] = pid === 0 ? 'scraping' : 'telecable';
+        }
+      } catch { init[pid] = pid === 0 ? 'scraping' : 'telecable'; }
     }
     return init;
   });
@@ -3167,15 +3174,39 @@ export default function EmisorM3U8Panel() {
                       const health = healthMap[i.toString()];
                       const unstable = !!health?.unstable;
                       const gaps60s = health?.gaps60s ?? 0;
+                      // Color por modalidad (mismo esquema que los tabs):
+                      // telecable_vlc → morado, telecable → amber, resto → verde.
+                      const modeForCard: string | undefined =
+                        i === 0
+                          ? disney7Mode
+                          : (TELECABLE_PIDS.has(i) ? telecableModes[i] : undefined);
+                      let cardBorder = 'border-broadcast-border/50 hover:border-green-500/40';
+                      let cardDot = 'bg-green-400';
+                      let cardTitle = 'text-green-400';
+                      let cardBadge = 'bg-green-500/15 text-green-400 border-green-500/30';
+                      let cardBadgeLabel = 'LIVE';
+                      if (modeForCard === 'telecable_vlc') {
+                        cardBorder = 'border-purple-500/50 hover:border-purple-400/70 shadow-purple-500/20';
+                        cardDot = 'bg-purple-400';
+                        cardTitle = 'text-purple-300';
+                        cardBadge = 'bg-purple-500/15 text-purple-300 border-purple-500/40';
+                        cardBadgeLabel = 'TELECABLE · VLC';
+                      } else if (modeForCard === 'telecable') {
+                        cardBorder = 'border-amber-500/50 hover:border-amber-400/70 shadow-amber-500/20';
+                        cardDot = 'bg-amber-400';
+                        cardTitle = 'text-amber-300';
+                        cardBadge = 'bg-amber-500/15 text-amber-300 border-amber-500/40';
+                        cardBadgeLabel = 'TELECABLE';
+                      }
                       return (
                         <div
                           key={i}
-                          className="bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-4 shadow-lg border border-broadcast-border/50 hover:border-green-500/40 transition-all duration-200"
+                          className={`bg-broadcast-panel/60 backdrop-blur-sm rounded-2xl p-4 shadow-lg border transition-all duration-200 ${cardBorder}`}
                         >
                           <div className="flex items-start justify-between gap-2 mb-3">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-400 animate-pulse flex-shrink-0"></span>
-                              <h3 className="text-sm font-bold truncate text-green-400" title={color.name}>
+                              <span className={`inline-block h-2.5 w-2.5 rounded-full animate-pulse flex-shrink-0 ${cardDot}`}></span>
+                              <h3 className={`text-sm font-bold truncate ${cardTitle}`} title={color.name}>
                                 {color.name}
                               </h3>
                             </div>
@@ -3199,8 +3230,8 @@ export default function EmisorM3U8Panel() {
                                 />
                                 {unstable ? `Inestable · ${gaps60s}` : 'Sano'}
                               </span>
-                              <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30">
-                                LIVE
+                              <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${cardBadge}`}>
+                                {cardBadgeLabel}
                               </span>
                             </div>
                           </div>
