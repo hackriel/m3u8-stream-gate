@@ -739,6 +739,20 @@ export default function EmisorM3U8Panel() {
     return init;
   });
   const [telecableInfos, setTelecableInfos] = useState<Record<number, TelecableInfo>>({});
+  // Cuando Teletica URL (13) entra en modo Telecable/VLC, limpiar el input M3U8
+  // si contiene la URL oficial Bradmax auto-rellenada. Evita que se muestre
+  // "cdn01.teletica.com/..." encima del selector amarillo (Telecable).
+  useEffect(() => {
+    const mode = telecableModes[TELETICA_URL_INDEX];
+    if (mode !== 'telecable' && mode !== 'telecable_vlc') return;
+    setProcesses(prev => {
+      const cur = prev[TELETICA_URL_INDEX]?.m3u8 ?? '';
+      if (cur.trim() !== TELETICA_OFFICIAL_M3U8) return prev;
+      const next = [...prev];
+      next[TELETICA_URL_INDEX] = { ...next[TELETICA_URL_INDEX], m3u8: '' };
+      return next;
+    });
+  }, [telecableModes]);
   const handleTelecableModeChange = useCallback((pid: number, mode: TelecableMode) => {
     setTelecableModes(prev => ({ ...prev, [pid]: mode }));
     try { localStorage.setItem(`telecable_${pid}_source_mode`, mode); } catch {}
