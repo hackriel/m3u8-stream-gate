@@ -615,7 +615,8 @@ export default function EmisorM3U8Panel() {
     // Oficial (no Telecable/VLC). Sin este guard, si el usuario dejó
     // teleticaMode='official' en localStorage y luego cambió a Telecable,
     // el input mostraba cdn01.teletica.com encima del modo amarillo.
-    const teleT = telecableModes[TELETICA_URL_INDEX];
+    let teleT: string | null = null;
+    try { teleT = localStorage.getItem(`telecable_${TELETICA_URL_INDEX}_source_mode`); } catch {}
     const isTelecableFamily = teleT === 'telecable' || teleT === 'telecable_vlc';
     if (teleticaMode === 'official' && !isTelecableFamily) {
       // Auto-rellenar el input M3U8 del proceso 13 con la URL fija,
@@ -644,7 +645,7 @@ export default function EmisorM3U8Panel() {
         return prev;
       });
     }
-  }, [teleticaMode, telecableModes]);
+  }, [teleticaMode]);
   // Poll del modo en el server (refleja fallbacks automáticos oficial→scraping).
   useEffect(() => {
     let lastServerMode: 'official' | 'scraping' | null = null;
