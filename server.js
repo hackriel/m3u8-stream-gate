@@ -658,6 +658,13 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   }
   telecableLastReloginAt.set(pid, Date.now());
 
+  // FUTV URL (11): Telecable rechaza el login desde IP USA (geo-block).
+  // Ruteamos SOLO estos 2 fetch por el proxy HTTP del Pi (IP CR residencial),
+  // así el token PHPSESSID y la URL firmada quedan atados a IP CR y FFmpeg
+  // (que también sale por túnel CR vía isViaCrTunnel) puede consumirlos.
+  // Para el resto de pids, dispatcher = undefined → fetch directo desde VPS.
+  const teleDispatcher = (pid === '11' && localProxyAgent) ? localProxyAgent : undefined;
+
   const matcher = TELECABLE_CHANNEL_MATCHERS[pid];
   const explicitContentId = contentIdOverride
     || telecableState.get(pid)?.contentId
@@ -677,6 +684,7 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   try {
     loginResp = await fetch(loginUrl, {
       headers: { 'User-Agent': TELECABLE_UA, 'Accept': 'application/json' },
+      dispatcher: teleDispatcher,
     });
   } catch (e) {
     throw new Error(`telecable login network error: ${e.message}`);
@@ -698,6 +706,7 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
       'Accept': 'application/json',
       'Cookie': `PHPSESSID=${phpsessid}; _nss=1`,
     },
+    dispatcher: teleDispatcher,
   });
   if (!plResp.ok) throw new Error(`telecable playlist http=${plResp.status}`);
   const plJson = await plResp.json();
@@ -878,7 +887,7 @@ for (const [pid, st] of Object.entries(telecablePersistedState)) {
 // ───────────────────────────────────────────────────────────────────────
 const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080';
 // IDs que requieren scraping local vía Pi5 CR (token/IP deben coincidir).
-const PROXY_PROCESSES = new Set(['11', '15', '24', '25']);
+const PROXY_PROCESSES = new Set(['15', '24', '25']);
 
 // Fallback legado SOCKS/proxychains para FFmpeg. FOX/FOX+ ya NO deben pasar
 // por este bloque: el scraping usa proxy HTTP Pi5 y FFmpeg sale por runuser croute.
@@ -899,13 +908,20 @@ const localProxyAgent = LOCAL_PROXY_URL ? new ProxyAgent(LOCAL_PROXY_URL) : null
 // fwmark 0x77 → tabla cr_routed → wg0. Si el túnel se cae, SOLO estos
 // canales fallan; el resto sigue saliendo por la IP del VPS.
 // ───────────────────────────────────────────────────────────────────────
-const CHANNELS_VIA_PI_WG = new Set(['11', '15', '24', '25']); // FUTV URL, CANAL 6 URL, FOX+ URL, FOX URL
+// FUTV URL (11) es un caso INVERTIDO: solo entra al túnel cuando el modo es
+// Telecable (TDMax funciona directo desde VPS con IP USA). El resto (15/24/25)
+// entra al túnel SIEMPRE que no esté en modo Telecable. Ver isViaCrTunnel abajo.
+const CHANNELS_VIA_PI_WG = new Set(['11', '15', '24', '25']);
 const CR_TUNNEL_USER = 'croute';
 const isViaCrTunnel = (pid) => {
   if (!CHANNELS_VIA_PI_WG.has(String(pid))) return false;
-  // Si el pid está en modo Telecable, FFmpeg sale por la IP del VPS
-  // (NO por túnel CR), porque la URL firmada está atada a la IP del VPS.
-  if (isTelecableMode(pid)) return false;
+  const spid = String(pid);
+  const isTele = isTelecableMode(pid);
+  // FUTV URL (11): INVERTIDO — solo túnel CR en modo Telecable.
+  // En TDMax (oficial), FUTV funciona directo desde VPS USA.
+  if (spid === '11') return isTele;
+  // 15/24/25: Telecable atado a IP VPS → sale directo. TDMax → túnel CR.
+  if (isTele) return false;
   return true;
 };
 // Wrappea un spawn de ffmpeg cuando el pid debe salir por el túnel CR.
@@ -917,7 +933,7 @@ const wrapFfmpegSpawn = (pid, ffmpegArgs) => {
 // IDs que deben usar la SEGUNDA cuenta TDMax (info@media.cr, la del Raspberry)
 // en vez de la cuenta principal (arlopfa). Evita exceder el cupo de devices
 // permitidos por TDMax en una sola cuenta.
-const PI_ACCOUNT_PROCESSES = new Set(['11', '15', '24', '25', '26']); // segunda cuenta TDMax: FUTV URL, CANAL 6 URL, FOX+ URL, FOX URL, FOX+ ALTERNO
+const PI_ACCOUNT_PROCESSES = new Set(['15', '24', '25', '26']); // segunda cuenta TDMax: CANAL 6 URL, FOX+ URL, FOX URL, FOX+ ALTERNO
 const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
 const getTdmaxCreds = (account) => {
   if (account === 'pi') {
