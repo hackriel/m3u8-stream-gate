@@ -6176,11 +6176,11 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 150)}...`);
 
     // Ejecutar ffmpeg
-    // Los canales en CHANNELS_VIA_PI_WG (15/24/25) se lanzan como `runuser -u croute`
-    // para que sus paquetes reciban fwmark y salgan por el túnel WG hacia el Pi5 CR.
+    // Los canales en CHANNELS_VIA_PI_WG (11 en modo Telecable, 15/24/25 en TDMax)
+    // se lanzan con `-http_proxy` apuntando al tinyproxy del Pi5 → IP residencial CR.
     const [spawnCmd, spawnArgs] = wrapFfmpegSpawn(process_id, ffmpegArgs);
     if (isViaCrTunnel(process_id)) {
-      sendLog(process_id, 'info', `🇨🇷 Saliendo vía túnel WireGuard CR (Pi5) — runuser ${CR_TUNNEL_USER}`);
+      sendLog(process_id, 'info', `🇨🇷 Saliendo vía túnel WireGuard CR (Pi5) — http_proxy ${LOCAL_PROXY_URL}`);
     }
     const ffmpegProcess = spawn(spawnCmd, spawnArgs, {
       cwd: path.join(__dirname, 'uploads')
