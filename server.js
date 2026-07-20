@@ -893,12 +893,13 @@ const PROXY_PROCESSES = new Set(['15', '24', '25']);
 // por este bloque: el scraping usa proxy HTTP Pi5 y FFmpeg sale por runuser croute.
 const LEGACY_SOCKS_FFMPEG_PROCESSES = new Set([]);
 
-// Proxy HTTP en la Pi (Node) para scraping TDMax de canales geo-bloqueados.
-// En esta instalación: VPS = 10.77.0.1, Pi5 = 10.77.0.2 (verificado con
-// `curl -x http://10.77.0.2:8888 https://ifconfig.me` → IP residencial CR).
-// Para FOX/FOX+ el scraping debe conectarse al proxy del Pi, no bindear
-// localAddress al IP del VPS (eso da `bind EADDRNOTAVAIL`).
-const LOCAL_PROXY_URL = process.env.LOCAL_PROXY_URL || 'http://10.77.0.2:8888';
+// Proxy HTTP en la Pi (tinyproxy) para scraping + FFmpeg de canales que
+// requieren IP residencial CR. Topología WireGuard actual:
+//   VPS = 10.77.0.2   Pi5 = 10.77.0.1   (verificar con `wg show wg0`)
+// El proxy escucha en 10.77.0.1:8888 y sale por la WAN residencial del Pi.
+// Usar el proxy evita depender de policy-routing por uid (fwmark/tabla
+// cr_routed), que resultó frágil en la combinación kernel+SNAT+conntrack.
+const LOCAL_PROXY_URL = process.env.LOCAL_PROXY_URL || 'http://10.77.0.1:8888';
 const localProxyAgent = LOCAL_PROXY_URL ? new ProxyAgent(LOCAL_PROXY_URL) : null;
 
 // ───────────────────────────────────────────────────────────────────────
@@ -925,10 +926,15 @@ const isViaCrTunnel = (pid) => {
   return true;
 };
 // Wrappea un spawn de ffmpeg cuando el pid debe salir por el túnel CR.
-// Devuelve [command, args] para pasar tal cual a child_process.spawn.
+// Estrategia: inyectar `-http_proxy <LOCAL_PROXY_URL>` como opción global de
+// FFmpeg (aplica al protocolo HTTP/HTTPS de los inputs HLS). El proxy corre
+// en el Pi5 (tinyproxy en 10.77.0.1:8888) y sale por la IP residencial CR.
+// No usamos `runuser -u croute` porque el policy-routing por uid + SNAT en
+// wg0 rompe conntrack de respuestas TCP en este kernel.
 const wrapFfmpegSpawn = (pid, ffmpegArgs) => {
   if (!isViaCrTunnel(pid)) return ['ffmpeg', ffmpegArgs];
-  return ['runuser', ['-u', CR_TUNNEL_USER, '--', 'ffmpeg', ...ffmpegArgs]];
+  if (!LOCAL_PROXY_URL) return ['ffmpeg', ffmpegArgs];
+  return ['ffmpeg', ['-http_proxy', LOCAL_PROXY_URL, ...ffmpegArgs]];
 };
 // IDs que deben usar la SEGUNDA cuenta TDMax (info@media.cr, la del Raspberry)
 // en vez de la cuenta principal (arlopfa). Evita exceder el cupo de devices
@@ -4572,7 +4578,7 @@ app.post('/api/emit', async (req, res) => {
 
     if (!ffmpegProcess && spawnCmd === 'ffmpeg' && isViaCrTunnel(process_id)) {
       [spawnCmd, spawnArgs] = wrapFfmpegSpawn(process_id, ffmpegArgs);
-      sendLog(process_id, 'info', `🇨🇷 FFmpeg saldrá vía túnel WireGuard CR (runuser ${CR_TUNNEL_USER}); sin SOCKS/proxychains`);
+      sendLog(process_id, 'info', `🇨🇷 FFmpeg saldrá vía túnel WireGuard CR (http_proxy ${LOCAL_PROXY_URL})`);
     }
 
     const commandStr = spawnCmd + ' ' + spawnArgs.join(' ');
@@ -6170,11 +6176,11 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 150)}...`);
 
     // Ejecutar ffmpeg
-    // Los canales en CHANNELS_VIA_PI_WG (15/24/25) se lanzan como `runuser -u croute`
-    // para que sus paquetes reciban fwmark y salgan por el túnel WG hacia el Pi5 CR.
+    // Los canales en CHANNELS_VIA_PI_WG (11 en modo Telecable, 15/24/25 en TDMax)
+    // se lanzan con `-http_proxy` apuntando al tinyproxy del Pi5 → IP residencial CR.
     const [spawnCmd, spawnArgs] = wrapFfmpegSpawn(process_id, ffmpegArgs);
     if (isViaCrTunnel(process_id)) {
-      sendLog(process_id, 'info', `🇨🇷 Saliendo vía túnel WireGuard CR (Pi5) — runuser ${CR_TUNNEL_USER}`);
+      sendLog(process_id, 'info', `🇨🇷 Saliendo vía túnel WireGuard CR (Pi5) — http_proxy ${LOCAL_PROXY_URL}`);
     }
     const ffmpegProcess = spawn(spawnCmd, spawnArgs, {
       cwd: path.join(__dirname, 'uploads')
