@@ -658,6 +658,13 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   }
   telecableLastReloginAt.set(pid, Date.now());
 
+  // FUTV URL (11): Telecable rechaza el login desde IP USA (geo-block).
+  // Ruteamos SOLO estos 2 fetch por el proxy HTTP del Pi (IP CR residencial),
+  // así el token PHPSESSID y la URL firmada quedan atados a IP CR y FFmpeg
+  // (que también sale por túnel CR vía isViaCrTunnel) puede consumirlos.
+  // Para el resto de pids, dispatcher = undefined → fetch directo desde VPS.
+  const teleDispatcher = (pid === '11' && localProxyAgent) ? localProxyAgent : undefined;
+
   const matcher = TELECABLE_CHANNEL_MATCHERS[pid];
   const explicitContentId = contentIdOverride
     || telecableState.get(pid)?.contentId
@@ -677,6 +684,7 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   try {
     loginResp = await fetch(loginUrl, {
       headers: { 'User-Agent': TELECABLE_UA, 'Accept': 'application/json' },
+      dispatcher: teleDispatcher,
     });
   } catch (e) {
     throw new Error(`telecable login network error: ${e.message}`);
@@ -698,6 +706,7 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
       'Accept': 'application/json',
       'Cookie': `PHPSESSID=${phpsessid}; _nss=1`,
     },
+    dispatcher: teleDispatcher,
   });
   if (!plResp.ok) throw new Error(`telecable playlist http=${plResp.status}`);
   const plJson = await plResp.json();
