@@ -1,72 +1,111 @@
+# Rebuild limpio del Pi 5 (gateway CR) + FUTV URL vía Pi
 
-## 1. Nuevos tabs "Canal 8 URL" y "Canal 2 URL" (solo Telecable)
+Objetivo: dejar el Pi 5 como un gateway CR **estable, predecible y auto-reparable**, con un solo script "todo en uno" que instale OS-tuning + WireGuard + proxy HTTP + watchdog + auto-restart, y agregar FUTV URL (ID 11) a la lista de canales que salen por CR.
 
-- Subir `NUM_PROCESSES` de 27 a 29.
-- IDs nuevos:
-  - `CANAL8_URL_INDEX = 27` → contentId `MULTIMEDIOS` ("MULTIMEDIOS"), slug HLS `Canal8`.
-  - `CANAL2_URL_INDEX = 28` → contentId `CDR` ("CDR"), slug HLS `Canal2`.
-- Como son canales **solo Telecable**, no se muestra el toggle "scraping vs telecable" — el modo queda fijado en `telecable` y se oculta el bloque de fuente alterna (igual que un canal normal pero sin opción de cambiar).
-- URL m3u8 para compartir (igual que los demás):
-  - Canal 8: `http://167.17.69.116:3001/live/Canal8/playlist.m3u8`
-  - Canal 2: `http://167.17.69.116:3001/live/Canal2/playlist.m3u8`
+## Parte A — Pi 5: instalación desde cero (por SSH)
 
-### Cambios en código
-- `EmisorM3U8Panel.tsx`:
-  - `NUM_PROCESSES = 29`, agregar `CANAL8_URL_INDEX`, `CANAL2_URL_INDEX`.
-  - Agregar entradas en `CHANNEL_CONFIGS`, `HLS_OUTPUT_PROCESSES`, mapa `hlsSlugs`, `TELECABLE_PIDS` (set base y array de defaults `localStorage`), default `telecableModes` = `'telecable'` para estos pids.
-  - Forzar `telecable` (no permitir cambiar) en el bloque de selector y en el envío de `source_mode` al backend.
-- `server.js`:
-  - `TELECABLE_PROCESSES` += `'27','28'`.
-  - `TELECABLE_CHANNEL_MATCHERS['27'] = { contentIds: ['MULTIMEDIOS'], namePatterns: [/multimedios/i] }`.
-  - `TELECABLE_CHANNEL_MATCHERS['28'] = { contentIds: ['CDR'], namePatterns: [/^cdr$/i] }`.
-  - `HLS_OUTPUT_PROCESSES.add('27','28')`.
-  - `HLS_SLUG_MAP['27'] = 'Canal8'`, `HLS_SLUG_MAP['28'] = 'Canal2'`.
-  - Agregar labels en los 2 `channelLabels` (líneas 3828 y 7015–7017).
+### 1. Flashear OS recomendado (una sola vez, desde tu PC)
+- **Raspberry Pi OS Lite (64-bit) Bookworm** — sin escritorio, menos servicios corriendo, más RAM libre, menos cosas que se cuelguen.
+- Usar **Raspberry Pi Imager** y en "Advanced options":
+  - Hostname: `pi5-cr-gw`
+  - Enable SSH con clave pública (pegá tu `id_ed25519.pub`)
+  - Usuario: `pi` + contraseña fuerte
+  - WiFi: dejarlo en blanco (usaremos **cable ethernet obligatorio** — WiFi es la causa #1 de "inestabilidad no predecible")
+  - Locale: America/Costa_Rica
 
-## 2. Canal 6: cambiar de `.ts` passthrough a `.m3u8`
-
-- El usuario ya tiene URL `.ts` (endpoint `/canal6.ts`). Como los demás canales se comparten como `.m3u8`, vamos a:
-  - **Mantener** el endpoint `/canal6.ts` por compatibilidad temporal (no romper XUI existentes) pero
-  - Mostrar como URL principal compartible en el UI: `http://167.17.69.116:3001/live/Canal6/playlist.m3u8` (ya está así para pid 15 en `hlsSlugs`). Esto ya es el comportamiento default actual — verifico que no haya nada que sobrescriba a `.ts` en el UI; si lo hay se quita.
-- Confirmar que `CANAL6_URL_INDEX` arranca en modo `telecable` por default (como pediste, "ya sabes el contentId de telecable"): cambiar default a `telecable` y `TELECABLE_CHANNEL_MATCHERS['15']` ya tiene `REPRETEL6`, OK.
-
-## 3. Disney 7 (ID 0): nuevo modo "Telecable" con dropdown de canales
-
-Hoy Disney 7 (ID 0) es un passthrough de archivo M3U pegado por el usuario, slug HLS `Disney7`. Vamos a agregar un selector arriba del input:
-
-- **Oficial** (default): el flujo actual exactamente igual (archivo M3U + perfil VLC-like).
-- **Telecable**: muestra un `<select>` (dropdown) poblado por `GET /api/telecable/channels` (que ya existe) listando todas las señales `{ contentId, name }`. El usuario elige (ej. "TUDN"), oprime "Scrapear", el backend hace login Telecable y devuelve la URL HLS firmada. Se emite al **mismo slug `Disney7`** (la URL pública para compartir no cambia).
-
-### Backend (`server.js`)
-- Agregar pid `'0'` a `TELECABLE_PROCESSES` como pid especial:
-  - `TELECABLE_CHANNEL_MATCHERS['0']` no se fija — el contentId viene dinámico desde el front (override).
-  - Nuevo endpoint `POST /api/telecable/0/resolve` con body `{ contentId }` que llama `telecableLoginAndResolve(0, contentId)` y devuelve `{ success, url }`.
-  - En el `start` handler, cuando `process_id === 0` y `source_mode === 'telecable'`, leer `telecable_contentId` del body, pasarlo a `telecableLoginAndResolve` y arrancar FFmpeg HLS hacia slug `Disney7` con el mismo perfil que Disney 7 SRT (re-encode normal — no el VLC M3U-file passthrough).
-- Mutex: `Disney7` slug ya está compartido entre IDs 0/16/19. El mutex existente sigue funcionando — al arrancar Disney 7 en modo Telecable se cierran los otros 2 automáticamente. ✅ Sin conflicto adicional.
-
-### Frontend (`EmisorM3U8Panel.tsx`)
-- Para `processIndex === 0`, mostrar bloque "Modo Disney 7": botones **Oficial** | **Telecable**.
-- Si Telecable: ocultar el input de archivo M3U y mostrar `<select>` con channels (cargados al cambiar a modo Telecable o al abrir el tab) + botón "🔄 Refrescar lista". Guardar `contentId` elegido en local state y enviarlo en el `start` payload.
-- Si Oficial: UI actual sin cambios.
-- Persistir modo en `localStorage` con key `disney7_0_source_mode`.
-
-## 4. Layout de tabs: filas de 10 en desktop, scroll horizontal en mobile
-
-En `TabsList` (línea 2680):
-```text
-mobile: inline-flex flex-nowrap min-w-max (scroll horizontal — se mantiene)
-desktop (md:+): grid grid-cols-10 gap-1 min-w-0
+### 2. Primer boot (5 min) — todo por SSH
+```bash
+ssh pi@<ip-local-del-pi>
+sudo apt update && sudo apt -y full-upgrade
+sudo apt -y install git curl chrony  # chrony = reloj estable
+sudo timedatectl set-timezone America/Costa_Rica
+sudo hostnamectl set-hostname pi5-cr-gw
 ```
 
-Cambio concreto: reemplazar las clases md de `TabsList` por `md:grid md:grid-cols-10 md:gap-1` (en vez de `md:flex-wrap`), y quitar `md:justify-center` del wrapper para que el grid ocupe todo el ancho disponible. El tab UPTIME y los demás se insertan en orden y wrapean a la siguiente fila a partir del 11.
+### 3. Clonar repo y correr script único
+```bash
+cd ~
+git clone https://github.com/hackriel/m3u8-stream-gate.git
+cd m3u8-stream-gate
+sudo bash pi5-cr-gateway/rebuild.sh
+```
 
-## Detalles técnicos
+`rebuild.sh` (nuevo, consolidado — reemplaza `install.sh` + `setup-pi5.sh` viejos) hace **todo** de forma idempotente:
 
-- **Mutex**: ningún slug nuevo colisiona — `Canal8` y `Canal2` son inéditos; Disney 7 Telecable reusa `Disney7` que ya tiene mutex multi-pid funcionando.
-- **Recovery**: para pid 0 en modo Telecable, el auto-recovery debe re-resolver la URL usando el `contentId` cacheado en `telecableState.get('0')` (ya lo hace `telecableLoginAndResolve` por la lógica de `cached.contentId`). No requiere cambios adicionales.
-- **Memoria**: actualizar `mem://index.md` y `.lovable/memory/` con notas sobre Canal 8/Canal 2 (Telecable-only) y Disney 7 dropdown Telecable.
-- **No tocar**: `pi5-cr-gateway`, edge functions, output-profiles.json.
+1. Deja limpio cualquier estado previo (`wg-quick@wg0 down`, borra iptables viejas).
+2. Instala: `wireguard-tools`, `iptables-persistent`, `watchdog`, `unattended-upgrades`, `qrencode`, `curl`.
+3. Habilita `ip_forward`, deshabilita IPv6 forwarding.
+4. Genera claves WG (si no existen) y escribe `/etc/wireguard/wg0.conf` con MTU 1380 + NAT + FORWARD reglas.
+5. Levanta `wg-quick@wg0` y lo habilita al boot.
+6. **Proxy HTTP Pi** (Node) como `pi-proxy.service` con `Restart=always`, `RestartSec=5`, `WatchdogSec=30` (systemd mata + reinicia si el proxy se cuelga).
+7. **Watchdog hardware BCM2712** (`/dev/watchdog`, timeout 15s) — reinicia el Pi si el kernel se congela.
+8. **EEPROM**: `POWER_OFF_ON_HALT=0` + `WAKE_ON_GPIO=1` (vuelve solo tras corte de luz).
+9. **unattended-upgrades** solo para *security* (no full-upgrade automático — evita sorpresas).
+10. **Chrony**: reloj sincronizado (crítico para handshake WG).
+11. **Reboot semanal programado** (`cron` domingos 4 AM CR) — limpia estado sin drama.
+12. Detecta CGNAT y falla temprano con mensaje claro.
+13. Imprime **pubkey + IP pública** al final.
 
-## Confirmación necesaria
+### 4. En el VPS (una vez)
+```bash
+cd /root/m3u8-stream-gate
+sudo PI_PUBKEY="<pubkey_del_paso_3>" \
+     PI_ENDPOINT="<ip_publica_pi>:51820" \
+     bash setup-vps-cr-wireguard.sh
+```
+Eso imprime la pubkey del VPS.
 
-Antes de implementar: ¿el modo Telecable de Disney 7 debe usar el **mismo perfil de encoding** que Disney 7 SRT (normal 720p CBR 2000k), o querés mantener el perfil VLC-like del modo Oficial? Por defecto voy con **normal** (mejor para HLS Telecable firmada). Avisame si preferís otra cosa.
+### 5. Volver al Pi y cerrar el peer
+```bash
+sudo bash pi5-cr-gateway/add-vps-peer.sh <pubkey_vps>
+sudo bash pi5-cr-gateway/status.sh   # debe mostrar handshake < 2 min
+```
+
+### 6. Router
+- **Port forward UDP 51820** → IP local del Pi.
+- **DHCP reservation** para la MAC del Pi (que la IP local nunca cambie).
+
+## Parte B — Cambios en el proyecto
+
+Agregar **FUTV URL (ID 11)** al enrutado CR — cambios mínimos en `server.js`:
+
+```diff
+- const PROXY_PROCESSES = new Set(['15', '24', '25']);
++ const PROXY_PROCESSES = new Set(['11', '15', '24', '25']);
+...
+- const CHANNELS_VIA_PI_WG = new Set(['15', '24', '25']);
++ const CHANNELS_VIA_PI_WG = new Set(['11', '15', '24', '25']);
+...
+- const PI_ACCOUNT_PROCESSES = new Set(['15', '24', '25', '26']);
++ const PI_ACCOUNT_PROCESSES = new Set(['11', '15', '24', '25', '26']);
+```
+
+Con esto, FUTV URL (ID 11):
+- Scrapea Telecable **desde la Pi** (IP CR) → devuelve URL firmada válida.
+- FFmpeg sale por `runuser -u croute` → paquetes fwmark 0x77 → `wg0` → Pi → CDN.
+- Si el túnel cae, **solo** FUTV/Canal 6/FOX/FOX+ fallan; el resto del VPS sigue normal.
+
+## Parte C — Orden seguro de despliegue (sin caídas)
+
+1. **En el Pi**: hacer todo A completo hasta que `status.sh` muestre handshake OK y `curl -x http://10.77.0.2:8888 https://ifconfig.me` desde el VPS devuelva IP CR.
+2. **En el VPS** (todavía SIN el cambio de código):
+   ```bash
+   curl -s http://localhost:3001/api/cr-tunnel/health
+   ```
+   Confirmar `wg_up:true` y `ip_cr:"<IP CR>"`.
+3. **Aplicar el cambio de `server.js`** (yo lo hago al aprobar el plan).
+4. **En el VPS**:
+   ```bash
+   cd /root/m3u8-stream-gate
+   sudo bash update.sh
+   ```
+   (el update reinicia el service; canales activos se recuperan solos).
+5. **Verificación**: levantar FUTV URL en modo Telecable → debe salir badge 🇨🇷 IP CR.
+
+## Notas técnicas
+
+- **Por qué el Pi era impredecible**: mezcla de OS con escritorio + WiFi + falta de watchdog HW + `Restart=always` sin `WatchdogSec` (systemd no notaba cuelgues silenciosos) + reloj sin chrony (handshake WG falla si drift > 60s). `rebuild.sh` cierra los cinco frentes.
+- **Nada se borra del VPS**: `setup-vps-cr-wireguard.sh` sigue igual (ya funciona). Solo se reusa.
+- **Rollback**: si algo sale mal, `sudo systemctl stop wg-quick@wg0 cr-policy-routing` en el VPS + revertir 3 líneas en `server.js`. Cero riesgo para canales no-CR.
+
+¿Aprobás? Cuando digas, creo `pi5-cr-gateway/rebuild.sh` y aplico el diff de `server.js`.

@@ -878,7 +878,7 @@ for (const [pid, st] of Object.entries(telecablePersistedState)) {
 // ───────────────────────────────────────────────────────────────────────
 const TIGO_PROXY_URL = process.env.TIGO_PROXY_URL || 'socks5h://cr_proxy_srv:CrProxy2026pR7x9dL4@200.91.131.146:1080';
 // IDs que requieren scraping local vía Pi5 CR (token/IP deben coincidir).
-const PROXY_PROCESSES = new Set(['15', '24', '25']);
+const PROXY_PROCESSES = new Set(['11', '15', '24', '25']);
 
 // Fallback legado SOCKS/proxychains para FFmpeg. FOX/FOX+ ya NO deben pasar
 // por este bloque: el scraping usa proxy HTTP Pi5 y FFmpeg sale por runuser croute.
@@ -899,7 +899,7 @@ const localProxyAgent = LOCAL_PROXY_URL ? new ProxyAgent(LOCAL_PROXY_URL) : null
 // fwmark 0x77 → tabla cr_routed → wg0. Si el túnel se cae, SOLO estos
 // canales fallan; el resto sigue saliendo por la IP del VPS.
 // ───────────────────────────────────────────────────────────────────────
-const CHANNELS_VIA_PI_WG = new Set(['15', '24', '25']); // CANAL 6 URL, FOX+ URL, FOX URL
+const CHANNELS_VIA_PI_WG = new Set(['11', '15', '24', '25']); // FUTV URL, CANAL 6 URL, FOX+ URL, FOX URL
 const CR_TUNNEL_USER = 'croute';
 const isViaCrTunnel = (pid) => {
   if (!CHANNELS_VIA_PI_WG.has(String(pid))) return false;
@@ -917,7 +917,7 @@ const wrapFfmpegSpawn = (pid, ffmpegArgs) => {
 // IDs que deben usar la SEGUNDA cuenta TDMax (info@media.cr, la del Raspberry)
 // en vez de la cuenta principal (arlopfa). Evita exceder el cupo de devices
 // permitidos por TDMax en una sola cuenta.
-const PI_ACCOUNT_PROCESSES = new Set(['15', '24', '25', '26']); // segunda cuenta TDMax: CANAL 6 URL, FOX+ URL, FOX URL, FOX+ ALTERNO
+const PI_ACCOUNT_PROCESSES = new Set(['11', '15', '24', '25', '26']); // segunda cuenta TDMax: FUTV URL, CANAL 6 URL, FOX+ URL, FOX URL, FOX+ ALTERNO
 const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
 const getTdmaxCreds = (account) => {
   if (account === 'pi') {
