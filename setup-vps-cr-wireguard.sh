@@ -75,15 +75,15 @@ Address    = $WG_IP
 PrivateKey = $VPS_PRIV
 MTU        = 1380
 Table      = off
+ListenPort = 51820
 
 [Peer]
-# Raspberry Pi 5 en casa CR
+# Raspberry Pi 5 en casa CR — SIN Endpoint: el Pi inicia el handshake (reverse tunnel)
+# porque el router Huawei de Telecable ignora reglas de port-forward de Epuser.
 PublicKey           = $PI_PUBKEY
-Endpoint            = $PI_ENDPOINT
 # 0.0.0.0/0 = todo el tráfico que el kernel mande por wg0 sale por el Pi (gateway CR).
 # El policy-routing limita qué procesos llegan a wg0 (solo uid:croute).
 AllowedIPs          = 0.0.0.0/0
-PersistentKeepalive = 25
 EOF
 chmod 600 "$WG_CONF"
 
