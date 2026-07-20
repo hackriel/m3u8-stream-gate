@@ -13,8 +13,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 VPS_PUBKEY="${1:-}"
-if [[ -z "$VPS_PUBKEY" ]]; then
-  echo "Uso: $0 <vps_pubkey>" >&2
+VPS_ENDPOINT="${2:-}"
+if [[ -z "$VPS_PUBKEY" || -z "$VPS_ENDPOINT" ]]; then
+  echo "Uso: $0 <vps_pubkey> <vps_ip_publica:51820>" >&2
+  echo "Ejemplo: $0 abcd...= 216.152.154.29:51820" >&2
   exit 1
 fi
 
@@ -33,8 +35,10 @@ mv "${WG_CONF}.tmp" "$WG_CONF"
 cat >> "$WG_CONF" <<EOF
 
 [Peer]
-# VPS (USA) — solo permite IPs internas del túnel
+# VPS (USA) — reverse tunnel: el Pi inicia el handshake hacia el VPS.
+# Así no dependemos del port-forward del router Huawei de Telecable.
 PublicKey           = $VPS_PUBKEY
+Endpoint            = $VPS_ENDPOINT
 AllowedIPs          = $VPS_WG_IP
 PersistentKeepalive = 25
 EOF
@@ -46,4 +50,4 @@ systemctl restart wg-quick@wg0
 sleep 1
 wg show wg0
 
-echo "✅ Peer del VPS agregado. Esperando handshake (el VPS debe conectar primero)..."
+echo "✅ Peer del VPS agregado. El Pi iniciará el handshake automáticamente en ~25s."
