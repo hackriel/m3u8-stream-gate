@@ -4578,7 +4578,7 @@ app.post('/api/emit', async (req, res) => {
 
     if (!ffmpegProcess && spawnCmd === 'ffmpeg' && isViaCrTunnel(process_id)) {
       [spawnCmd, spawnArgs] = wrapFfmpegSpawn(process_id, ffmpegArgs);
-      sendLog(process_id, 'info', `🇨🇷 FFmpeg saldrá vía túnel WireGuard CR (runuser ${CR_TUNNEL_USER}); sin SOCKS/proxychains`);
+      sendLog(process_id, 'info', `🇨🇷 FFmpeg saldrá vía túnel WireGuard CR (http_proxy ${LOCAL_PROXY_URL})`);
     }
 
     const commandStr = spawnCmd + ' ' + spawnArgs.join(' ');
