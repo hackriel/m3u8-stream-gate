@@ -658,12 +658,10 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   }
   telecableLastReloginAt.set(pid, Date.now());
 
-  // FUTV URL (11): Telecable rechaza el login desde IP USA (geo-block).
-  // Ruteamos SOLO estos 2 fetch por el proxy HTTP del Pi (IP CR residencial),
-  // así el token PHPSESSID y la URL firmada quedan atados a IP CR y FFmpeg
-  // (que también sale por túnel CR vía isViaCrTunnel) puede consumirlos.
-  // Para el resto de pids, dispatcher = undefined → fetch directo desde VPS.
-  const teleDispatcher = (pid === '11' && localProxyAgent) ? localProxyAgent : undefined;
+  // FUTV URL (11): se intentó rutear el login por el Pi (IP CR) para saltarse
+  // un supuesto geo-block, pero Telecable bloquea FUTV por *device type*
+  // (STB-only), no por IP. Se dejó el fetch directo desde VPS para todos.
+  const teleDispatcher = undefined;
 
   const matcher = TELECABLE_CHANNEL_MATCHERS[pid];
   const explicitContentId = contentIdOverride
@@ -912,15 +910,14 @@ const localProxyAgent = LOCAL_PROXY_URL ? new ProxyAgent(LOCAL_PROXY_URL) : null
 // FUTV URL (11) es un caso INVERTIDO: solo entra al túnel cuando el modo es
 // Telecable (TDMax funciona directo desde VPS con IP USA). El resto (15/24/25)
 // entra al túnel SIEMPRE que no esté en modo Telecable. Ver isViaCrTunnel abajo.
-const CHANNELS_VIA_PI_WG = new Set(['11', '15', '24', '25']);
+// FUTV URL (11) se removió: Telecable bloquea el canal por device type,
+// no por IP, así que enrutar por CR no cambia nada.
+const CHANNELS_VIA_PI_WG = new Set(['15', '24', '25']);
 const CR_TUNNEL_USER = 'croute';
 const isViaCrTunnel = (pid) => {
   if (!CHANNELS_VIA_PI_WG.has(String(pid))) return false;
   const spid = String(pid);
   const isTele = isTelecableMode(pid);
-  // FUTV URL (11): INVERTIDO — solo túnel CR en modo Telecable.
-  // En TDMax (oficial), FUTV funciona directo desde VPS USA.
-  if (spid === '11') return isTele;
   // 15/24/25: Telecable atado a IP VPS → sale directo. TDMax → túnel CR.
   if (isTele) return false;
   return true;
