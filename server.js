@@ -5538,7 +5538,43 @@ app.post('/api/emit', async (req, res) => {
           autoRecoveryInProgress.set(String(process_id), false);
           quickRetryState.delete(String(process_id));
           recoveryAttempts.set(String(process_id), 0);
-          // No hacer recovery y dejar el proceso muerto para evitar saturación.
+          // No hacer recovery inmediato para evitar saturación, PERO si el canal tiene
+          // "Encendido siempre" activo, reintentar UNA vez pasada la ventana del breaker
+          // (10 min). Antes quedaba muerto indefinidamente y el usuario no se enteraba.
+          setTimeout(async () => {
+            try {
+              if (!supabase) return;
+              if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) return;
+              if (ffmpegProcesses.has(String(process_id))) return;
+              const { data: cbRow } = await supabase
+                .from('emission_processes')
+                .select('always_on, m3u8, rtmp')
+                .eq('id', parseInt(process_id))
+                .maybeSingle();
+              if (!cbRow?.always_on) return;
+              resetCircuitBreaker(process_id);
+              sendLog(process_id, 'warn', '🔁 CIRCUIT BREAKER liberado (Encendido siempre): reintentando recovery...');
+              if (isTelecableMode(process_id)) {
+                await autoRecoverChannel(String(process_id), null, `TELECABLE ${process_id}`);
+              } else if (CHANNEL_MAP[String(process_id)]) {
+                const { channelId, channelName } = CHANNEL_MAP[String(process_id)];
+                await autoRecoverChannel(String(process_id), channelId, channelName);
+              } else if (cbRow.m3u8) {
+                await fetch(`http://localhost:${PORT}/api/emit`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    source_m3u8: cbRow.m3u8,
+                    target_rtmp: HLS_OUTPUT_PROCESSES.has(String(process_id)) ? 'hls-local' : (cbRow.rtmp || ''),
+                    process_id: String(process_id),
+                    is_recovery: true,
+                  }),
+                });
+              }
+            } catch (e) {
+              sendLog(process_id, 'error', `❌ Reintento post-circuit-breaker falló: ${e.message}`);
+            }
+          }, CIRCUIT_BREAKER_WINDOW_MS);
         } else {
         
         // MEJORA #2: Retry con misma URL antes de recovery completo
