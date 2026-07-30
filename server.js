@@ -5941,6 +5941,20 @@ app.post('/api/emit', async (req, res) => {
           });
         } else if (String(process_id) === '12') {
           sendLog(process_id, 'info', '🛑 TIGO SRT quedó detenido: usa Emitir cuando OBS vuelva a enviar señal.');
+        } else if (isTelecableMode(process_id)) {
+          // Canales TELECABLE-ONLY (ej. Canal 8 URL / Canal 2 URL, pids 27/28) que no
+          // están en CHANNEL_MAP ni en MANUAL_URL_PROCESSES: antes caían aquí sin
+          // ninguna rama de recovery y quedaban muertos hasta intervención manual.
+          sendLog(process_id, 'warn', `🔄 Canal Telecable (pid ${process_id}) caído (código ${code}) - refrescando URL firmada y relanzando...`);
+          enqueueRecovery(process_id, async () => {
+            await sleep(1000);
+            if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+              sendLog(process_id, 'info', '🛑 Recovery cancelado: parada manual detectada durante espera');
+              return;
+            }
+            await autoRecoverChannel(String(process_id), null, `TELECABLE ${process_id}`);
+          });
+        } else if (String(process_id) === '__never__') {
           if (supabase) {
             await supabase.from('emission_processes').update({
               is_active: false,
