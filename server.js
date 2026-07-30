@@ -2892,6 +2892,17 @@ const detectAndCategorizeError = (output, processId) => {
       output.includes('Connection reset by peer') ||
       output.includes('Broken pipe') ||
       output.includes('Unable to publish')) {
+    // Si la salida de este proceso es HLS local (no hay RTMP), estos errores de
+    // socket vienen SIEMPRE del lado de la FUENTE (CDN/proxy). Etiquetarlos como
+    // "RTMP" confundía el diagnóstico y ensuciaba failure_reason en la base.
+    if (HLS_OUTPUT_PROCESSES.has(String(processId))) {
+      const netReason = output.includes('Connection reset') ? 'CDN cortó la conexión (connection reset)' :
+                        output.includes('Broken pipe') ? 'CDN cortó la conexión (broken pipe)' :
+                        'Fallo de red hacia la fuente (socket TCP)';
+      sendLog(processId, 'warn', `🌐 RED/FUENTE: ${netReason}`);
+      detectedErrors.set(processId, { type: 'source', reason: netReason });
+      return true;
+    }
     const reason = output.includes('Broken pipe') ? 'Servidor RTMP cerró la conexión (Broken pipe)' :
                    output.includes('Connection to tcp://') && output.includes('failed') ? 'Destino RTMP no responde o URL incorrecta' :
                    output.includes('RTMP handshake failed') ? 'Fallo en handshake RTMP (verificar URL)' :
