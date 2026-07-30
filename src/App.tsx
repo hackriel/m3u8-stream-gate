@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import PasswordGate from "./components/PasswordGate";
 import Index from "./pages/Index";
+import Uptime from "./pages/Uptime";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -14,15 +15,15 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <PasswordGate>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Index />} />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </PasswordGate>
+      <BrowserRouter>
+        <Routes>
+          {/* Pantalla pública de uptime (sin contraseña) */}
+          <Route path="/uptime" element={<Uptime />} />
+          <Route path="/" element={<PasswordGate><Index /></PasswordGate>} />
+          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="*" element={<PasswordGate><NotFound /></PasswordGate>} />
+        </Routes>
+      </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
 );
