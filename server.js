@@ -655,6 +655,9 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   const elapsed = Date.now() - lastAt;
   if (elapsed < TELECABLE_MIN_RELOGIN_INTERVAL_MS) {
     const waitMs = TELECABLE_MIN_RELOGIN_INTERVAL_MS - elapsed;
+    try {
+      sendLog(pid, 'info', `⏳ Telecable: esperando ${Math.ceil(waitMs / 1000)}s por rate-limit anti-abuso antes del login`);
+    } catch (_) {}
     await new Promise(r => setTimeout(r, waitMs));
   }
   telecableLastReloginAt.set(pid, Date.now());
@@ -3367,11 +3370,22 @@ app.post('/api/emit', async (req, res) => {
         if (overrideCid && (!cached || cached.contentId !== overrideCid)) {
           telecableState.set(String(process_id), { contentId: overrideCid });
         }
-        const stillFresh = cached?.expiresAt &&
+        // La URL firmada de Telecable dura DÍAS. Antes solo se reusaba en
+        // recovery: en un arranque manual siempre hacía login + descarga de la
+        // playlist completa (~20-30s de espera antes de lanzar FFmpeg). Ahora
+        // se reusa también en arranque manual mientras le queden >24h.
+        const stillFresh = cached?.expiresAt && cached?.url &&
           (!overrideCid || cached.contentId === overrideCid) &&
-          (cached.expiresAt - Math.floor(Date.now() / 1000) > TELECABLE_REFRESH_MARGIN_S) &&
-          is_recovery;
-        const st = stillFresh ? cached : await safeTelecableResolve(process_id, overrideCid);
+          (cached.expiresAt - Math.floor(Date.now() / 1000) > TELECABLE_REFRESH_MARGIN_S);
+        let st;
+        if (stillFresh) {
+          st = cached;
+          sendLog(process_id, 'info', '⚡ Telecable: reusando URL firmada en caché (sin re-login)');
+        } else {
+          const t0 = Date.now();
+          st = await safeTelecableResolve(process_id, overrideCid);
+          sendLog(process_id, 'info', `⏱️ Telecable login+playlist tomó ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+        }
         effectiveSourceM3u8 = st.url;
         sendLog(process_id, 'info', `📡 Telecable → consumiendo HLS firmado (IP VPS)`);
       } catch (e) {
