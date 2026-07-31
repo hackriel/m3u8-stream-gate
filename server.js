@@ -8204,7 +8204,27 @@ server.listen(PORT, () => {
   };
 
   setInterval(async () => {
-    for (const pid of ALWAYS_ON_WATCHDOG_IDS) {
+    // Lista dinámica: TODOS los canales con always_on=true en BD, no solo un
+    // set fijo. Antes, canales como 11/13/14/17/27/28 quedaban muertos si el
+    // refresh de las 3 AM o el recovery fallaban.
+    let pids = ALWAYS_ON_WATCHDOG_IDS;
+    try {
+      if (supabase) {
+        const { data } = await supabase
+          .from('emission_processes')
+          .select('id')
+          .eq('always_on', true);
+        if (data && data.length) {
+          const dyn = data
+            .map(r => String(r.id))
+            // 12/16/18 se autoarrancan por su propio path (OBS local)
+            .filter(p => p !== '12' && p !== '16' && p !== '18');
+          pids = Array.from(new Set([...dyn, ...ALWAYS_ON_WATCHDOG_IDS]));
+        }
+      }
+    } catch (_) { /* fallback a lista fija */ }
+
+    for (const pid of pids) {
       try {
         await tryRelaunchAlwaysOnChannel(pid);
       } catch (err) {
