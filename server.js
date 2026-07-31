@@ -8068,8 +8068,6 @@ server.listen(PORT, () => {
     // Respetar parada manual y descanso nocturno (1-5 AM)
     if (manualStopProcesses.has(PID) || manualStopProcesses.has(PID_NUM)) return;
     if (nightRestStoppedProcesses.has(PID)) return;
-    const { hour: crHour } = getCostaRicaHour();
-    if (crHour >= 1 && crHour < 5) return;
 
     // Si ya hay un FFmpeg vivo o un recovery en curso, no tocar
     const procData = ffmpegProcesses.get(PID) || ffmpegProcesses.get(PID_NUM);
@@ -8078,12 +8076,20 @@ server.listen(PORT, () => {
 
     const { data: row } = await supabase
       .from('emission_processes')
-      .select('id, source_url, m3u8, rtmp, always_on, is_emitting, emit_status')
+      .select('id, source_url, m3u8, rtmp, always_on, is_emitting, emit_status, night_rest, player_url')
       .eq('id', PID_NUM)
       .single();
 
     if (!row || !row.always_on) return;
     if (row.is_emitting) return; // ya está emitiendo (o intentándolo)
+
+    // El bloqueo horario 1-5 AM solo aplica a canales con descanso nocturno.
+    // Antes bloqueaba a TODOS, así que si el refresh de las 3 AM fallaba nadie
+    // rescataba el canal hasta las 5 AM.
+    if (row.night_rest) {
+      const { hour: crHour } = getCostaRicaHour();
+      if (crHour >= 1 && crHour < 5) return;
+    }
 
     // Determinar payload según tipo de canal
     let payload;
