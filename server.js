@@ -655,6 +655,9 @@ async function telecableLoginAndResolve(processId, contentIdOverride = null, qua
   const elapsed = Date.now() - lastAt;
   if (elapsed < TELECABLE_MIN_RELOGIN_INTERVAL_MS) {
     const waitMs = TELECABLE_MIN_RELOGIN_INTERVAL_MS - elapsed;
+    try {
+      sendLog(pid, 'info', `⏳ Telecable: esperando ${Math.ceil(waitMs / 1000)}s por rate-limit anti-abuso antes del login`);
+    } catch (_) {}
     await new Promise(r => setTimeout(r, waitMs));
   }
   telecableLastReloginAt.set(pid, Date.now());
