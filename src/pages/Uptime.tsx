@@ -12,12 +12,29 @@ const NAMES: Record<number, string> = {
   26: "FOX+ ALTERNO", 27: "Canal 8 URL", 28: "Canal 2 URL",
 };
 
-const COLORS: Record<number, string> = {
-  0: "#9ca3af", 10: "#6366f1", 11: "#10b981", 12: "#0ea5e9", 13: "#06b6d4",
-  14: "#84cc16", 15: "#f59e0b", 16: "#d1d5db", 17: "#f43f5e", 18: "#d946ef",
-  20: "#ea580c", 21: "#0891b2", 22: "#ef4444", 23: "#b91c1c", 24: "#dc2626",
-  25: "#991b1b", 26: "#be123c", 27: "#fb923c", 28: "#0284c7",
+/** Color por TIPO de fuente (nada de rojos: el rojo se reserva para fallos) */
+const SOURCE_COLORS = {
+  telecable: "#f59e0b", // ámbar
+  tdmax: "#22c55e",     // verde
+  srt: "#38bdf8",       // celeste
+  other: "#a78bfa",     // violeta suave
+} as const;
+
+type SourceKind = keyof typeof SOURCE_COLORS;
+
+const SOURCE_LABEL: Record<SourceKind, string> = {
+  telecable: "Telecable",
+  tdmax: "TDMax / Scraping",
+  srt: "SRT",
+  other: "Manual / Otro",
 };
+
+function sourceKind(id: number, mode: string | null): SourceKind {
+  if ((NAMES[id] || "").toUpperCase().includes("SRT")) return "srt";
+  if (mode && mode.startsWith("telecable")) return "telecable";
+  if (mode === "scraping" || mode === "official") return "tdmax";
+  return "other";
+}
 
 type Row = {
   id: number;
@@ -25,12 +42,14 @@ type Row = {
   start_time: number | null;
   elapsed: number | null;
   is_emitting: boolean | null;
+  source_mode: string | null;
 };
 
 type Card = {
   id: number;
   name: string;
   color: string;
+  kind: SourceKind;
   live: boolean;
   seconds: number;
   status: string;
@@ -74,7 +93,7 @@ export default function Uptime() {
     const load = async () => {
       const { data } = await supabase
         .from("emission_processes")
-        .select("id, emit_status, start_time, elapsed, is_emitting");
+        .select("id, emit_status, start_time, elapsed, is_emitting, source_mode");
       if (alive && data) setRows(data as Row[]);
     };
     load();
@@ -103,10 +122,12 @@ export default function Uptime() {
         const seconds = live && r.start_time && r.start_time > 0
           ? Math.floor(now / 1000) - r.start_time
           : r.elapsed || 0;
+        const kind = sourceKind(r.id, r.source_mode);
         return {
           id: r.id,
           name: NAMES[r.id],
-          color: COLORS[r.id] || "#22c55e",
+          color: SOURCE_COLORS[kind],
+          kind,
           live,
           seconds,
           status: r.emit_status || "idle",
@@ -142,10 +163,18 @@ export default function Uptime() {
           <h1 className="text-[2.4vmin] font-semibold tracking-widest uppercase text-muted-foreground">
             Uptime en vivo
           </h1>
-          <span className="text-[2vmin] text-muted-foreground tabular-nums">
-            {cards.length} activo{cards.length === 1 ? "" : "s"}
-            {pages > 1 ? ` · ${page + 1}/${pages}` : ""}
-          </span>
+          <div className="flex items-center gap-[2vmin]">
+            {(Object.keys(SOURCE_COLORS) as SourceKind[]).map((k) => (
+              <span key={k} className="flex items-center gap-[0.8vmin] text-[1.6vmin] text-muted-foreground uppercase tracking-wider">
+                <span className="rounded-full" style={{ background: SOURCE_COLORS[k], width: "1.2vmin", height: "1.2vmin" }} />
+                {SOURCE_LABEL[k]}
+              </span>
+            ))}
+            <span className="text-[2vmin] text-muted-foreground tabular-nums">
+              {cards.length} activo{cards.length === 1 ? "" : "s"}
+              {pages > 1 ? ` · ${page + 1}/${pages}` : ""}
+            </span>
+          </div>
         </header>
 
         {cards.length === 0 ? (
@@ -197,7 +226,7 @@ export default function Uptime() {
                   className="relative mt-[1.5vmin] text-muted-foreground tracking-widest uppercase"
                   style={{ fontSize: big ? "2.2vmin" : "1.6vmin" }}
                 >
-                  {Math.floor(c.seconds / 3600)}h {Math.floor((c.seconds % 3600) / 60)}m emitiendo
+                  {SOURCE_LABEL[c.kind]} · {Math.floor(c.seconds / 3600)}h {Math.floor((c.seconds % 3600) / 60)}m emitiendo
                 </div>
               </article>
             ))}
