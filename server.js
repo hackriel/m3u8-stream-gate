@@ -7904,16 +7904,16 @@ server.listen(PORT, () => {
         if (!rows || rows.length === 0) return;
 
         const now = Date.now();
-        for (const row of rows) {
+        const refreshOne = async (row, idx) => {
           const pid = String(row.id);
           // SRT/OBS locales excluidos del refresh horario:
           //   12/16/18 = OBS local;  21/22/23 = SRT-ingest desde Pi5 (el Pi5 refresca su propio token TDMax).
           // FUTV ALTERNO (17) sí refresca si tiene player_url.
-          if (pid === '12' || pid === '16' || pid === '18' || PI_SRT_INGEST_PROCESSES.has(pid)) continue;
+          if (pid === '12' || pid === '16' || pid === '18' || PI_SRT_INGEST_PROCESSES.has(pid)) return;
 
           // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
-          if (now - lastRefresh < REFRESH_GUARD_MS) continue;
+          if (now - lastRefresh < REFRESH_GUARD_MS) return;
 
           sendLog(pid, 'info', `⏰ Refresh programado (${String(crHour).padStart(2, '0')}:00 CR): apagando 3 min para que XUI/Odin caigan al backup, luego URL fresca...`);
 
