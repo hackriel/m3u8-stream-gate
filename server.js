@@ -7904,16 +7904,16 @@ server.listen(PORT, () => {
         if (!rows || rows.length === 0) return;
 
         const now = Date.now();
-        for (const row of rows) {
+        const refreshOne = async (row, idx) => {
           const pid = String(row.id);
           // SRT/OBS locales excluidos del refresh horario:
           //   12/16/18 = OBS local;  21/22/23 = SRT-ingest desde Pi5 (el Pi5 refresca su propio token TDMax).
           // FUTV ALTERNO (17) sí refresca si tiene player_url.
-          if (pid === '12' || pid === '16' || pid === '18' || PI_SRT_INGEST_PROCESSES.has(pid)) continue;
+          if (pid === '12' || pid === '16' || pid === '18' || PI_SRT_INGEST_PROCESSES.has(pid)) return;
 
           // Guard: si refrescamos hace <60 min, saltar (evita doble disparo en la misma ventana)
           const lastRefresh = row.last_refresh_at ? new Date(row.last_refresh_at).getTime() : 0;
-          if (now - lastRefresh < REFRESH_GUARD_MS) continue;
+          if (now - lastRefresh < REFRESH_GUARD_MS) return;
 
           sendLog(pid, 'info', `⏰ Refresh programado (${String(crHour).padStart(2, '0')}:00 CR): apagando 3 min para que XUI/Odin caigan al backup, luego URL fresca...`);
 
@@ -8000,10 +8000,44 @@ server.listen(PORT, () => {
               }
             }
             sendLog(pid, 'success', `✅ Refresh programado completado`);
+
+            // ===== VERIFICACIÓN POST-REFRESH =====
+            // Algunos canales no volvían: el relanzamiento fallaba (scrape muerto,
+            // circuit breaker, CDN caída) y nadie los rescataba hasta las 5 AM.
+            // Verificamos hasta 3 veces (45s / 90s / 150s) y reintentamos.
+            for (const waitMs of [45_000, 45_000, 60_000]) {
+              await new Promise(r => setTimeout(r, waitMs));
+              const live = ffmpegProcesses.get(pid) || ffmpegProcesses.get(Number(pid));
+              if (live?.process && !live.process.killed) break;
+              if (autoRecoveryInProgress.get(pid)) continue; // ya está intentando
+              sendLog(pid, 'warn', `⚠️ Post-refresh: el canal NO volvió. Reintentando relanzamiento...`);
+              try { failureTimestamps.delete(pid); } catch (_) {}
+              recoveryAttempts.set(String(pid), 0);
+              manualStopProcesses.delete(pid);
+              manualStopProcesses.delete(Number(pid));
+              try {
+                await tryRelaunchAlwaysOnChannel(pid);
+              } catch (e) {
+                sendLog(pid, 'error', `❌ Post-refresh: reintento falló: ${e.message}`);
+              }
+            }
+            const finalLive = ffmpegProcesses.get(pid) || ffmpegProcesses.get(Number(pid));
+            if (finalLive?.process && !finalLive.process.killed) {
+              sendLog(pid, 'success', `✅ Post-refresh verificado: canal al aire`);
+            } else {
+              sendLog(pid, 'error', `❌ Post-refresh: el canal sigue caído tras 3 reintentos (el watchdog seguirá intentando cada 2 min)`);
+            }
           } catch (e) {
             sendLog(pid, 'error', `❌ Error en refresh programado: ${e.message}`);
           }
-        }
+        };
+
+        // Ejecutar todos en paralelo (antes era secuencial: con N canales el
+        // último tardaba N x 3 min en volver). Escalonamos 4s el arranque de
+        // cada uno para no saturar CPU/scraping al relanzar a la vez.
+        await Promise.all(rows.map((row, idx) =>
+          new Promise(r => setTimeout(r, idx * 4000)).then(() => refreshOne(row, idx))
+        ));
       } catch (err) {
         console.error('Error en scheduler refresh programado:', err);
       }
@@ -8034,8 +8068,6 @@ server.listen(PORT, () => {
     // Respetar parada manual y descanso nocturno (1-5 AM)
     if (manualStopProcesses.has(PID) || manualStopProcesses.has(PID_NUM)) return;
     if (nightRestStoppedProcesses.has(PID)) return;
-    const { hour: crHour } = getCostaRicaHour();
-    if (crHour >= 1 && crHour < 5) return;
 
     // Si ya hay un FFmpeg vivo o un recovery en curso, no tocar
     const procData = ffmpegProcesses.get(PID) || ffmpegProcesses.get(PID_NUM);
@@ -8044,12 +8076,20 @@ server.listen(PORT, () => {
 
     const { data: row } = await supabase
       .from('emission_processes')
-      .select('id, source_url, m3u8, rtmp, always_on, is_emitting, emit_status')
+      .select('id, source_url, m3u8, rtmp, always_on, is_emitting, emit_status, night_rest, player_url')
       .eq('id', PID_NUM)
       .single();
 
     if (!row || !row.always_on) return;
     if (row.is_emitting) return; // ya está emitiendo (o intentándolo)
+
+    // El bloqueo horario 1-5 AM solo aplica a canales con descanso nocturno.
+    // Antes bloqueaba a TODOS, así que si el refresh de las 3 AM fallaba nadie
+    // rescataba el canal hasta las 5 AM.
+    if (row.night_rest) {
+      const { hour: crHour } = getCostaRicaHour();
+      if (crHour >= 1 && crHour < 5) return;
+    }
 
     // Determinar payload según tipo de canal
     let payload;
@@ -8064,6 +8104,16 @@ server.listen(PORT, () => {
         is_recovery: true,
       };
     } else if (CHANNEL_MAP[PID]) {
+      // TELETICA URL (13) en modo OFICIAL: no scrapear, usar Bradmax.
+      if (String(PID) === '13' && getTeleticaSourceMode('13') === 'official') {
+        label = 'TELETICA URL (oficial)';
+        payload = {
+          source_m3u8: TELETICA_OFFICIAL_URL,
+          target_rtmp: row.rtmp || 'rtmp://localhost:1935/live/Teletica',
+          process_id: '13',
+          is_recovery: true,
+        };
+      } else {
       // Canales scrapeados (24/25 — y futuros): re-disparar scrape fresco vía
       // autoRecoverChannel. NO usar /api/emit con la URL vieja porque el
       // wmsAuthSign ya está expirado (es lo que rompió el ciclo original).
@@ -8084,20 +8134,22 @@ server.listen(PORT, () => {
         sendLog(PID, 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
       }
       return;
-    } else if (String(PID) === '26') {
-      // FOX+ ALTERNO: re-scrape con player_url persistida
+      }
+    } else if (String(PID) === '26' || String(PID) === '17') {
+      // FOX+ ALTERNO (26) / FUTV ALTERNO (17): re-scrape con player_url persistida
+      const ALT_LABEL = String(PID) === '17' ? 'FUTV ALTERNO' : 'FOX+ ALTERNO';
       const playerUrl = row.player_url;
       if (!playerUrl) {
-        sendLog('26', 'warn', `⚠️ Watchdog always-on: sin player_url guardada, no se puede relanzar`);
+        sendLog(PID, 'warn', `⚠️ Watchdog always-on: sin player_url guardada, no se puede relanzar`);
         return;
       }
       const m = String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i);
       const channelId = m ? m[1] : null;
       if (!channelId) {
-        sendLog('26', 'error', `❌ Watchdog always-on: player_url inválida: ${playerUrl}`);
+        sendLog(PID, 'error', `❌ Watchdog always-on: player_url inválida: ${playerUrl}`);
         return;
       }
-      sendLog('26', 'warn', `🔁 Watchdog always-on: FOX+ ALTERNO caído. Re-scrapeando con player_url...`);
+      sendLog(PID, 'warn', `🔁 Watchdog always-on: ${ALT_LABEL} caído. Re-scrapeando con player_url...`);
       try { failureTimestamps.delete(PID); } catch (_) {}
       recoveryAttempts.set(String(PID), 0);
       await supabase.from('emission_processes').update({
@@ -8108,9 +8160,9 @@ server.listen(PORT, () => {
         failure_details: null,
       }).eq('id', PID_NUM);
       try {
-        await autoRecoverChannel('26', channelId, 'FOX+ ALTERNO');
+        await autoRecoverChannel(String(PID), channelId, ALT_LABEL);
       } catch (e) {
-        sendLog('26', 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
+        sendLog(PID, 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
       }
       return;
     } else {
@@ -8152,7 +8204,27 @@ server.listen(PORT, () => {
   };
 
   setInterval(async () => {
-    for (const pid of ALWAYS_ON_WATCHDOG_IDS) {
+    // Lista dinámica: TODOS los canales con always_on=true en BD, no solo un
+    // set fijo. Antes, canales como 11/13/14/17/27/28 quedaban muertos si el
+    // refresh de las 3 AM o el recovery fallaban.
+    let pids = ALWAYS_ON_WATCHDOG_IDS;
+    try {
+      if (supabase) {
+        const { data } = await supabase
+          .from('emission_processes')
+          .select('id')
+          .eq('always_on', true);
+        if (data && data.length) {
+          const dyn = data
+            .map(r => String(r.id))
+            // 12/16/18 se autoarrancan por su propio path (OBS local)
+            .filter(p => p !== '12' && p !== '16' && p !== '18');
+          pids = Array.from(new Set([...dyn, ...ALWAYS_ON_WATCHDOG_IDS]));
+        }
+      }
+    } catch (_) { /* fallback a lista fija */ }
+
+    for (const pid of pids) {
       try {
         await tryRelaunchAlwaysOnChannel(pid);
       } catch (err) {
