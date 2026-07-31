@@ -2892,6 +2892,17 @@ const detectAndCategorizeError = (output, processId) => {
       output.includes('Connection reset by peer') ||
       output.includes('Broken pipe') ||
       output.includes('Unable to publish')) {
+    // Si la salida de este proceso es HLS local (no hay RTMP), estos errores de
+    // socket vienen SIEMPRE del lado de la FUENTE (CDN/proxy). Etiquetarlos como
+    // "RTMP" confundía el diagnóstico y ensuciaba failure_reason en la base.
+    if (HLS_OUTPUT_PROCESSES.has(String(processId))) {
+      const netReason = output.includes('Connection reset') ? 'CDN cortó la conexión (connection reset)' :
+                        output.includes('Broken pipe') ? 'CDN cortó la conexión (broken pipe)' :
+                        'Fallo de red hacia la fuente (socket TCP)';
+      sendLog(processId, 'warn', `🌐 RED/FUENTE: ${netReason}`);
+      detectedErrors.set(processId, { type: 'source', reason: netReason });
+      return true;
+    }
     const reason = output.includes('Broken pipe') ? 'Servidor RTMP cerró la conexión (Broken pipe)' :
                    output.includes('Connection to tcp://') && output.includes('failed') ? 'Destino RTMP no responde o URL incorrecta' :
                    output.includes('RTMP handshake failed') ? 'Fallo en handshake RTMP (verificar URL)' :
@@ -5527,7 +5538,43 @@ app.post('/api/emit', async (req, res) => {
           autoRecoveryInProgress.set(String(process_id), false);
           quickRetryState.delete(String(process_id));
           recoveryAttempts.set(String(process_id), 0);
-          // No hacer recovery y dejar el proceso muerto para evitar saturación.
+          // No hacer recovery inmediato para evitar saturación, PERO si el canal tiene
+          // "Encendido siempre" activo, reintentar UNA vez pasada la ventana del breaker
+          // (10 min). Antes quedaba muerto indefinidamente y el usuario no se enteraba.
+          setTimeout(async () => {
+            try {
+              if (!supabase) return;
+              if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) return;
+              if (ffmpegProcesses.has(String(process_id))) return;
+              const { data: cbRow } = await supabase
+                .from('emission_processes')
+                .select('always_on, m3u8, rtmp')
+                .eq('id', parseInt(process_id))
+                .maybeSingle();
+              if (!cbRow?.always_on) return;
+              resetCircuitBreaker(process_id);
+              sendLog(process_id, 'warn', '🔁 CIRCUIT BREAKER liberado (Encendido siempre): reintentando recovery...');
+              if (isTelecableMode(process_id)) {
+                await autoRecoverChannel(String(process_id), null, `TELECABLE ${process_id}`);
+              } else if (CHANNEL_MAP[String(process_id)]) {
+                const { channelId, channelName } = CHANNEL_MAP[String(process_id)];
+                await autoRecoverChannel(String(process_id), channelId, channelName);
+              } else if (cbRow.m3u8) {
+                await fetch(`http://localhost:${PORT}/api/emit`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    source_m3u8: cbRow.m3u8,
+                    target_rtmp: HLS_OUTPUT_PROCESSES.has(String(process_id)) ? 'hls-local' : (cbRow.rtmp || ''),
+                    process_id: String(process_id),
+                    is_recovery: true,
+                  }),
+                });
+              }
+            } catch (e) {
+              sendLog(process_id, 'error', `❌ Reintento post-circuit-breaker falló: ${e.message}`);
+            }
+          }, CIRCUIT_BREAKER_WINDOW_MS);
         } else {
         
         // MEJORA #2: Retry con misma URL antes de recovery completo
@@ -5939,6 +5986,19 @@ app.post('/api/emit', async (req, res) => {
               failure_details: null,
             }).eq('id', parseInt(process_id));
           }
+        } else if (isTelecableMode(process_id)) {
+          // Canales TELECABLE-ONLY (ej. Canal 8 URL / Canal 2 URL, pids 27/28) que no
+          // están en CHANNEL_MAP ni en MANUAL_URL_PROCESSES: antes caían aquí sin
+          // ninguna rama de recovery y quedaban muertos hasta intervención manual.
+          sendLog(process_id, 'warn', `🔄 Canal Telecable (pid ${process_id}) caído (código ${code}) - refrescando URL firmada y relanzando...`);
+          enqueueRecovery(process_id, async () => {
+            await sleep(1000);
+            if (manualStopProcesses.has(String(process_id)) || manualStopProcesses.has(Number(process_id))) {
+              sendLog(process_id, 'info', '🛑 Recovery cancelado: parada manual detectada durante espera');
+              return;
+            }
+            await autoRecoverChannel(String(process_id), null, `TELECABLE ${process_id}`);
+          });
         }
         } // end circuit breaker else
       }
