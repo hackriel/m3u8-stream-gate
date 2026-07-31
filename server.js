@@ -359,6 +359,7 @@ const ignoredLateCloseProcesses = new WeakSet(); // FFmpeg viejos ya manejados p
 const failureTimestamps = new Map(); // Map<processId(string), number[]>
 const CIRCUIT_BREAKER_WINDOW_MS = 10 * 60 * 1000; // 10 minutos
 const CIRCUIT_BREAKER_MAX_FAILURES = 6; // máx 6 caídas en 10 min → detener
+const CIRCUIT_BREAKER_REARM_MS = 2 * 60 * 1000; // always_on: rearmar y reintentar a los 2 min
 
 const isCircuitBroken = (processId) => {
   const key = String(processId);
@@ -5574,7 +5575,7 @@ app.post('/api/emit', async (req, res) => {
             } catch (e) {
               sendLog(process_id, 'error', `❌ Reintento post-circuit-breaker falló: ${e.message}`);
             }
-          }, CIRCUIT_BREAKER_WINDOW_MS);
+          }, CIRCUIT_BREAKER_REARM_MS);
         } else {
         
         // MEJORA #2: Retry con misma URL antes de recovery completo
