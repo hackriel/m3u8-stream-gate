@@ -45,6 +45,12 @@ type Row = {
   source_mode: string | null;
 };
 
+type LiveStats = {
+  fps?: number | null;
+  drop?: number | null;
+  dup?: number | null;
+};
+
 type Card = {
   id: number;
   name: string;
@@ -53,6 +59,9 @@ type Card = {
   live: boolean;
   seconds: number;
   status: string;
+  fps: number | null;
+  drop: number | null;
+  dup: number | null;
 };
 
 const fmt = (total: number) => {
@@ -78,6 +87,7 @@ export default function Uptime() {
   const rotateSec = Math.max(3, Number(params.get("rotate") || 10));
 
   const [rows, setRows] = useState<Row[]>([]);
+  const [stats, setStats] = useState<Record<string, LiveStats>>({});
   const [now, setNow] = useState(Date.now());
   const [dims, setDims] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [page, setPage] = useState(0);
@@ -98,6 +108,26 @@ export default function Uptime() {
     };
     load();
     const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  // Telemetría en vivo (fps / dup / drop) desde el VPS
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const resp = await fetch("/api/status");
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const procs = data?.processes as Record<string, { live?: LiveStats | null }> | undefined;
+        if (!alive || !procs) return;
+        const next: Record<string, LiveStats> = {};
+        Object.entries(procs).forEach(([id, st]) => { if (st?.live) next[id] = st.live; });
+        setStats(next);
+      } catch { /* /api no disponible fuera del VPS */ }
+    };
+    load();
+    const t = setInterval(load, 3000);
     return () => { alive = false; clearInterval(t); };
   }, []);
 
@@ -123,6 +153,7 @@ export default function Uptime() {
           ? Math.floor(now / 1000) - r.start_time
           : r.elapsed || 0;
         const kind = sourceKind(r.id, r.source_mode);
+        const st = stats[String(r.id)];
         return {
           id: r.id,
           name: NAMES[r.id],
@@ -131,11 +162,14 @@ export default function Uptime() {
           live,
           seconds,
           status: r.emit_status || "idle",
+          fps: st?.fps ?? null,
+          drop: st?.drop ?? null,
+          dup: st?.dup ?? null,
         };
       })
       .filter((c) => c.live)
       .sort((a, b) => b.seconds - a.seconds);
-  }, [rows, now]);
+  }, [rows, now, stats]);
 
   const slots = forced > 0 ? Math.min(forced, 8) : autoSlots(dims.w, dims.h);
   const pages = Math.max(1, Math.ceil(cards.length / slots));
@@ -227,6 +261,35 @@ export default function Uptime() {
                   style={{ fontSize: big ? "2.2vmin" : "1.6vmin" }}
                 >
                   {SOURCE_LABEL[c.kind]} · {Math.floor(c.seconds / 3600)}h {Math.floor((c.seconds % 3600) / 60)}m emitiendo
+                </div>
+                <div
+                  className="relative mt-[1.2vmin] flex items-center gap-[1.5vmin] font-mono tabular-nums"
+                  style={{ fontSize: big ? "2.4vmin" : "1.8vmin" }}
+                >
+                  <span
+                    className="rounded-[0.8vmin] px-[1.2vmin] py-[0.4vmin] border"
+                    style={{
+                      borderColor: `${c.color}55`,
+                      color: c.fps == null ? undefined : c.fps >= 25 ? c.color : "hsl(var(--destructive))",
+                    }}
+                  >
+                    {c.fps == null ? "FPS —" : `${c.fps.toFixed(1)} FPS`}
+                  </span>
+                  <span
+                    className="rounded-[0.8vmin] px-[1.2vmin] py-[0.4vmin] border text-muted-foreground"
+                    style={{ borderColor: `${c.color}33`, color: (c.dup ?? 0) > 0 ? c.color : undefined }}
+                  >
+                    DUP {c.dup ?? "—"}
+                  </span>
+                  <span
+                    className="rounded-[0.8vmin] px-[1.2vmin] py-[0.4vmin] border"
+                    style={{
+                      borderColor: (c.drop ?? 0) > 0 ? "hsl(var(--destructive))" : `${c.color}33`,
+                      color: (c.drop ?? 0) > 0 ? "hsl(var(--destructive))" : undefined,
+                    }}
+                  >
+                    DROP {c.drop ?? "—"}
+                  </span>
                 </div>
               </article>
             ))}
