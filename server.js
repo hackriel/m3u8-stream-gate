@@ -8000,10 +8000,44 @@ server.listen(PORT, () => {
               }
             }
             sendLog(pid, 'success', `✅ Refresh programado completado`);
+
+            // ===== VERIFICACIÓN POST-REFRESH =====
+            // Algunos canales no volvían: el relanzamiento fallaba (scrape muerto,
+            // circuit breaker, CDN caída) y nadie los rescataba hasta las 5 AM.
+            // Verificamos hasta 3 veces (45s / 90s / 150s) y reintentamos.
+            for (const waitMs of [45_000, 45_000, 60_000]) {
+              await new Promise(r => setTimeout(r, waitMs));
+              const live = ffmpegProcesses.get(pid) || ffmpegProcesses.get(Number(pid));
+              if (live?.process && !live.process.killed) break;
+              if (autoRecoveryInProgress.get(pid)) continue; // ya está intentando
+              sendLog(pid, 'warn', `⚠️ Post-refresh: el canal NO volvió. Reintentando relanzamiento...`);
+              try { failureTimestamps.delete(pid); } catch (_) {}
+              recoveryAttempts.set(String(pid), 0);
+              manualStopProcesses.delete(pid);
+              manualStopProcesses.delete(Number(pid));
+              try {
+                await tryRelaunchAlwaysOnChannel(pid);
+              } catch (e) {
+                sendLog(pid, 'error', `❌ Post-refresh: reintento falló: ${e.message}`);
+              }
+            }
+            const finalLive = ffmpegProcesses.get(pid) || ffmpegProcesses.get(Number(pid));
+            if (finalLive?.process && !finalLive.process.killed) {
+              sendLog(pid, 'success', `✅ Post-refresh verificado: canal al aire`);
+            } else {
+              sendLog(pid, 'error', `❌ Post-refresh: el canal sigue caído tras 3 reintentos (el watchdog seguirá intentando cada 2 min)`);
+            }
           } catch (e) {
             sendLog(pid, 'error', `❌ Error en refresh programado: ${e.message}`);
           }
-        }
+        };
+
+        // Ejecutar todos en paralelo (antes era secuencial: con N canales el
+        // último tardaba N x 3 min en volver). Escalonamos 4s el arranque de
+        // cada uno para no saturar CPU/scraping al relanzar a la vez.
+        await Promise.all(rows.map((row, idx) =>
+          new Promise(r => setTimeout(r, idx * 4000)).then(() => refreshOne(row, idx))
+        ));
       } catch (err) {
         console.error('Error en scheduler refresh programado:', err);
       }
