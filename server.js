@@ -8104,6 +8104,16 @@ server.listen(PORT, () => {
         is_recovery: true,
       };
     } else if (CHANNEL_MAP[PID]) {
+      // TELETICA URL (13) en modo OFICIAL: no scrapear, usar Bradmax.
+      if (String(PID) === '13' && getTeleticaSourceMode('13') === 'official') {
+        label = 'TELETICA URL (oficial)';
+        payload = {
+          source_m3u8: TELETICA_OFFICIAL_URL,
+          target_rtmp: row.rtmp || 'rtmp://localhost:1935/live/Teletica',
+          process_id: '13',
+          is_recovery: true,
+        };
+      } else {
       // Canales scrapeados (24/25 — y futuros): re-disparar scrape fresco vía
       // autoRecoverChannel. NO usar /api/emit con la URL vieja porque el
       // wmsAuthSign ya está expirado (es lo que rompió el ciclo original).
@@ -8124,20 +8134,22 @@ server.listen(PORT, () => {
         sendLog(PID, 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
       }
       return;
-    } else if (String(PID) === '26') {
-      // FOX+ ALTERNO: re-scrape con player_url persistida
+      }
+    } else if (String(PID) === '26' || String(PID) === '17') {
+      // FOX+ ALTERNO (26) / FUTV ALTERNO (17): re-scrape con player_url persistida
+      const ALT_LABEL = String(PID) === '17' ? 'FUTV ALTERNO' : 'FOX+ ALTERNO';
       const playerUrl = row.player_url;
       if (!playerUrl) {
-        sendLog('26', 'warn', `⚠️ Watchdog always-on: sin player_url guardada, no se puede relanzar`);
+        sendLog(PID, 'warn', `⚠️ Watchdog always-on: sin player_url guardada, no se puede relanzar`);
         return;
       }
       const m = String(playerUrl).match(/[?&]id=([a-f0-9]{24})/i) || String(playerUrl).match(/^([a-f0-9]{24})$/i);
       const channelId = m ? m[1] : null;
       if (!channelId) {
-        sendLog('26', 'error', `❌ Watchdog always-on: player_url inválida: ${playerUrl}`);
+        sendLog(PID, 'error', `❌ Watchdog always-on: player_url inválida: ${playerUrl}`);
         return;
       }
-      sendLog('26', 'warn', `🔁 Watchdog always-on: FOX+ ALTERNO caído. Re-scrapeando con player_url...`);
+      sendLog(PID, 'warn', `🔁 Watchdog always-on: ${ALT_LABEL} caído. Re-scrapeando con player_url...`);
       try { failureTimestamps.delete(PID); } catch (_) {}
       recoveryAttempts.set(String(PID), 0);
       await supabase.from('emission_processes').update({
@@ -8148,9 +8160,9 @@ server.listen(PORT, () => {
         failure_details: null,
       }).eq('id', PID_NUM);
       try {
-        await autoRecoverChannel('26', channelId, 'FOX+ ALTERNO');
+        await autoRecoverChannel(String(PID), channelId, ALT_LABEL);
       } catch (e) {
-        sendLog('26', 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
+        sendLog(PID, 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
       }
       return;
     } else {
