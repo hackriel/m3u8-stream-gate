@@ -1585,11 +1585,14 @@ export default function EmisorM3U8Panel() {
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(processIndex);
     // Disney 7 (pid 0) en modo Telecable NO usa archivo M3U — usa contentId del dropdown.
     const isDisney7Telecable = processIndex === 0 && (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc');
-    const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex) && !isDisney7Telecable;
+    // Disney 8 (pid 10) en modo Telecable: mismo flujo, pero salida RTMP manual.
+    const isDisney8Telecable = processIndex === DISNEY8_INDEX && disney8Mode === 'telecable';
+    const isTelecableDropdown = isDisney7Telecable || isDisney8Telecable;
+    const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex) && !isTelecableDropdown;
     const m3uPayload = isM3uFileProcess ? m3uPayloads[processIndex] : null;
 
     // Disney 7 Telecable: validar que el usuario eligió un canal del dropdown
-    if (isDisney7Telecable && !disney7ContentId) {
+    if (isTelecableDropdown && !(isDisney8Telecable ? disney8ContentId : disney7ContentId)) {
       updateProcess(processIndex, {
         emitStatus: "error",
         emitMsg: "Seleccioná un canal del dropdown Telecable primero",
@@ -1700,7 +1703,7 @@ export default function EmisorM3U8Panel() {
 
     // En Disney 7 Telecable y en TELECABLE-only pids (Canal 8/2), el `m3u8`
     // del input puede estar vacío — la URL la resuelve el backend.
-    const requiresM3u8Input = !isDisney7Telecable && !TELECABLE_ONLY_PIDS.has(processIndex);
+    const requiresM3u8Input = !isTelecableDropdown && !TELECABLE_ONLY_PIDS.has(processIndex);
     if ((requiresM3u8Input && !process.m3u8) || (!process.rtmp && !isHlsOutput)) {
       updateProcess(processIndex, {
         emitStatus: "error",
@@ -1735,8 +1738,10 @@ export default function EmisorM3U8Panel() {
             ? {
                 source_mode: telecableModes[processIndex] as 'telecable' | 'telecable_vlc',
                 ...(processIndex === 0 && disney7ContentId ? { telecable_content_id: disney7ContentId } : {}),
+                ...(processIndex === DISNEY8_INDEX && disney8ContentId ? { telecable_content_id: disney8ContentId } : {}),
               }
             : processIndex === 0 ? { source_mode: 'scraping' as const }
+            : processIndex === DISNEY8_INDEX ? { source_mode: 'scraping' as const }
             : processIndex === TELETICA_URL_INDEX ? { source_mode: teleticaMode }
             : processIndex === CANAL6_URL_INDEX ? { source_mode: canal6Mode }
             : processIndex === FOX_URL_INDEX ? { source_mode: foxMode }
