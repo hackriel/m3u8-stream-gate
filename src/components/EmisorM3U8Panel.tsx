@@ -938,16 +938,18 @@ export default function EmisorM3U8Panel() {
   // NO reintentar automáticamente — evita loop infinito de 500s. El usuario
   // puede pulsar el botón 🔄 para reintentar manualmente.
   useEffect(() => {
+    const wantsChannels =
+      (activeTab === '0' && (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc')) ||
+      (activeTab === '10' && disney8Mode === 'telecable');
     if (
-      activeTab === '0' &&
-      (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc') &&
+      wantsChannels &&
       telecableChannels.length === 0 &&
       !telecableChannelsLoading &&
       !telecableChannelsAttemptedRef.current
     ) {
       loadTelecableChannels(false);
     }
-  }, [activeTab, disney7Mode, telecableChannels.length, telecableChannelsLoading, loadTelecableChannels]);
+  }, [activeTab, disney7Mode, disney8Mode, telecableChannels.length, telecableChannelsLoading, loadTelecableChannels]);
   // Modo de salida para procesos M3U file (RANDOM Disney 7).
   // 'copy' = -c copy puro · 'smart' = copy compatible con fallback · 'transcode' = perfil estándar 2000k
   // RANDOM Disney 7 (ID 19) ahora usa un único modo "rawvideo": video crudo
