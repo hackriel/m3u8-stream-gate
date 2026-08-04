@@ -2193,15 +2193,55 @@ export default function EmisorM3U8Panel() {
                     </p>
                   </div>
                 )}
-                {isDisney7TelecableActive && (
+                {isDisney8Tab && (
+                  <div className="mb-3 p-3 rounded-xl bg-card/50 border border-border">
+                    <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
+                      Modo Disney 8
+                    </label>
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setDisney8Mode('official')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          disney8Mode === 'official'
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Pegá un archivo M3U con headers (flujo histórico)"
+                      >
+                        🏛️ Oficial m3u pegado
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDisney8Mode('telecable')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
+                          disney8Mode === 'telecable'
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                            : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        title="Elegí cualquier canal de la playlist Telecable y emitilo al RTMP que pegues abajo"
+                      >
+                        📡 Telecable dropdown
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      {disney8Mode === 'telecable'
+                        ? 'Elegí un canal de la lista Telecable. El VPS resuelve la URL firmada y emite al RTMP destino que pegues abajo.'
+                        : 'Pegá el archivo M3U con headers (flujo de siempre). La salida es el RTMP destino que pegues abajo.'}
+                    </p>
+                  </div>
+                )}
+                {isTelecableDropdownActive && (
                   <div className="mb-3 p-3 rounded-xl bg-card/50 border border-amber-400/30">
                     <label className="block text-xs mb-2 text-muted-foreground uppercase tracking-wide font-semibold">
                       Canal Telecable
                     </label>
                     <div className="flex gap-2">
                       <select
-                        value={disney7ContentId}
-                        onChange={(e) => setDisney7ContentId(e.target.value)}
+                        value={dropdownContentId}
+                        onChange={(e) => setDropdownContentId(e.target.value)}
                         disabled={process.isEmitiendo || process.emitStatus === 'starting' || telecableChannelsLoading}
                         className="flex-1 bg-background border-2 border-amber-400/40 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-60"
                       >
