@@ -2058,9 +2058,15 @@ export default function EmisorM3U8Panel() {
     const outputProfile = getOutputProfile(processIndex);
     const isDisney7Tab = processIndex === 0;
     const isDisney7TelecableActive = isDisney7Tab && (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc');
+    const isDisney8Tab = processIndex === DISNEY8_INDEX;
+    const isDisney8TelecableActive = isDisney8Tab && disney8Mode === 'telecable';
+    // Cualquier tab con dropdown de canales Telecable (Disney 7 / Disney 8).
+    const isTelecableDropdownActive = isDisney7TelecableActive || isDisney8TelecableActive;
+    const dropdownContentId = isDisney8Tab ? disney8ContentId : disney7ContentId;
+    const setDropdownContentId = isDisney8Tab ? setDisney8ContentId : setDisney7ContentId;
     const isTelecableOnlyTab = TELECABLE_ONLY_PIDS.has(processIndex);
     // Pids cuya UI de input m3u8 NO se muestra (URL resuelta por backend).
-    const hideM3u8Input = isDisney7TelecableActive || isTelecableOnlyTab;
+    const hideM3u8Input = isTelecableDropdownActive || isTelecableOnlyTab;
 
     return (
       <div className="space-y-6">
