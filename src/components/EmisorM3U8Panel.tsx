@@ -2278,7 +2278,7 @@ export default function EmisorM3U8Panel() {
                   </div>
                 )}
                 <label className="block text-sm mb-2 text-muted-foreground">
-                  {isDisney7TelecableActive
+                  {isTelecableDropdownActive
                     ? 'URL HLS Telecable resuelta'
                     : isTelecableOnlyTab
                       ? 'URL HLS Telecable resuelta'
@@ -2290,7 +2290,7 @@ export default function EmisorM3U8Panel() {
                       ? 'URL del player TDMax (pega aquí)'
                       : 'URL M3U8 (fuente)'}
                 </label>
-                {M3U_FILE_PROCESSES.has(processIndex) && !isDisney7TelecableActive && (
+                {M3U_FILE_PROCESSES.has(processIndex) && !isTelecableDropdownActive && (
                   <div className="mb-3">
                     <textarea
                       placeholder={"#EXTM3U\n#EXTVLCOPT:http-referrer=https://...\n#EXTVLCOPT:http-user-agent=Mozilla/5.0 ...\n#EXTINF:-1,Canal\nhttps://servidor.com/stream.m3u8"}
@@ -2647,6 +2647,9 @@ export default function EmisorM3U8Panel() {
                             if (processIndex === 0 && disney7ContentId) {
                               refreshBody.content_id = disney7ContentId;
                             }
+                            if (processIndex === DISNEY8_INDEX && disney8ContentId) {
+                              refreshBody.content_id = disney8ContentId;
+                            }
                             const r = await fetch(`/api/telecable/${processIndex}/refresh`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
@@ -2668,7 +2671,7 @@ export default function EmisorM3U8Panel() {
                         }
                         fetchChannelUrl(processIndex);
                       }}
-                      disabled={fetchingChannel !== null || (processIndex === 0 && disney7Mode === 'telecable' && !disney7ContentId)}
+                      disabled={fetchingChannel !== null || (processIndex === 0 && disney7Mode === 'telecable' && !disney7ContentId) || (processIndex === DISNEY8_INDEX && disney8Mode === 'telecable' && !disney8ContentId)}
                       className="px-4 py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-[.98] transition-all duration-200 font-medium text-accent-foreground shadow-lg hover:shadow-xl disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
                       title={
                         (TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc'))
