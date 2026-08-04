@@ -3194,6 +3194,8 @@ export default function EmisorM3U8Panel() {
                   const effectiveMode: string | undefined =
                     i === 0
                       ? disney7Mode
+                      : i === DISNEY8_INDEX
+                        ? disney8Mode
                       : (TELECABLE_PIDS.has(i) ? telecableModes[i] : undefined);
                   if (effectiveMode === 'telecable_vlc') {
                     emittingClass = 'bg-purple-500/20 border-2 border-purple-500 text-purple-300 shadow-lg shadow-purple-500/50 hover:bg-purple-500/30';
@@ -3289,6 +3291,8 @@ export default function EmisorM3U8Panel() {
                       const modeForCard: string | undefined =
                         i === 0
                           ? disney7Mode
+                          : i === DISNEY8_INDEX
+                            ? disney8Mode
                           : (TELECABLE_PIDS.has(i) ? telecableModes[i] : undefined);
                       let cardBorder = 'border-broadcast-border/50 hover:border-green-500/40';
                       let cardDot = 'bg-green-400';
