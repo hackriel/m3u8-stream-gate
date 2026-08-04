@@ -889,6 +889,26 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     try { localStorage.setItem('disney7_0_telecable_content_id', disney7ContentId); } catch {}
   }, [disney7ContentId]);
+
+  // ── Disney 8 (pid 10): sub-tabs "Oficial m3u pegado | Telecable dropdown".
+  //    Réplica de Disney 7 pero la salida es el RTMP manual pegado por el usuario.
+  type Disney8Mode = 'official' | 'telecable';
+  const [disney8Mode, setDisney8Mode] = useState<Disney8Mode>(() => {
+    try {
+      return localStorage.getItem('disney8_10_source_mode') === 'telecable' ? 'telecable' : 'official';
+    } catch { return 'official'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('disney8_10_source_mode', disney8Mode); } catch {}
+    const mapped: TelecableMode = disney8Mode === 'telecable' ? 'telecable' : 'scraping';
+    setTelecableModes(prev => (prev[10] === mapped ? prev : { ...prev, [10]: mapped }));
+  }, [disney8Mode]);
+  const [disney8ContentId, setDisney8ContentId] = useState<string>(() => {
+    try { return localStorage.getItem('disney8_10_telecable_content_id') || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('disney8_10_telecable_content_id', disney8ContentId); } catch {}
+  }, [disney8ContentId]);
   const loadTelecableChannels = useCallback(async (force = false) => {
     setTelecableChannelsLoading(true);
     telecableChannelsAttemptedRef.current = true;
