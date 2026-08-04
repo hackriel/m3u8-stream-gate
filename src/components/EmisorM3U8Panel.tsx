@@ -708,7 +708,7 @@ export default function EmisorM3U8Panel() {
   //    'scraping'  = flujo histórico del canal (TDMax+Pi5 o lo que aplique).
   // pid 0 (Disney 7) usa selector dedicado "Oficial | Telecable" con dropdown.
   // pids 27/28 (Canal 8 / Canal 2 URL) son TELECABLE-only (sin toggle).
-  const TELECABLE_PIDS = useMemo(() => new Set<number>([0, 11, 13, 14, 15, 24, 25, 27, 28]), []);
+  const TELECABLE_PIDS = useMemo(() => new Set<number>([0, 10, 11, 13, 14, 15, 24, 25, 27, 28]), []);
   // pids cuyo único modo permitido es TELECABLE (sin selector visible).
   // 15 (Canal 6 URL) entra acá: el flujo histórico TDMax+Pi5 quedó descartado,
   // ahora se resuelve igual que Canal 8/Canal 2 (Telecable directo desde VPS).
@@ -717,7 +717,7 @@ export default function EmisorM3U8Panel() {
   type TelecableInfo = { expires_at: number | null; expires_in_s: number | null; last_login_failure_count: number } | null;
   const [telecableModes, setTelecableModes] = useState<Record<number, TelecableMode>>(() => {
     const init: Record<number, TelecableMode> = {};
-    for (const pid of [0, 11, 13, 14, 15, 24, 25, 27, 28]) {
+    for (const pid of [0, 10, 11, 13, 14, 15, 24, 25, 27, 28]) {
       try {
         const v = localStorage.getItem(`telecable_${pid}_source_mode`);
         // Canal 6 (15) / Canal 8 (27) / Canal 2 (28) son telecable-only:
@@ -732,9 +732,9 @@ export default function EmisorM3U8Panel() {
           // default para que el tab arranque amarillo. El poll al server (≤5s)
           // corrige a 'scraping' si ese pid está realmente en scraping.
           // pid 0 (Disney 7) tiene su propio selector — se queda en 'scraping'.
-          init[pid] = pid === 0 ? 'scraping' : 'telecable';
+          init[pid] = (pid === 0 || pid === 10) ? 'scraping' : 'telecable';
         }
-      } catch { init[pid] = pid === 0 ? 'scraping' : 'telecable'; }
+      } catch { init[pid] = (pid === 0 || pid === 10) ? 'scraping' : 'telecable'; }
     }
     return init;
   });
