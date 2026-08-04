@@ -567,7 +567,9 @@ const TELECABLE_MIN_RELOGIN_INTERVAL_MS = 20_000;    // anti-abuse rate-limit
 // pid '0' (Disney 7) acepta content-id DINÁMICO desde el frontend (dropdown);
 // pid '27' (Canal 8 URL) = MULTIMEDIOS y pid '28' (Canal 2 URL) = CDR son
 // canales TELECABLE-ONLY (sin modo histórico).
-const TELECABLE_PROCESSES = new Set(['0','11','13','14','15','24','25','27','28']);
+// pid '10' (Disney 8) también acepta content-id DINÁMICO (dropdown), pero su
+// salida es el RTMP destino manual pegado por el usuario (no HLS local).
+const TELECABLE_PROCESSES = new Set(['0','10','11','13','14','15','24','25','27','28']);
 // Matchers: probamos primero content-id exacto; si no aparece en la playlist,
 // caemos a patrones por nombre. Tolerante a renombres del CDN Telecable.
 // IDs fijos confirmados por el usuario contra /api/telecable/channels.
@@ -3361,7 +3363,8 @@ app.post('/api/emit', async (req, res) => {
         const cached = telecableState.get(String(process_id));
         // Disney 7 (pid 0): el contentId puede cambiar entre arranques (dropdown).
         // Si llegó override y difiere del cacheado, forzamos re-resolve.
-        const overrideCid = process_id === '0' && telecable_content_id ? String(telecable_content_id) : null;
+        const overrideCid = (process_id === '0' || process_id === '10') && telecable_content_id
+          ? String(telecable_content_id) : null;
         if (overrideCid && cached && cached.contentId !== overrideCid) {
           telecableState.delete(String(process_id));
         }
