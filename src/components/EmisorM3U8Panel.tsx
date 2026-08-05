@@ -1834,6 +1834,11 @@ export default function EmisorM3U8Panel() {
       failureDetails: undefined,
       recoveryCount: 0,
       lastSignalDuration: 0,
+      // En Disney 7 / Disney 8 modo Telecable dropdown la URL HLS la resuelve
+      // el backend y muere con la sesión (token firmado). Si la dejamos en el
+      // input, al re-emitir con OTRO canal el usuario ve/arrastra la URL vieja.
+      // Se limpia siempre al detener: el tab queda listo para elegir otro canal.
+      ...(isTelecableDropdownPid(processIndex) ? { m3u8: "" } : {}),
     });
     
     await supabase
@@ -1845,8 +1850,58 @@ export default function EmisorM3U8Panel() {
         emit_status: 'idle',
         recovery_count: 0,
         last_signal_duration: 0,
+        ...(isTelecableDropdownPid(processIndex) ? { m3u8: '' } : {}),
       })
       .eq('id', processIndex);
+  }
+
+  // ── Helpers Telecable dropdown (Disney 7 pid 0 · Disney 8 pid 10) ──────────
+  /** ¿Este pid está ahora mismo en modo "Telecable dropdown"? */
+  function isTelecableDropdownPid(processIndex: number) {
+    if (processIndex === 0) return disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc';
+    if (processIndex === DISNEY8_INDEX) return disney8Mode === 'telecable';
+    return false;
+  }
+
+  /** Limpia URL resuelta + mensajes de error para que no queden datos viejos. */
+  function clearTelecableResolved(processIndex: number, alsoChannel = false) {
+    updateProcess(processIndex, {
+      m3u8: "",
+      emitStatus: "idle",
+      emitMsg: "",
+      failureReason: undefined,
+      failureDetails: undefined,
+    });
+    if (alsoChannel) {
+      if (processIndex === DISNEY8_INDEX) setDisney8ContentId('');
+      else setDisney7ContentId('');
+    }
+    supabase.from('emission_processes').update({ m3u8: '' }).eq('id', processIndex).then(() => {}, () => {});
+  }
+
+  /**
+   * Cambio de sub-tab (modo) en Disney 7 / Disney 8.
+   * - Bloquea el cambio mientras hay emisión / arranque / parada en curso.
+   * - Corta la propagación del evento para que no dispare nada del tab padre.
+   * - Limpia la URL resuelta del modo anterior (no mezclar Oficial ↔ Telecable).
+   */
+  function switchDisneyMode(
+    e: React.MouseEvent<HTMLButtonElement>,
+    processIndex: number,
+    next: 'official' | 'telecable' | 'telecable_vlc',
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    const p = processes[processIndex];
+    if (p?.isEmitiendo || p?.emitStatus === 'starting' || p?.emitStatus === 'stopping') {
+      toast.info('Detené la emisión antes de cambiar de modo.');
+      return;
+    }
+    const current = processIndex === DISNEY8_INDEX ? disney8Mode : disney7Mode;
+    if (current === next) return;
+    clearTelecableResolved(processIndex);
+    if (processIndex === DISNEY8_INDEX) setDisney8Mode(next === 'official' ? 'official' : 'telecable');
+    else setDisney7Mode(next);
   }
 
 
