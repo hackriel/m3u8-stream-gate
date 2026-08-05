@@ -728,13 +728,15 @@ export default function EmisorM3U8Panel() {
         } else if (v === 'telecable' || v === 'telecable_vlc' || v === 'scraping') {
           init[pid] = v;
         } else {
-          // Sin valor local (p. ej. computadora nueva): asumir 'telecable' por
-          // default para que el tab arranque amarillo. El poll al server (≤5s)
-          // corrige a 'scraping' si ese pid está realmente en scraping.
-          // pid 0 (Disney 7) tiene su propio selector — se queda en 'scraping'.
-          init[pid] = (pid === 0 || pid === 10) ? 'scraping' : 'telecable';
+          // Sin valor local (navegador nuevo, preview de Lovable, otra máquina):
+          // asumir 'scraping' (TDMax) en vez de 'telecable'. Antes se asumía
+          // 'telecable' y el selector salía amarillo aunque la URL fuera TDMax;
+          // si el endpoint /api/telecable no responde (preview), la mentira
+          // quedaba fija. El poll al server (≤5s) corrige a telecable cuando
+          // ese pid realmente está en modo Telecable.
+          init[pid] = 'scraping';
         }
-      } catch { init[pid] = (pid === 0 || pid === 10) ? 'scraping' : 'telecable'; }
+      } catch { init[pid] = (pid === 15 || pid === 27 || pid === 28) ? 'telecable' : 'scraping'; }
     }
     return init;
   });
