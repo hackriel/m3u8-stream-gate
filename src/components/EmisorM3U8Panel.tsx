@@ -883,6 +883,7 @@ export default function EmisorM3U8Panel() {
   const [telecableChannelsLoading, setTelecableChannelsLoading] = useState(false);
   const [telecableChannelsError, setTelecableChannelsError] = useState<string | null>(null);
   const telecableChannelsAttemptedRef = useRef(false);
+  const telecableChannelsAttemptedAtRef = useRef(0);
   const [disney7ContentId, setDisney7ContentId] = useState<string>(() => {
     try { return localStorage.getItem('disney7_0_telecable_content_id') || ''; } catch { return ''; }
   });
@@ -912,6 +913,7 @@ export default function EmisorM3U8Panel() {
   const loadTelecableChannels = useCallback(async (force = false) => {
     setTelecableChannelsLoading(true);
     telecableChannelsAttemptedRef.current = true;
+    telecableChannelsAttemptedAtRef.current = Date.now();
     setTelecableChannelsError(null);
     try {
       const r = await fetch(`/api/telecable/channels${force ? '?force=1' : ''}`);
@@ -941,15 +943,22 @@ export default function EmisorM3U8Panel() {
     const wantsChannels =
       (activeTab === '0' && (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc')) ||
       (activeTab === '10' && disney8Mode === 'telecable');
+    // Reintento permitido: si el intento anterior FALLÓ y ya pasaron 30s, se
+    // vuelve a intentar al entrar al tab (evita quedarse con dropdown vacío
+    // para siempre tras un error puntual del VPS).
+    const canRetryAfterError =
+      telecableChannelsAttemptedRef.current &&
+      !!telecableChannelsError &&
+      Date.now() - telecableChannelsAttemptedAtRef.current > 30_000;
     if (
       wantsChannels &&
       telecableChannels.length === 0 &&
       !telecableChannelsLoading &&
-      !telecableChannelsAttemptedRef.current
+      (!telecableChannelsAttemptedRef.current || canRetryAfterError)
     ) {
       loadTelecableChannels(false);
     }
-  }, [activeTab, disney7Mode, disney8Mode, telecableChannels.length, telecableChannelsLoading, loadTelecableChannels]);
+  }, [activeTab, disney7Mode, disney8Mode, telecableChannels.length, telecableChannelsLoading, telecableChannelsError, loadTelecableChannels]);
   // Modo de salida para procesos M3U file (RANDOM Disney 7).
   // 'copy' = -c copy puro · 'smart' = copy compatible con fallback · 'transcode' = perfil estándar 2000k
   // RANDOM Disney 7 (ID 19) ahora usa un único modo "rawvideo": video crudo
