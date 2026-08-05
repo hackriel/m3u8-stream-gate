@@ -883,6 +883,7 @@ export default function EmisorM3U8Panel() {
   const [telecableChannelsLoading, setTelecableChannelsLoading] = useState(false);
   const [telecableChannelsError, setTelecableChannelsError] = useState<string | null>(null);
   const telecableChannelsAttemptedRef = useRef(false);
+  const telecableChannelsAttemptedAtRef = useRef(0);
   const [disney7ContentId, setDisney7ContentId] = useState<string>(() => {
     try { return localStorage.getItem('disney7_0_telecable_content_id') || ''; } catch { return ''; }
   });
@@ -912,6 +913,7 @@ export default function EmisorM3U8Panel() {
   const loadTelecableChannels = useCallback(async (force = false) => {
     setTelecableChannelsLoading(true);
     telecableChannelsAttemptedRef.current = true;
+    telecableChannelsAttemptedAtRef.current = Date.now();
     setTelecableChannelsError(null);
     try {
       const r = await fetch(`/api/telecable/channels${force ? '?force=1' : ''}`);
@@ -941,15 +943,22 @@ export default function EmisorM3U8Panel() {
     const wantsChannels =
       (activeTab === '0' && (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc')) ||
       (activeTab === '10' && disney8Mode === 'telecable');
+    // Reintento permitido: si el intento anterior FALLÓ y ya pasaron 30s, se
+    // vuelve a intentar al entrar al tab (evita quedarse con dropdown vacío
+    // para siempre tras un error puntual del VPS).
+    const canRetryAfterError =
+      telecableChannelsAttemptedRef.current &&
+      !!telecableChannelsError &&
+      Date.now() - telecableChannelsAttemptedAtRef.current > 30_000;
     if (
       wantsChannels &&
       telecableChannels.length === 0 &&
       !telecableChannelsLoading &&
-      !telecableChannelsAttemptedRef.current
+      (!telecableChannelsAttemptedRef.current || canRetryAfterError)
     ) {
       loadTelecableChannels(false);
     }
-  }, [activeTab, disney7Mode, disney8Mode, telecableChannels.length, telecableChannelsLoading, loadTelecableChannels]);
+  }, [activeTab, disney7Mode, disney8Mode, telecableChannels.length, telecableChannelsLoading, telecableChannelsError, loadTelecableChannels]);
   // Modo de salida para procesos M3U file (RANDOM Disney 7).
   // 'copy' = -c copy puro · 'smart' = copy compatible con fallback · 'transcode' = perfil estándar 2000k
   // RANDOM Disney 7 (ID 19) ahora usa un único modo "rawvideo": video crudo
@@ -1825,6 +1834,11 @@ export default function EmisorM3U8Panel() {
       failureDetails: undefined,
       recoveryCount: 0,
       lastSignalDuration: 0,
+      // En Disney 7 / Disney 8 modo Telecable dropdown la URL HLS la resuelve
+      // el backend y muere con la sesión (token firmado). Si la dejamos en el
+      // input, al re-emitir con OTRO canal el usuario ve/arrastra la URL vieja.
+      // Se limpia siempre al detener: el tab queda listo para elegir otro canal.
+      ...(isTelecableDropdownPid(processIndex) ? { m3u8: "" } : {}),
     });
     
     await supabase
@@ -1836,8 +1850,58 @@ export default function EmisorM3U8Panel() {
         emit_status: 'idle',
         recovery_count: 0,
         last_signal_duration: 0,
+        ...(isTelecableDropdownPid(processIndex) ? { m3u8: '' } : {}),
       })
       .eq('id', processIndex);
+  }
+
+  // ── Helpers Telecable dropdown (Disney 7 pid 0 · Disney 8 pid 10) ──────────
+  /** ¿Este pid está ahora mismo en modo "Telecable dropdown"? */
+  function isTelecableDropdownPid(processIndex: number) {
+    if (processIndex === 0) return disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc';
+    if (processIndex === DISNEY8_INDEX) return disney8Mode === 'telecable';
+    return false;
+  }
+
+  /** Limpia URL resuelta + mensajes de error para que no queden datos viejos. */
+  function clearTelecableResolved(processIndex: number, alsoChannel = false) {
+    updateProcess(processIndex, {
+      m3u8: "",
+      emitStatus: "idle",
+      emitMsg: "",
+      failureReason: undefined,
+      failureDetails: undefined,
+    });
+    if (alsoChannel) {
+      if (processIndex === DISNEY8_INDEX) setDisney8ContentId('');
+      else setDisney7ContentId('');
+    }
+    supabase.from('emission_processes').update({ m3u8: '' }).eq('id', processIndex).then(() => {}, () => {});
+  }
+
+  /**
+   * Cambio de sub-tab (modo) en Disney 7 / Disney 8.
+   * - Bloquea el cambio mientras hay emisión / arranque / parada en curso.
+   * - Corta la propagación del evento para que no dispare nada del tab padre.
+   * - Limpia la URL resuelta del modo anterior (no mezclar Oficial ↔ Telecable).
+   */
+  function switchDisneyMode(
+    e: React.MouseEvent<HTMLButtonElement>,
+    processIndex: number,
+    next: 'official' | 'telecable' | 'telecable_vlc',
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    const p = processes[processIndex];
+    if (p?.isEmitiendo || p?.emitStatus === 'starting' || p?.emitStatus === 'stopping') {
+      toast.info('Detené la emisión antes de cambiar de modo.');
+      return;
+    }
+    const current = processIndex === DISNEY8_INDEX ? disney8Mode : disney7Mode;
+    if (current === next) return;
+    clearTelecableResolved(processIndex);
+    if (processIndex === DISNEY8_INDEX) setDisney8Mode(next === 'official' ? 'official' : 'telecable');
+    else setDisney7Mode(next);
   }
 
 
@@ -2146,8 +2210,8 @@ export default function EmisorM3U8Panel() {
                     <div className="flex gap-2 flex-wrap">
                       <button
                         type="button"
-                        onClick={() => setDisney7Mode('official')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        onClick={(e) => switchDisneyMode(e, 0, 'official')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           disney7Mode === 'official'
                             ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
@@ -2159,8 +2223,8 @@ export default function EmisorM3U8Panel() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setDisney7Mode('telecable')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        onClick={(e) => switchDisneyMode(e, 0, 'telecable')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           disney7Mode === 'telecable'
                             ? 'bg-amber-500/20 border-amber-500 text-amber-300'
@@ -2172,8 +2236,8 @@ export default function EmisorM3U8Panel() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setDisney7Mode('telecable_vlc')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        onClick={(e) => switchDisneyMode(e, 0, 'telecable_vlc')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           disney7Mode === 'telecable_vlc'
                             ? 'bg-purple-500/20 border-purple-500 text-purple-300'
@@ -2201,8 +2265,8 @@ export default function EmisorM3U8Panel() {
                     <div className="flex gap-2 flex-wrap">
                       <button
                         type="button"
-                        onClick={() => setDisney8Mode('official')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        onClick={(e) => switchDisneyMode(e, DISNEY8_INDEX, 'official')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           disney8Mode === 'official'
                             ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
@@ -2214,8 +2278,8 @@ export default function EmisorM3U8Panel() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setDisney8Mode('telecable')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        onClick={(e) => switchDisneyMode(e, DISNEY8_INDEX, 'telecable')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           disney8Mode === 'telecable'
                             ? 'bg-amber-500/20 border-amber-500 text-amber-300'
@@ -2241,8 +2305,13 @@ export default function EmisorM3U8Panel() {
                     <div className="flex gap-2">
                       <select
                         value={dropdownContentId}
-                        onChange={(e) => setDropdownContentId(e.target.value)}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || telecableChannelsLoading}
+                        onChange={(e) => {
+                          // Cambiar de canal invalida la URL firmada del canal
+                          // anterior: se limpia para no arrastrar datos viejos.
+                          setDropdownContentId(e.target.value);
+                          clearTelecableResolved(processIndex);
+                        }}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping' || telecableChannelsLoading}
                         className="flex-1 bg-background border-2 border-amber-400/40 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-60"
                       >
                         <option value="">
@@ -2260,17 +2329,35 @@ export default function EmisorM3U8Panel() {
                       </select>
                       <button
                         type="button"
-                        onClick={() => loadTelecableChannels(true)}
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); loadTelecableChannels(true); }}
                         disabled={telecableChannelsLoading}
                         className="px-3 py-2 rounded-lg bg-card border border-border hover:bg-muted text-xs font-medium disabled:opacity-60"
                         title="Refrescar lista de canales Telecable"
                       >
                         🔄
                       </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping') {
+                            toast.info('Detené la emisión antes de limpiar la selección.');
+                            return;
+                          }
+                          clearTelecableResolved(processIndex, true);
+                          toast.success('Selección Telecable limpiada — elegí otro canal.');
+                        }}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
+                        className="px-3 py-2 rounded-lg bg-card border border-border hover:bg-muted text-xs font-medium disabled:opacity-60"
+                        title="Limpiar canal seleccionado y la URL resuelta (deja el tab listo para elegir otro canal)"
+                      >
+                        🧹
+                      </button>
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                       {telecableChannels.length > 0
-                        ? `${telecableChannels.length} canales disponibles. Elegí uno y pulsá Emitir HLS — el VPS resuelve la URL Telecable automáticamente (no hace falta Scrapear).`
+                        ? `${telecableChannels.length} canales disponibles. Elegí uno y pulsá Emitir — el VPS resuelve la URL Telecable automáticamente (no hace falta Scrapear). Al detener, la URL se limpia sola: solo elegí otro canal y volvé a emitir. 🧹 limpia también la selección.`
                         : telecableChannelsError
                           ? `No se pudo cargar la lista (${telecableChannelsError}). Esto es normal en el preview de Lovable: el endpoint /api/telecable/channels solo existe en el VPS de producción. En el VPS funciona normal.`
                           : 'La lista se carga automáticamente al entrar a este tab.'}
