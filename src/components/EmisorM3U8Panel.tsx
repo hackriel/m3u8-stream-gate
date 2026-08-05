@@ -2210,8 +2210,8 @@ export default function EmisorM3U8Panel() {
                     <div className="flex gap-2 flex-wrap">
                       <button
                         type="button"
-                        onClick={() => setDisney7Mode('official')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        onClick={(e) => switchDisneyMode(e, 0, 'official')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           disney7Mode === 'official'
                             ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
@@ -2223,8 +2223,8 @@ export default function EmisorM3U8Panel() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setDisney7Mode('telecable')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        onClick={(e) => switchDisneyMode(e, 0, 'telecable')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           disney7Mode === 'telecable'
                             ? 'bg-amber-500/20 border-amber-500 text-amber-300'
@@ -2236,8 +2236,8 @@ export default function EmisorM3U8Panel() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setDisney7Mode('telecable_vlc')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        onClick={(e) => switchDisneyMode(e, 0, 'telecable_vlc')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           disney7Mode === 'telecable_vlc'
                             ? 'bg-purple-500/20 border-purple-500 text-purple-300'
@@ -2265,8 +2265,8 @@ export default function EmisorM3U8Panel() {
                     <div className="flex gap-2 flex-wrap">
                       <button
                         type="button"
-                        onClick={() => setDisney8Mode('official')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        onClick={(e) => switchDisneyMode(e, DISNEY8_INDEX, 'official')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           disney8Mode === 'official'
                             ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
@@ -2278,8 +2278,8 @@ export default function EmisorM3U8Panel() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setDisney8Mode('telecable')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting'}
+                        onClick={(e) => switchDisneyMode(e, DISNEY8_INDEX, 'telecable')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
                           disney8Mode === 'telecable'
                             ? 'bg-amber-500/20 border-amber-500 text-amber-300'
