@@ -2305,8 +2305,13 @@ export default function EmisorM3U8Panel() {
                     <div className="flex gap-2">
                       <select
                         value={dropdownContentId}
-                        onChange={(e) => setDropdownContentId(e.target.value)}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || telecableChannelsLoading}
+                        onChange={(e) => {
+                          // Cambiar de canal invalida la URL firmada del canal
+                          // anterior: se limpia para no arrastrar datos viejos.
+                          setDropdownContentId(e.target.value);
+                          clearTelecableResolved(processIndex);
+                        }}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping' || telecableChannelsLoading}
                         className="flex-1 bg-background border-2 border-amber-400/40 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-60"
                       >
                         <option value="">
@@ -2324,17 +2329,35 @@ export default function EmisorM3U8Panel() {
                       </select>
                       <button
                         type="button"
-                        onClick={() => loadTelecableChannels(true)}
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); loadTelecableChannels(true); }}
                         disabled={telecableChannelsLoading}
                         className="px-3 py-2 rounded-lg bg-card border border-border hover:bg-muted text-xs font-medium disabled:opacity-60"
                         title="Refrescar lista de canales Telecable"
                       >
                         🔄
                       </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping') {
+                            toast.info('Detené la emisión antes de limpiar la selección.');
+                            return;
+                          }
+                          clearTelecableResolved(processIndex, true);
+                          toast.success('Selección Telecable limpiada — elegí otro canal.');
+                        }}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
+                        className="px-3 py-2 rounded-lg bg-card border border-border hover:bg-muted text-xs font-medium disabled:opacity-60"
+                        title="Limpiar canal seleccionado y la URL resuelta (deja el tab listo para elegir otro canal)"
+                      >
+                        🧹
+                      </button>
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                       {telecableChannels.length > 0
-                        ? `${telecableChannels.length} canales disponibles. Elegí uno y pulsá Emitir HLS — el VPS resuelve la URL Telecable automáticamente (no hace falta Scrapear).`
+                        ? `${telecableChannels.length} canales disponibles. Elegí uno y pulsá Emitir — el VPS resuelve la URL Telecable automáticamente (no hace falta Scrapear). Al detener, la URL se limpia sola: solo elegí otro canal y volvé a emitir. 🧹 limpia también la selección.`
                         : telecableChannelsError
                           ? `No se pudo cargar la lista (${telecableChannelsError}). Esto es normal en el preview de Lovable: el endpoint /api/telecable/channels solo existe en el VPS de producción. En el VPS funciona normal.`
                           : 'La lista se carga automáticamente al entrar a este tab.'}
