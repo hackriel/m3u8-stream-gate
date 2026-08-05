@@ -910,6 +910,39 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     try { localStorage.setItem('disney8_10_telecable_content_id', disney8ContentId); } catch {}
   }, [disney8ContentId]);
+  // ── Hidratación ÚNICA desde el server (una sola vez al montar).
+  // disney7Mode/disney8Mode viven en localStorage y son por-navegador: si emitís
+  // desde producción y abrís el panel en otra máquina (o en el preview de
+  // Lovable), el sub-tab mostraba el último modo local ("VLC LIKE") aunque el
+  // server estuviera realmente en "Telecable (dropdown)". Leemos el modo real
+  // una vez y alineamos el selector. No es un loop: solo corre en el mount.
+  const disneyModesHydratedRef = useRef(false);
+  useEffect(() => {
+    if (disneyModesHydratedRef.current) return;
+    disneyModesHydratedRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [r0, r10] = await Promise.all([
+          fetch('/api/telecable/0/source-mode'),
+          fetch('/api/telecable/10/source-mode'),
+        ]);
+        if (cancelled) return;
+        if (r0.ok) {
+          const j = await r0.json();
+          if (j.mode === 'telecable' || j.mode === 'telecable_vlc' || j.mode === 'scraping') {
+            setDisney7Mode(j.mode === 'scraping' ? 'official' : j.mode);
+          }
+        }
+        if (r10.ok) {
+          const j = await r10.json();
+          if (j.mode === 'telecable' || j.mode === 'telecable_vlc') setDisney8Mode('telecable');
+          else if (j.mode === 'scraping') setDisney8Mode('official');
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const loadTelecableChannels = useCallback(async (force = false) => {
     setTelecableChannelsLoading(true);
     telecableChannelsAttemptedRef.current = true;
