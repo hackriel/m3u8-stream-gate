@@ -8,9 +8,9 @@
 // ============================================================================
 import express from 'express';
 import { exec, spawn } from 'child_process';
-import fs from 'fs';
 import os from 'os';
 import net from 'net';
+import http from 'http';
 import dgram from 'dgram';
 
 const router = express.Router();
@@ -727,7 +727,7 @@ router.get('/ingest', async (_req, res) => {
 // ---------------------------------------------------------------------------
 const localGet = async (path) =>
   new Promise((resolve) => {
-    const req2 = require$http.get({ host: '127.0.0.1', port: process.env.PORT || 3001, path }, (r) => {
+    const req2 = http.get({ host: '127.0.0.1', port: process.env.PORT || 3001, path }, (r) => {
       let b = '';
       r.on('data', (c) => (b += c));
       r.on('end', () => { try { resolve(JSON.parse(b)); } catch (_) { resolve(null); } });
@@ -735,8 +735,6 @@ const localGet = async (path) =>
     req2.on('error', () => resolve(null));
     req2.setTimeout(30000, () => { req2.destroy(); resolve(null); });
   });
-// import dinámico evitado: usamos http nativo
-import require$http from 'http';
 
 router.get('/summary', async (_req, res) => {
   const [server, nic, sysctl, sockets, ffmpeg, ingest] = await Promise.all([
