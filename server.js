@@ -16,6 +16,7 @@ import { createClient } from '@supabase/supabase-js';
 import { request as undiciRequest, ProxyAgent } from 'undici';
 
 // FOX/FOX+ URL filler (pantalla "RECONECTANDO" mientras se re-scrape)
+import diagnosticsRouter from './diagnostics.js';
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
 
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
@@ -7388,6 +7389,9 @@ app.get('/api/metrics', (req, res) => {
     });
   }
 });
+
+// Módulo de Diagnóstico de Streaming y Red (read-only)
+app.use('/api/diag', diagnosticsRouter);
 
 // Endpoints /api/proxy-status y /api/tigo-srt-status eliminados (Tigo descartado).
 app.use((req, res, next) => {

@@ -3276,6 +3276,14 @@ export default function EmisorM3U8Panel() {
           <p className="text-muted-foreground">
             Gestiona hasta {VISIBLE_PROCESSES.length} procesos de streaming simultáneos
           </p>
+          <div className="mt-3 flex justify-center">
+            <a
+              href="/diagnostico"
+              className="inline-flex items-center gap-2 rounded-xl border border-border bg-card/60 px-4 py-2 text-sm font-semibold hover:bg-muted/50 transition-colors"
+            >
+              🩺 Diagnóstico de Streaming
+            </a>
+          </div>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">

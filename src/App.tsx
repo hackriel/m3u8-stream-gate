@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import PasswordGate from "./components/PasswordGate";
 import Index from "./pages/Index";
 import Uptime from "./pages/Uptime";
+import Diagnostics from "./pages/Diagnostics";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -20,6 +21,8 @@ const App = () => (
           {/* Pantalla pública de uptime (sin contraseña) */}
           <Route path="/uptime" element={<Uptime />} />
           <Route path="/" element={<PasswordGate><Index /></PasswordGate>} />
+          <Route path="/diagnostico" element={<PasswordGate><Diagnostics /></PasswordGate>} />
+          <Route path="/diagnostics" element={<PasswordGate><Diagnostics /></PasswordGate>} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<PasswordGate><NotFound /></PasswordGate>} />
         </Routes>
