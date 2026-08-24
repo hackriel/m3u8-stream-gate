@@ -190,6 +190,28 @@ const Diagnostics = () => {
     };
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem("diag_mon_pid", monPid);
+    localStorage.setItem("diag_mon_dur", monDuration);
+  }, [monPid, monDuration]);
+
+  // ---- Monitor en vivo: estado inicial + polling mientras corre -----------
+  useEffect(() => {
+    api("/live/state").then(setLiveMon).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!liveMon?.running) return;
+    const id = setInterval(async () => {
+      try {
+        setLiveMon(await api("/live/state"));
+      } catch {
+        /* noop */
+      }
+    }, 2500);
+    return () => clearInterval(id);
+  }, [liveMon?.running]);
+
+
   // ---- Stress test polling -----------------------------------------------
   useEffect(() => {
     if (!stress?.running) return;
