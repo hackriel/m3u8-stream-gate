@@ -85,6 +85,11 @@ const Diagnostics = () => {
   const [iperfPort, setIperfPort] = useState(() => localStorage.getItem("diag_iperf_port") || "5201");
   const [stepSeconds, setStepSeconds] = useState("10");
 
+  // Monitor en vivo de una emisión real
+  const [liveMon, setLiveMon] = useState<any>(null);
+  const [monPid, setMonPid] = useState(() => localStorage.getItem("diag_mon_pid") || "0");
+  const [monDuration, setMonDuration] = useState(() => localStorage.getItem("diag_mon_dur") || "120");
+
   // Telemetría en vivo de las emisiones (fps/dup/drop) para el bloque SRT/FFmpeg
   const [liveSeries, setLiveSeries] = useState<
     { t: string; fps: number; drops: number; dups: number; cpu: number; txMbps: number }[]
@@ -184,6 +189,28 @@ const Diagnostics = () => {
       clearInterval(id);
     };
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("diag_mon_pid", monPid);
+    localStorage.setItem("diag_mon_dur", monDuration);
+  }, [monPid, monDuration]);
+
+  // ---- Monitor en vivo: estado inicial + polling mientras corre -----------
+  useEffect(() => {
+    api("/live/state").then(setLiveMon).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!liveMon?.running) return;
+    const id = setInterval(async () => {
+      try {
+        setLiveMon(await api("/live/state"));
+      } catch {
+        /* noop */
+      }
+    }, 2500);
+    return () => clearInterval(id);
+  }, [liveMon?.running]);
+
 
   // ---- Stress test polling -----------------------------------------------
   useEffect(() => {
@@ -372,6 +399,114 @@ const Diagnostics = () => {
             corriendo <code>iperf3 -s -p {iperfPort}</code> en tu PC y poné arriba tu IP pública.
           </p>
         </Section>
+
+        {/* ---------------- Monitor de emisión en vivo ---------------- */}
+        <Section
+          title="Monitor de emisión en vivo (conclusiones con la señal real)"
+          subtitle="Emitís normalmente (ej. Disney 7) y el panel muestrea cada 2s FPS, bitrate, dup/drop, NIC y buffers UDP para decir dónde se pierde."
+          right={
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                className="w-24"
+                value={monPid}
+                onChange={(e) => setMonPid(e.target.value.replace(/\D/g, ""))}
+                placeholder="ID canal"
+              />
+              <Input
+                className="w-24"
+                value={monDuration}
+                onChange={(e) => setMonDuration(e.target.value.replace(/\D/g, ""))}
+                placeholder="seg"
+              />
+              <Button
+                onClick={() =>
+                  guard("livemon", async () => {
+                    if (liveMon?.running) {
+                      setLiveMon(await api("/live/stop", {}));
+                    } else {
+                      await api("/live/start", { processId: monPid, durationSec: Number(monDuration) });
+                      setLiveMon(await api("/live/state"));
+                    }
+                  })
+                }
+                disabled={busy === "livemon"}
+              >
+                {liveMon?.running ? "⏹ Detener monitoreo" : "🎥 Monitorear emisión"}
+              </Button>
+            </div>
+          }
+        >
+          {!liveMon?.samples?.length ? (
+            <p className="text-xs text-muted-foreground">
+              Poné el ID del canal que estás emitiendo (Disney 7 = 0), la duración en segundos (120 recomendado) y
+              dale a monitorear mientras la señal corre. No interrumpe nada: solo observa.
+            </p>
+          ) : (
+            <>
+              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {[
+                  { k: "FPS prom.", v: liveMon.verdict?.metrics?.fpsAvg ?? liveMon.samples.at(-1)?.fps ?? "—" },
+                  { k: "FPS mín.", v: liveMon.verdict?.metrics?.fpsMin ?? "—" },
+                  { k: "Bitrate prom.", v: `${liveMon.verdict?.metrics?.brAvg ?? liveMon.samples.at(-1)?.bitrateKbps ?? "—"} kbps` },
+                  { k: "Frames drop", v: liveMon.verdict?.metrics?.dropTotal ?? "—" },
+                ].map((m) => (
+                  <div key={m.k} className="rounded-lg bg-muted/40 p-3">
+                    <p className="text-[11px] text-muted-foreground">{m.k}</p>
+                    <p className="text-base font-semibold">{String(m.v)}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={liveMon.samples.map((s: any) => ({
+                      t: new Date(s.t).toLocaleTimeString("es-CR", { hour12: false }),
+                      fps: s.fps ?? 0,
+                      kbps: s.bitrateKbps ?? 0,
+                      drops: s.dropDelta ?? 0,
+                    }))}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                    <XAxis dataKey="t" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="l" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 10 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Line yAxisId="l" type="monotone" dataKey="fps" stroke="hsl(var(--primary))" dot={false} name="FPS" />
+                    <Line yAxisId="r" type="monotone" dataKey="kbps" stroke="hsl(var(--chart-2, 200 80% 55%))" dot={false} name="kbps" />
+                    <Line yAxisId="l" type="monotone" dataKey="drops" stroke="hsl(var(--destructive))" dot={false} name="Drops" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              {liveMon.verdict && (
+                <div className="mt-4 rounded-lg border border-border p-4">
+                  <p className="text-sm font-semibold">
+                    {liveMon.verdict.enoughData ? liveMon.verdict.summary : liveMon.verdict.summary}
+                  </p>
+                  {liveMon.verdict.probabilities && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {Object.entries(liveMon.verdict.probabilities as Record<string, number>)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([k, v]) => (
+                          <Badge key={k} variant="outline">
+                            {k.replace(/_/g, " ")}: {v}%
+                          </Badge>
+                        ))}
+                    </div>
+                  )}
+                  <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                    {(liveMon.verdict.evidence || []).map((e: string, i: number) => (
+                      <li key={i}>{e}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </Section>
+
 
         {/* ---------------- Stress test ---------------- */}
         <Section
