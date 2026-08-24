@@ -916,10 +916,12 @@ const sampleLive = async (pid, iface, prev) => {
 
   const s = {
     t: Date.now(),
-    status: statusR?.status || 'unknown',
-    running: !!statusR?.process_running,
+    status: statusR?.status || fromAll?.status || 'unknown',
+    running: !!(statusR?.process_running || fromAll?.process_running),
+    hasTelemetry: !!live,
     fps: live?.fps ?? null,
     bitrateKbps: live?.bitrateKbps ?? null,
+
     speed: live?.speed ?? null,
     dup: live?.dup ?? null,
     drop: live?.drop ?? null,
