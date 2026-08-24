@@ -867,4 +867,222 @@ router.post('/verdict', async (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// MONITOR EN VIVO — muestrea una emisión real y saca conclusiones
+// ----------------------------------------------------------------------------
+// Read-only: solo lee /api/status (telemetría de FFmpeg), /proc/net/dev,
+// /proc/net/snmp y load average. No toca la emisión ni la configuración.
+// ---------------------------------------------------------------------------
+let liveMon = {
+  running: false,
+  processId: null,
+  startedAt: null,
+  finishedAt: null,
+  durationSec: 0,
+  samples: [],
+  verdict: null,
+  error: null,
+};
+let liveMonTimer = null;
+
+const readNetDev = async (iface) => {
+  const r = await run(`grep -w "${iface}:" /proc/net/dev || true`, 4000);
+  const parts = r.stdout.trim().replace(/^.*:/, '').trim().split(/\s+/).map(num);
+  // rx: bytes packets errs drop fifo frame compressed multicast | tx: bytes packets errs drop ...
+  if (parts.length < 16) return null;
+  return {
+    rxBytes: parts[0], rxPackets: parts[1], rxErrs: parts[2], rxDrop: parts[3],
+    txBytes: parts[8], txPackets: parts[9], txErrs: parts[10], txDrop: parts[11],
+  };
+};
+
+const readUdpErrors = async () => {
+  const r = await run('cat /proc/net/snmp 2>/dev/null | grep -A1 "^Udp:" | tail -1', 4000);
+  const p = r.stdout.trim().split(/\s+/);
+  // Udp: InDatagrams NoPorts InErrors OutDatagrams RcvbufErrors SndbufErrors ...
+  return { inErrors: num(p[3]), rcvbufErrors: num(p[5]), sndbufErrors: num(p[6]) };
+};
+
+const sampleLive = async (pid, iface, prev) => {
+  const [statusR, netDev, udp] = await Promise.all([
+    localGet(`/api/status?process_id=${encodeURIComponent(pid)}`),
+    readNetDev(iface),
+    readUdpErrors(),
+  ]);
+  const live = statusR?.live || null;
+  const load = os.loadavg()[0] / (os.cpus().length || 1);
+  const s = {
+    t: Date.now(),
+    status: statusR?.status || 'unknown',
+    running: !!statusR?.process_running,
+    fps: live?.fps ?? null,
+    bitrateKbps: live?.bitrateKbps ?? null,
+    speed: live?.speed ?? null,
+    dup: live?.dup ?? null,
+    drop: live?.drop ?? null,
+    q: live?.q ?? null,
+    srtRttMs: live?.srtRttMs ?? null,
+    srtPktsLost: live?.srtPktsLost ?? null,
+    loadRatio: Math.round(load * 100) / 100,
+    // deltas por muestra
+    dropDelta: prev?.dropRaw != null && live?.drop != null ? Math.max(0, live.drop - prev.dropRaw) : null,
+    dupDelta: prev?.dupRaw != null && live?.dup != null ? Math.max(0, live.dup - prev.dupRaw) : null,
+    nicRxDropDelta: prev?.netDev && netDev ? netDev.rxDrop - prev.netDev.rxDrop : null,
+    nicTxDropDelta: prev?.netDev && netDev ? netDev.txDrop - prev.netDev.txDrop : null,
+    udpErrDelta: prev?.udp ? (udp.inErrors + udp.rcvbufErrors) - (prev.udp.inErrors + prev.udp.rcvbufErrors) : null,
+  };
+  return { sample: s, carry: { dropRaw: live?.drop ?? null, dupRaw: live?.dup ?? null, netDev, udp } };
+};
+
+const liveVerdict = (samples) => {
+  const withData = samples.filter((s) => s.fps != null || s.bitrateKbps != null);
+  if (withData.length < 3) {
+    return {
+      enoughData: false,
+      summary: 'Datos insuficientes: no llegó telemetría de FFmpeg. Verificá que el canal esté realmente emitiendo durante el monitoreo.',
+      evidence: [],
+      probabilities: null,
+    };
+  }
+  const nums = (k) => withData.map((s) => s[k]).filter((v) => typeof v === 'number');
+  const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+  const fps = nums('fps');
+  const br = nums('bitrateKbps');
+  const speed = nums('speed');
+  const dropDeltas = withData.map((s) => s.dropDelta).filter((v) => typeof v === 'number');
+  const dupDeltas = withData.map((s) => s.dupDelta).filter((v) => typeof v === 'number');
+  const nicDrops = withData.map((s) => (s.nicRxDropDelta || 0) + (s.nicTxDropDelta || 0)).filter((v) => typeof v === 'number');
+  const udpErrs = withData.map((s) => s.udpErrDelta).filter((v) => typeof v === 'number');
+
+  const fpsAvg = Math.round(avg(fps) * 10) / 10;
+  const fpsMin = fps.length ? Math.min(...fps) : null;
+  const brAvg = Math.round(avg(br));
+  const brMin = br.length ? Math.min(...br) : null;
+  const brStd = br.length > 1 ? Math.sqrt(avg(br.map((v) => (v - avg(br)) ** 2))) : 0;
+  const speedAvg = Math.round(avg(speed) * 100) / 100;
+  const dropTotal = dropDeltas.reduce((a, b) => a + b, 0);
+  const dupTotal = dupDeltas.reduce((a, b) => a + b, 0);
+  const nicDropTotal = nicDrops.reduce((a, b) => a + b, 0);
+  const udpErrTotal = udpErrs.reduce((a, b) => a + b, 0);
+  const restarts = samples.filter((s) => s.status === 'starting' || s.status === 'error').length;
+
+  const scores = { encoder_fuente: 0, isp_subida: 0, ruta_peering: 0, servidor: 0, nic: 0, config_linux: 0, ok: 0 };
+  const ev = [];
+
+  if (fpsMin != null && fpsMin < 25) {
+    ev.push(`FPS cayó a ${fpsMin} (promedio ${fpsAvg}): la señal que llega al VPS se está quedando sin frames.`);
+    scores.encoder_fuente += 2; scores.isp_subida += 2;
+  } else if (fpsAvg) {
+    ev.push(`FPS estable en ${fpsAvg} durante todo el monitoreo.`);
+    scores.ok += 1;
+  }
+
+  if (brAvg && brMin != null && brMin < brAvg * 0.6) {
+    ev.push(`Bitrate cayó de ~${brAvg} kbps a ${brMin} kbps: el enlace de subida no sostiene el caudal (shaping/congestión).`);
+    scores.isp_subida += 3;
+  }
+  if (brAvg && brStd > brAvg * 0.25) {
+    ev.push(`Bitrate muy inestable (desvío ${Math.round(brStd)} kbps sobre ${brAvg} kbps): típico de jitter en la ruta.`);
+    scores.ruta_peering += 2;
+  }
+  if (dropTotal > 0) {
+    ev.push(`FFmpeg descartó ${dropTotal} frames durante el monitoreo: llegan tarde o corruptos desde el encoder.`);
+    scores.isp_subida += 2; scores.ruta_peering += 1;
+  }
+  if (dupTotal > 0) {
+    ev.push(`FFmpeg duplicó ${dupTotal} frames: la fuente entrega menos FPS de los esperados (hueco en la entrada).`);
+    scores.encoder_fuente += 2;
+  }
+  if (nicDropTotal > 0) {
+    ev.push(`La NIC del VPS descartó ${nicDropTotal} paquetes: el problema es del servidor, no de tu red.`);
+    scores.nic += 3;
+  }
+  if (udpErrTotal > 0) {
+    ev.push(`${udpErrTotal} errores UDP en el kernel (buffers): subir rmem_max/wmem_max ayudaría a SRT.`);
+    scores.config_linux += 3;
+  }
+  const loadMax = Math.max(...samples.map((s) => s.loadRatio || 0));
+  if (loadMax > 0.85) {
+    ev.push(`Carga del servidor llegó a ${Math.round(loadMax * 100)}% de sus núcleos.`);
+    scores.servidor += 3;
+  }
+  if (speedAvg && speedAvg < 0.97) {
+    ev.push(`speed=${speedAvg}x: FFmpeg va más lento que tiempo real (se acumula retraso).`);
+    scores.servidor += 2; scores.encoder_fuente += 1;
+  }
+  if (restarts > 0) {
+    ev.push(`Se detectaron ${restarts} muestras en estado starting/error: hubo cortes/reconexiones durante el monitoreo.`);
+    scores.isp_subida += 2;
+  }
+  if (!ev.length) ev.push('Sin anomalías: la emisión se mantuvo estable en toda la ventana medida.');
+
+  const total = Object.values(scores).reduce((a, b) => a + b, 0);
+  const probabilities = total
+    ? Object.fromEntries(Object.entries(scores).map(([k, v]) => [k, Math.round((v / total) * 100)]))
+    : null;
+  const topKey = probabilities ? Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0][0] : null;
+  const causeText = {
+    encoder_fuente: 'El encoder/fuente (Pearl Nano, OBS o el origen HLS) no entrega frames de forma continua.',
+    isp_subida: 'Tu enlace de subida / ISP no sostiene el bitrate hacia el VPS (shaping o congestión).',
+    ruta_peering: 'Ruta/peering entre tu ISP y el datacenter: jitter que degrada el flujo.',
+    servidor: 'El VPS se está quedando corto de CPU o va más lento que tiempo real.',
+    nic: 'La interfaz de red del VPS está descartando paquetes.',
+    config_linux: 'Buffers de socket del kernel demasiado chicos para SRT/UDP.',
+    ok: 'Todo estable: no hay evidencia de pérdida en esta ventana.',
+  };
+
+  return {
+    enoughData: true,
+    metrics: { fpsAvg, fpsMin, brAvg, brMin, brStdKbps: Math.round(brStd), speedAvg, dropTotal, dupTotal, nicDropTotal, udpErrTotal, restarts, loadMax },
+    probabilities,
+    summary: topKey ? causeText[topKey] : null,
+    evidence: ev,
+  };
+};
+
+router.get('/live/state', (_req, res) => res.json(liveMon));
+
+router.post('/live/start', async (req, res) => {
+  if (liveMon.running) return res.status(409).json({ error: 'Ya hay un monitoreo en curso.' });
+  const pid = String(req.body?.processId ?? '').trim();
+  if (!/^\d{1,3}$/.test(pid)) return res.status(400).json({ error: 'processId inválido.' });
+  const durationSec = Math.min(600, Math.max(30, parseInt(req.body?.durationSec, 10) || 120));
+  const iface = await defaultIface();
+
+  liveMon = { running: true, processId: pid, startedAt: Date.now(), finishedAt: null, durationSec, samples: [], verdict: null, error: null };
+  let carry = null;
+  const endAt = Date.now() + durationSec * 1000;
+
+  const tick = async () => {
+    try {
+      const { sample, carry: next } = await sampleLive(pid, iface, carry);
+      carry = next;
+      liveMon.samples.push(sample);
+    } catch (err) {
+      liveMon.error = err?.message || String(err);
+    }
+    if (!liveMon.running) return;
+    if (Date.now() >= endAt) {
+      liveMon.running = false;
+      liveMon.finishedAt = Date.now();
+      liveMon.verdict = liveVerdict(liveMon.samples);
+      liveMonTimer = null;
+      return;
+    }
+    liveMonTimer = setTimeout(tick, 2000);
+  };
+  tick();
+  res.json({ started: true, processId: pid, durationSec, iface });
+});
+
+router.post('/live/stop', (_req, res) => {
+  if (liveMonTimer) { clearTimeout(liveMonTimer); liveMonTimer = null; }
+  if (liveMon.running) {
+    liveMon.running = false;
+    liveMon.finishedAt = Date.now();
+    liveMon.verdict = liveVerdict(liveMon.samples);
+  }
+  res.json(liveMon);
+});
+
 export default router;
