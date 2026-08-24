@@ -229,6 +229,7 @@ if (!fs.existsSync(HLS_OUTPUT_DIR)) {
 // Guard: si OTRO pid comparte el mismo slug y está vivo, NO limpia.
 // ───────────────────────────────────────────────────────────────────────
 function clearHlsSlugForPid(pid, logTag = null) {
+  try { if (typeof srtFeedLossCleared !== 'undefined') srtFeedLossCleared.delete(String(pid)); } catch (_) {}
   const slug = (typeof HLS_SLUG_MAP !== 'undefined') ? HLS_SLUG_MAP[String(pid)] : null;
   if (!slug) return false;
   // ¿Hay OTRO proceso vivo escribiendo al mismo slug?
@@ -2212,6 +2213,59 @@ setInterval(() => {
     }
   }
 }, WATCHDOG_CHECK_INTERVAL);
+
+// ───────────────────────────────────────────────────────────────────────
+// SRT FEED-LOSS GUARD (corta el "loop" del último fragmento en XUI)
+// Cuando el publisher SRT (OBS / Pearl Nano) corta la señal, el FFmpeg
+// listener NO muere: sigue escuchando el puerto sin recibir datos. El
+// playlist HLS queda congelado con sus últimos 8 segmentos y `omit_endlist`,
+// así que XUI/Odin lo interpretan como live y reproducen esa ventana en
+// bucle infinito.
+// Solución: si un canal SRT lleva > SRT_FEED_LOSS_MS sin producir frames,
+// borramos playlist.m3u8 + segmentos de su slug → los clientes reciben 404
+// y caen a su URL de backup. Cuando el publisher vuelve, FFmpeg reescribe
+// el playlist (append_list + epoch) y el canal revive solo.
+// ───────────────────────────────────────────────────────────────────────
+const SRT_FEED_LOSS_MS = parseInt(process.env.SRT_FEED_LOSS_MS || '12000', 10);
+const srtFeedLossCleared = new Set(); // pids ya limpiados (evita spam de logs)
+
+setInterval(() => {
+  for (const [processId, processData] of ffmpegProcesses.entries()) {
+    const pid = String(processId);
+    if (!isSrtIngestProcess(pid)) continue;
+    if (!processData || !processData.process || processData.process.killed) continue;
+
+    const lastFrame = lastFrameTime.get(processId) || lastFrameTime.get(pid) || lastFrameTime.get(Number(pid));
+    if (!lastFrame) continue; // nunca arrancó: lo maneja el watchdog de arranque
+
+    const stalledMs = Date.now() - lastFrame;
+
+    if (stalledMs > SRT_FEED_LOSS_MS) {
+      if (srtFeedLossCleared.has(pid)) continue;
+      const slug = HLS_SLUG_MAP[pid];
+      if (!slug) continue;
+      const dir = path.join(HLS_OUTPUT_DIR, slug);
+      let removed = 0;
+      try {
+        if (fs.existsSync(dir)) {
+          for (const f of fs.readdirSync(dir)) {
+            if (f.endsWith('.m3u8') || f.endsWith('.ts')) {
+              try { fs.unlinkSync(path.join(dir, f)); removed++; } catch (_) {}
+            }
+          }
+        }
+      } catch (_) {}
+      srtFeedLossCleared.add(pid);
+      try {
+        sendLog(pid, 'warn', `📴 SEÑAL SRT CORTADA (${Math.floor(stalledMs / 1000)}s sin frames) — playlist HLS eliminado (${removed} archivos). XUI dejará de loopear el último fragmento y caerá a backup.`);
+      } catch (_) {}
+    } else if (srtFeedLossCleared.has(pid)) {
+      srtFeedLossCleared.delete(pid);
+      try { sendLog(pid, 'success', `📡 SEÑAL SRT RESTABLECIDA — regenerando playlist HLS`); } catch (_) {}
+    }
+  }
+}, 3000);
+
 
 setInterval(async () => {
   if (!supabase) return;
