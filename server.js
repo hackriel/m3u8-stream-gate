@@ -229,6 +229,7 @@ if (!fs.existsSync(HLS_OUTPUT_DIR)) {
 // Guard: si OTRO pid comparte el mismo slug y está vivo, NO limpia.
 // ───────────────────────────────────────────────────────────────────────
 function clearHlsSlugForPid(pid, logTag = null) {
+  try { if (typeof srtFeedLossCleared !== 'undefined') srtFeedLossCleared.delete(String(pid)); } catch (_) {}
   const slug = (typeof HLS_SLUG_MAP !== 'undefined') ? HLS_SLUG_MAP[String(pid)] : null;
   if (!slug) return false;
   // ¿Hay OTRO proceso vivo escribiendo al mismo slug?
