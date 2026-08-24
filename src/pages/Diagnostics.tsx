@@ -85,6 +85,11 @@ const Diagnostics = () => {
   const [iperfPort, setIperfPort] = useState(() => localStorage.getItem("diag_iperf_port") || "5201");
   const [stepSeconds, setStepSeconds] = useState("10");
 
+  // Monitor en vivo de una emisión real
+  const [liveMon, setLiveMon] = useState<any>(null);
+  const [monPid, setMonPid] = useState(() => localStorage.getItem("diag_mon_pid") || "0");
+  const [monDuration, setMonDuration] = useState(() => localStorage.getItem("diag_mon_dur") || "120");
+
   // Telemetría en vivo de las emisiones (fps/dup/drop) para el bloque SRT/FFmpeg
   const [liveSeries, setLiveSeries] = useState<
     { t: string; fps: number; drops: number; dups: number; cpu: number; txMbps: number }[]
