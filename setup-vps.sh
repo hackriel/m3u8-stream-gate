@@ -150,6 +150,25 @@ grep -q 'tcp_keepalive_time' /etc/sysctl.conf 2>/dev/null || {
 }
 ok "TCP keepalive optimizado (60s/10s/6 probes)"
 
+# ── Paso 3b-2: Buffers de socket del kernel para SRT/UDP de alto bitrate ──
+echo "🔧 [3b-2/8] Ampliando buffers UDP del kernel para SRT..."
+sysctl -w net.core.rmem_max=33554432       > /dev/null 2>&1
+sysctl -w net.core.wmem_max=33554432       > /dev/null 2>&1
+sysctl -w net.core.rmem_default=16777216   > /dev/null 2>&1
+sysctl -w net.core.wmem_default=16777216   > /dev/null 2>&1
+sysctl -w net.core.netdev_max_backlog=5000 > /dev/null 2>&1
+# Persistir en reboot
+grep -q 'net.core.rmem_max' /etc/sysctl.conf 2>/dev/null || {
+  echo "net.core.rmem_max = 33554432"       >> /etc/sysctl.conf
+  echo "net.core.wmem_max = 33554432"       >> /etc/sysctl.conf
+  echo "net.core.rmem_default = 16777216"   >> /etc/sysctl.conf
+  echo "net.core.wmem_default = 16777216"   >> /etc/sysctl.conf
+  echo "net.core.netdev_max_backlog = 5000" >> /etc/sysctl.conf
+}
+ok "Buffers UDP ampliados a 32 MB (rmem/wmem_max)"
+
+
+
 # ── Paso 3c: Firewall (UFW) - abrir puertos SRT/RTMP/panel ──
 echo "🛡️  [3c/8] Configurando firewall UFW (SSH + panel + RTMP + SRT)..."
 apt install -y ufw >/dev/null 2>&1 || true
