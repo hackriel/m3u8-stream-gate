@@ -904,13 +904,16 @@ const readUdpErrors = async () => {
 };
 
 const sampleLive = async (pid, iface, prev) => {
-  const [statusR, netDev, udp] = await Promise.all([
+  const [statusR, allR, netDev, udp] = await Promise.all([
     localGet(`/api/status?process_id=${encodeURIComponent(pid)}`),
+    localGet('/api/status'),
     readNetDev(iface),
     readUdpErrors(),
   ]);
-  const live = statusR?.live || null;
+  const fromAll = allR?.processes?.[String(pid)] || null;
+  const live = statusR?.live || fromAll?.live || null;
   const load = os.loadavg()[0] / (os.cpus().length || 1);
+
   const s = {
     t: Date.now(),
     status: statusR?.status || 'unknown',
