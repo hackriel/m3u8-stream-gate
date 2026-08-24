@@ -443,19 +443,53 @@ const Diagnostics = () => {
             </p>
           ) : (
             <>
-              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {[
-                  { k: "FPS prom.", v: liveMon.verdict?.metrics?.fpsAvg ?? liveMon.samples.at(-1)?.fps ?? "—" },
-                  { k: "FPS mín.", v: liveMon.verdict?.metrics?.fpsMin ?? "—" },
-                  { k: "Bitrate prom.", v: `${liveMon.verdict?.metrics?.brAvg ?? liveMon.samples.at(-1)?.bitrateKbps ?? "—"} kbps` },
-                  { k: "Frames drop", v: liveMon.verdict?.metrics?.dropTotal ?? "—" },
-                ].map((m) => (
-                  <div key={m.k} className="rounded-lg bg-muted/40 p-3">
-                    <p className="text-[11px] text-muted-foreground">{m.k}</p>
-                    <p className="text-base font-semibold">{String(m.v)}</p>
-                  </div>
-                ))}
-              </div>
+              {(() => {
+                const ss = liveMon.samples as any[];
+                const last = ss[ss.length - 1] || {};
+                const fpsVals = ss.map((s) => s.fps).filter((v: any) => typeof v === "number");
+                const brVals = ss.map((s) => s.bitrateKbps).filter((v: any) => typeof v === "number");
+                const dropTotal = ss
+                  .map((s) => s.dropDelta)
+                  .filter((v: any) => typeof v === "number")
+                  .reduce((a: number, b: number) => a + b, 0);
+                const avg = (a: number[]) => (a.length ? Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 10) / 10 : null);
+                const noTel = !fpsVals.length && !brVals.length;
+                return (
+                  <>
+                    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                      <Badge variant="outline">muestras: {ss.length}</Badge>
+                      <Badge variant="outline">estado: {last.status ?? "?"}</Badge>
+                      <Badge variant={last.running ? "outline" : "destructive"}>
+                        FFmpeg: {last.running ? "corriendo" : "no corriendo"}
+                      </Badge>
+                      <Badge variant={noTel ? "destructive" : "outline"}>
+                        telemetría: {noTel ? "sin datos" : "ok"}
+                      </Badge>
+                    </div>
+                    {noTel && (
+                      <p className="mb-3 text-xs text-destructive">
+                        No llega telemetría del ID <strong>{liveMon.processId}</strong>. Si el canal que estás emitiendo
+                        es otro, cambiá el ID; si acabás de arrancar, esperá unos segundos a que FFmpeg empiece a
+                        reportar frames.
+                      </p>
+                    )}
+                    <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {[
+                        { k: "FPS prom.", v: liveMon.verdict?.metrics?.fpsAvg ?? avg(fpsVals) ?? "—" },
+                        { k: "FPS mín.", v: liveMon.verdict?.metrics?.fpsMin ?? (fpsVals.length ? Math.min(...fpsVals) : "—") },
+                        { k: "Bitrate prom.", v: `${liveMon.verdict?.metrics?.brAvg ?? avg(brVals) ?? "—"} kbps` },
+                        { k: "Frames drop", v: liveMon.verdict?.metrics?.dropTotal ?? dropTotal },
+                      ].map((m) => (
+                        <div key={m.k} className="rounded-lg bg-muted/40 p-3">
+                          <p className="text-[11px] text-muted-foreground">{m.k}</p>
+                          <p className="text-base font-semibold">{String(m.v)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+
 
               <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">

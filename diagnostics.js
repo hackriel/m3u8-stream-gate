@@ -904,19 +904,24 @@ const readUdpErrors = async () => {
 };
 
 const sampleLive = async (pid, iface, prev) => {
-  const [statusR, netDev, udp] = await Promise.all([
+  const [statusR, allR, netDev, udp] = await Promise.all([
     localGet(`/api/status?process_id=${encodeURIComponent(pid)}`),
+    localGet('/api/status'),
     readNetDev(iface),
     readUdpErrors(),
   ]);
-  const live = statusR?.live || null;
+  const fromAll = allR?.processes?.[String(pid)] || null;
+  const live = statusR?.live || fromAll?.live || null;
   const load = os.loadavg()[0] / (os.cpus().length || 1);
+
   const s = {
     t: Date.now(),
-    status: statusR?.status || 'unknown',
-    running: !!statusR?.process_running,
+    status: statusR?.status || fromAll?.status || 'unknown',
+    running: !!(statusR?.process_running || fromAll?.process_running),
+    hasTelemetry: !!live,
     fps: live?.fps ?? null,
     bitrateKbps: live?.bitrateKbps ?? null,
+
     speed: live?.speed ?? null,
     dup: live?.dup ?? null,
     drop: live?.drop ?? null,
@@ -937,13 +942,23 @@ const sampleLive = async (pid, iface, prev) => {
 const liveVerdict = (samples) => {
   const withData = samples.filter((s) => s.fps != null || s.bitrateKbps != null);
   if (withData.length < 3) {
+    const last = samples.at(-1) || {};
+    const evidence = [
+      `Estado reportado del proceso: ${last.status || 'desconocido'} (FFmpeg ${last.running ? 'corriendo' : 'NO corriendo'}).`,
+      last.running
+        ? 'El proceso corre pero no publicó líneas de progreso (telemetría) en la ventana: la fuente puede no estar entregando frames todavía.'
+        : 'No hay un proceso FFmpeg activo con ese ID: revisá que el ID sea el del canal que estás emitiendo.',
+    ];
     return {
       enoughData: false,
-      summary: 'Datos insuficientes: no llegó telemetría de FFmpeg. Verificá que el canal esté realmente emitiendo durante el monitoreo.',
-      evidence: [],
+      summary: last.running
+        ? 'El proceso está activo pero no llegó telemetría de FFmpeg (sin frames en la ventana medida).'
+        : `No hay emisión activa en el ID monitoreado (estado: ${last.status || 'idle'}). Poné el ID correcto y monitoreá mientras la señal corre.`,
+      evidence,
       probabilities: null,
     };
   }
+
   const nums = (k) => withData.map((s) => s[k]).filter((v) => typeof v === 'number');
   const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
   const fps = nums('fps');
