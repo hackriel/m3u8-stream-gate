@@ -7007,6 +7007,169 @@ app.get('/api/telecable/channels', async (req, res) => {
   }
 });
 
+// ── PROBE de descubrimiento: ¿existe alguna combinación de parámetros de la
+// API Telecable (unit / version / capabilities / User-Agent) con la que el
+// canal pedido (por defecto FUTV) devuelva URL válida en vez de error.m3u8?
+// Objetivo: evitar tener que abrir/capturar el TV Box Android.
+// Uso:  curl -s "http://localhost:3000/api/telecable/probe?contentId=FUTV" | jq
+const TELECABLE_PROBE_UNITS = [
+  'mastele', 'masteletv', 'mastele_tv', 'mastelestb', 'stb', 'tv',
+  'androidtv', 'mastele_stb', 'masteleandroid',
+];
+const TELECABLE_PROBE_UAS = [
+  { label: 'ios',        ua: TELECABLE_UA },
+  { label: 'androidtv',  ua: 'TPlay_AndroidTV/4.1.0 (Linux; Android 11; STB Build/RTT; wv) okhttp/4.12.0' },
+  { label: 'android',    ua: 'TPlay_Android/4.1.0 (Linux; Android 13) okhttp/4.12.0' },
+  { label: 'exo',        ua: 'ExoPlayerLib/2.19.1 (Linux; Android 11) AndroidXMedia3' },
+];
+const TELECABLE_PROBE_CAPS = [
+  { label: 'ios-base', login: TELECABLE_CAPABILITIES, playlist: TELECABLE_PLAYLIST_CAPS },
+  { label: 'drm',      login: TELECABLE_CAPABILITIES + ',drm,widevine',
+                       playlist: TELECABLE_PLAYLIST_CAPS + ',drm,widevine,dash' },
+  { label: 'stb-min',  login: 'normalize_id,category,lowlatency',
+                       playlist: 'adaptive,fmp4,lowlatency' },
+];
+const TELECABLE_PROBE_VERSIONS = ['4.1.0', '3.0.0', '5.0.0'];
+
+app.get('/api/telecable/probe', async (req, res) => {
+  const deviceId = process.env.TELECABLE_DEVICE_ID;
+  const devicePassword = process.env.TELECABLE_DEVICE_PASSWORD;
+  if (!deviceId || !devicePassword) {
+    return res.status(500).json({ error: 'TELECABLE_DEVICE_ID/PASSWORD no configurados' });
+  }
+  const wanted = String(req.query.contentId || 'FUTV');
+  const quality = parseInt(String(req.query.quality || TELECABLE_DEFAULT_QUALITY), 10);
+  const delayMs = Math.max(300, parseInt(String(req.query.delay || '600'), 10));
+  const results = [];
+  let success = null;
+
+  const combos = [];
+  for (const unit of TELECABLE_PROBE_UNITS) {
+    for (const uaDef of TELECABLE_PROBE_UAS) {
+      for (const caps of TELECABLE_PROBE_CAPS) {
+        for (const version of TELECABLE_PROBE_VERSIONS) {
+          combos.push({ unit, uaDef, caps, version });
+        }
+      }
+    }
+  }
+  // Ordenamos para probar primero lo más prometedor (units de TV con UA androidtv).
+  combos.sort((a, b) => {
+    const score = (c) => (/tv|stb|android/i.test(c.unit) ? 0 : 1) +
+      (c.uaDef.label === 'androidtv' ? 0 : 1) + (c.caps.label === 'drm' ? 0 : 1);
+    return score(a) - score(b);
+  });
+  const limit = Math.min(combos.length, parseInt(String(req.query.limit || '60'), 10));
+
+  for (let i = 0; i < limit && !success; i++) {
+    const { unit, uaDef, caps, version } = combos[i];
+    const tag = `${unit}|${uaDef.label}|${caps.label}|v${version}`;
+    try {
+      const loginUrl =
+        `${TELECABLE_API_BASE}/api/device-login?capabilities=${encodeURIComponent(caps.login)}` +
+        `&deviceId=${encodeURIComponent(deviceId)}&lang=es&password=${encodeURIComponent(devicePassword)}` +
+        `&unit=${encodeURIComponent(unit)}&version=${encodeURIComponent(version)}`;
+      const lr = await fetch(loginUrl, { headers: { 'User-Agent': uaDef.ua, 'Accept': 'application/json' } });
+      const lj = await lr.json().catch(() => ({}));
+      if (!lr.ok || lj?.status !== 1 || !lj?.PHPSESSID) {
+        results.push({ combo: tag, stage: 'login', outcome: `login_failed status=${lj?.status} err=${lj?.error || lr.status}` });
+        await new Promise(r => setTimeout(r, delayMs));
+        continue;
+      }
+      const plUrl =
+        `${TELECABLE_API_BASE}/api/playlist?logosize=512&format=m3u8` +
+        `&capabilities=${encodeURIComponent(caps.playlist)}` +
+        `&quality=${quality}&radioFormat=m3u8&PHPSESSID=${encodeURIComponent(lj.PHPSESSID)}`;
+      const pr = await fetch(plUrl, {
+        headers: { 'User-Agent': uaDef.ua, 'Accept': 'application/json', 'Cookie': `PHPSESSID=${lj.PHPSESSID}; _nss=1` },
+      });
+      const pj = await pr.json().catch(() => ({}));
+      if (pj?.status !== 1 || !Array.isArray(pj.channels)) {
+        results.push({ combo: tag, stage: 'playlist', outcome: `playlist_invalid http=${pr.status} status=${pj?.status}` });
+        await new Promise(r => setTimeout(r, delayMs));
+        continue;
+      }
+      const ch = pj.channels.find(c => c.id === wanted)
+        || pj.channels.find(c => new RegExp(`^${wanted}$`, 'i').test(String(c.name || c.title || '')));
+      if (!ch) {
+        results.push({ combo: tag, stage: 'match', outcome: 'channel_absent', total_channels: pj.channels.length });
+      } else if (!ch.url) {
+        results.push({ combo: tag, stage: 'match', outcome: 'channel_sin_url', total_channels: pj.channels.length });
+      } else if (/\/error\/.+\/error\.m3u8/i.test(ch.url)) {
+        const reason = (ch.url.match(/\/error\/[^/]+\/([^/]+)\/error\.m3u8/i) || [])[1] || 'unknown';
+        results.push({ combo: tag, stage: 'match', outcome: `blocked:${reason}`, total_channels: pj.channels.length });
+      } else {
+        // Verificación real: el manifiesto debe responder 200 y ser HLS.
+        let verify = 'no_check';
+        try {
+          const vr = await fetch(ch.url, { headers: { 'User-Agent': uaDef.ua } });
+          const txt = vr.ok ? (await vr.text()).slice(0, 200) : '';
+          verify = vr.ok && txt.trimStart().startsWith('#EXTM3U') ? 'HLS_200' : `http_${vr.status}`;
+        } catch (e) { verify = `verify_err:${e.message}`; }
+        const entry = { combo: tag, stage: 'match', outcome: 'OK', verify, url: ch.url, total_channels: pj.channels.length };
+        results.push(entry);
+        if (verify === 'HLS_200') success = entry;
+      }
+    } catch (e) {
+      results.push({ combo: tag, stage: 'exception', outcome: e.message });
+    }
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+
+  res.json({
+    ok: true,
+    contentId: wanted,
+    probed: results.length,
+    success,
+    blocked_reasons: [...new Set(results.filter(r => /^blocked:/.test(r.outcome)).map(r => r.outcome))],
+    results,
+  });
+});
+
+// Dump completo de la playlist tal cual la devuelve Telecable con un `unit`
+// arbitrario — sirve para ver si el TV Box tiene un lineup distinto.
+// Uso: curl -s "http://localhost:3000/api/telecable/raw-playlist?unit=stb" | jq '.channels[] | {id,name}'
+app.get('/api/telecable/raw-playlist', async (req, res) => {
+  const deviceId = process.env.TELECABLE_DEVICE_ID;
+  const devicePassword = process.env.TELECABLE_DEVICE_PASSWORD;
+  if (!deviceId || !devicePassword) {
+    return res.status(500).json({ error: 'TELECABLE_DEVICE_ID/PASSWORD no configurados' });
+  }
+  const unit = String(req.query.unit || 'mastele');
+  const version = String(req.query.version || '4.1.0');
+  const ua = String(req.query.ua || TELECABLE_UA);
+  try {
+    const loginUrl =
+      `${TELECABLE_API_BASE}/api/device-login?capabilities=${encodeURIComponent(TELECABLE_CAPABILITIES)}` +
+      `&deviceId=${encodeURIComponent(deviceId)}&lang=es&password=${encodeURIComponent(devicePassword)}` +
+      `&unit=${encodeURIComponent(unit)}&version=${encodeURIComponent(version)}`;
+    const lr = await fetch(loginUrl, { headers: { 'User-Agent': ua, 'Accept': 'application/json' } });
+    const lj = await lr.json().catch(() => ({}));
+    if (lj?.status !== 1 || !lj?.PHPSESSID) {
+      return res.status(502).json({ error: `login_failed status=${lj?.status} err=${lj?.error || lr.status}` });
+    }
+    const plUrl =
+      `${TELECABLE_API_BASE}/api/playlist?logosize=512&format=m3u8` +
+      `&capabilities=${encodeURIComponent(TELECABLE_PLAYLIST_CAPS)}` +
+      `&quality=${TELECABLE_DEFAULT_QUALITY}&radioFormat=m3u8&PHPSESSID=${encodeURIComponent(lj.PHPSESSID)}`;
+    const pr = await fetch(plUrl, {
+      headers: { 'User-Agent': ua, 'Accept': 'application/json', 'Cookie': `PHPSESSID=${lj.PHPSESSID}; _nss=1` },
+    });
+    const pj = await pr.json().catch(() => ({}));
+    res.json({
+      ok: true, unit, version,
+      total: Array.isArray(pj?.channels) ? pj.channels.length : 0,
+      channels: (pj?.channels || []).map(c => ({
+        id: c.id, name: c.name || c.title || null, quality: c.quality || null,
+        blocked: /\/error\/.+\/error\.m3u8/i.test(c.url || '') || null,
+      })),
+    });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+
 // ── ALIASES legacy (FOX URL pid 25) ── mantenidos para no romper clientes viejos.
 app.get('/api/fox/source-mode', (req, res) => res.json(telecableSourceModePayload('25')));
 
