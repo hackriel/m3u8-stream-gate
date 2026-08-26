@@ -62,6 +62,7 @@ type Card = {
   fps: number | null;
   drop: number | null;
   dup: number | null;
+  viewers: number | null;
 };
 
 const fmt = (total: number) => {
