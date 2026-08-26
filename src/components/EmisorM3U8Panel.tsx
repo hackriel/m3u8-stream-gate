@@ -354,6 +354,27 @@ export default function EmisorM3U8Panel() {
   // evitar falsos positivos por jitter leve del CDN. Se limpia solo al bajar.
   const healthRef = useRef<Record<string, { lastDrop: number; lastDup: number; gapTimes: number[] }>>({});
   const [healthMap, setHealthMap] = useState<Record<string, { unstable: boolean; gaps60s: number }>>({});
+  // Visores en vivo por proceso (clientes únicos consultando la URL HLS)
+  const [viewersMap, setViewersMap] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const resp = await fetch('/api/viewers');
+        if (!resp.ok) return;
+        const ct = resp.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) return;
+        const data = await resp.json();
+        if (alive && data?.by_pid) setViewersMap(data.by_pid as Record<string, number>);
+      } catch { /* /api no disponible fuera del VPS */ }
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+
 
   const reconcileWithServerStatus = useCallback(async () => {
     try {
