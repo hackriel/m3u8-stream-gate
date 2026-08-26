@@ -89,6 +89,7 @@ export default function Uptime() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [stats, setStats] = useState<Record<string, LiveStats>>({});
+  const [viewers, setViewers] = useState<Record<string, number>>({});
   const [now, setNow] = useState(Date.now());
   const [dims, setDims] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [page, setPage] = useState(0);
