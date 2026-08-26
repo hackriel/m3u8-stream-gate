@@ -319,6 +319,7 @@ app.use('/live', (req, res, next) => {
 // ÚNICAMENTE para Canal 6 (ID 15). Los demás canales siguen como HLS normal.
 // XUI apunta a http://host:3001/canal6.ts → remuxea /live/Canal6/playlist.m3u8 a MPEG-TS continuo.
 app.get('/canal6.ts', (req, res) => {
+  trackViewer('Canal6', req);
   const playlist = path.join(HLS_OUTPUT_DIR, 'Canal6', 'playlist.m3u8');
   if (!fs.existsSync(playlist)) {
     return res.status(404).type('text/plain').send('Canal 6 no está activo');
