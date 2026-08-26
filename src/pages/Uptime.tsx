@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Eye } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 /** Canales ocultos en el dashboard (no tiene sentido mostrarlos aquí tampoco) */
@@ -62,6 +63,7 @@ type Card = {
   fps: number | null;
   drop: number | null;
   dup: number | null;
+  viewers: number | null;
 };
 
 const fmt = (total: number) => {
@@ -88,6 +90,7 @@ export default function Uptime() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [stats, setStats] = useState<Record<string, LiveStats>>({});
+  const [viewers, setViewers] = useState<Record<string, number>>({});
   const [now, setNow] = useState(Date.now());
   const [dims, setDims] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [page, setPage] = useState(0);
@@ -131,6 +134,25 @@ export default function Uptime() {
     return () => { alive = false; clearInterval(t); };
   }, []);
 
+  // Visores en vivo por canal (VPS: /api/viewers)
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const resp = await fetch("/api/viewers");
+        if (!resp.ok) return;
+        const ct = resp.headers.get("content-type") || "";
+        if (!ct.includes("application/json")) return;
+        const data = await resp.json();
+        if (alive && data?.by_pid) setViewers(data.by_pid as Record<string, number>);
+      } catch { /* /api no disponible fuera del VPS */ }
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+
   // Reloj
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -165,11 +187,12 @@ export default function Uptime() {
           fps: st?.fps ?? null,
           drop: st?.drop ?? null,
           dup: st?.dup ?? null,
+          viewers: viewers[String(r.id)] ?? null,
         };
       })
       .filter((c) => c.live)
       .sort((a, b) => b.seconds - a.seconds);
-  }, [rows, now, stats]);
+  }, [rows, now, stats, viewers]);
 
   const slots = forced > 0 ? Math.min(forced, 8) : autoSlots(dims.w, dims.h);
   const pages = Math.max(1, Math.ceil(cards.length / slots));
@@ -234,6 +257,14 @@ export default function Uptime() {
                   className="absolute inset-0 opacity-[0.10]"
                   style={{ background: `radial-gradient(circle at 50% 30%, ${c.color}, transparent 70%)` }}
                 />
+                <div
+                  className="absolute top-[1.2vmin] right-[1.4vmin] flex items-center gap-[0.8vmin] rounded-full border px-[1.2vmin] py-[0.4vmin] font-mono tabular-nums"
+                  style={{ borderColor: `${c.color}55`, color: c.color, fontSize: big ? "2.4vmin" : "1.8vmin" }}
+                  title="Visores consultando la URL ahora"
+                >
+                  <Eye style={{ width: big ? "2.6vmin" : "2vmin", height: big ? "2.6vmin" : "2vmin" }} />
+                  <span>{c.viewers == null ? "—" : c.viewers}</span>
+                </div>
                 <div className="relative flex items-center gap-[1.2vmin] mb-[1vmin]">
                   <span
                     className="rounded-full animate-pulse"

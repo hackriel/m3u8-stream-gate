@@ -252,12 +252,54 @@ function clearHlsSlugForPid(pid, logTag = null) {
   }
   return false;
 }
+// ───────────────────────────────────────────────────────────────────────
+// CONTADOR DE VISORES EN VIVO
+// Cada request a /live/<slug>/... registra (slug, ip+user-agent) con timestamp.
+// Un "visor" = cliente único visto en los últimos VIEWER_TTL_MS.
+// ───────────────────────────────────────────────────────────────────────
+const VIEWER_TTL_MS = Number(process.env.VIEWER_TTL_MS || 45000);
+const hlsViewers = new Map(); // slug -> Map(clientKey -> lastSeenMs)
+
+function trackViewer(slug, req) {
+  if (!slug) return;
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.socket?.remoteAddress || 'unknown';
+  const key = `${ip}|${(req.headers['user-agent'] || '').slice(0, 60)}`;
+  let m = hlsViewers.get(slug);
+  if (!m) { m = new Map(); hlsViewers.set(slug, m); }
+  m.set(key, Date.now());
+}
+
+function viewerCounts() {
+  const cutoff = Date.now() - VIEWER_TTL_MS;
+  const out = {};
+  for (const [slug, m] of hlsViewers.entries()) {
+    for (const [k, ts] of m.entries()) if (ts < cutoff) m.delete(k);
+    if (m.size === 0) { hlsViewers.delete(slug); continue; }
+    out[slug] = m.size;
+  }
+  return out;
+}
+
+app.get('/api/viewers', (req, res) => {
+  const bySlug = viewerCounts();
+  const byPid = {};
+  for (const [pid, slug] of Object.entries(HLS_SLUG_MAP || {})) {
+    byPid[pid] = bySlug[slug] || 0;
+  }
+  const total = Object.values(bySlug).reduce((a, b) => a + b, 0);
+  res.json({ success: true, ttl_ms: VIEWER_TTL_MS, by_slug: bySlug, by_pid: byPid, total });
+});
+
 // Servir segmentos HLS con headers correctos para XUI/IPTV
 app.use('/live', (req, res, next) => {
   // CORS permisivo para reproductores IPTV
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
+  // Contador de visores (por slug = primer segmento de la ruta)
+  const slug = req.path.split('/').filter(Boolean)[0];
+  if (slug && (req.path.endsWith('.m3u8') || req.path.endsWith('.ts'))) trackViewer(slug, req);
   // Cache headers para HLS: segmentos .ts se cachean, playlist .m3u8 no
   if (req.path.endsWith('.m3u8')) {
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -272,10 +314,12 @@ app.use('/live', (req, res, next) => {
 }, express.static(HLS_OUTPUT_DIR));
 
 
+
 // ===== CANAL 6 MPEG-TS PASSTHROUGH =====
 // ÚNICAMENTE para Canal 6 (ID 15). Los demás canales siguen como HLS normal.
 // XUI apunta a http://host:3001/canal6.ts → remuxea /live/Canal6/playlist.m3u8 a MPEG-TS continuo.
 app.get('/canal6.ts', (req, res) => {
+  trackViewer('Canal6', req);
   const playlist = path.join(HLS_OUTPUT_DIR, 'Canal6', 'playlist.m3u8');
   if (!fs.existsSync(playlist)) {
     return res.status(404).type('text/plain').send('Canal 6 no está activo');
