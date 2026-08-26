@@ -3477,6 +3477,13 @@ export default function EmisorM3U8Panel() {
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
                               <span
+                                title="Visores únicos consultando la URL ahora (últimos 45s)"
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-sky-500/15 text-sky-300 border-sky-500/40 tabular-nums"
+                              >
+                                <Eye className="h-3 w-3" />
+                                {viewersMap[i.toString()] ?? '—'}
+                              </span>
+                              <span
                                 title={
                                   unstable
                                     ? `Inestable — ${gaps60s} gap${gaps60s === 1 ? '' : 's'} (drop/dup frames) en los últimos 60s`
