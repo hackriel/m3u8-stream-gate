@@ -133,6 +133,25 @@ export default function Uptime() {
     return () => { alive = false; clearInterval(t); };
   }, []);
 
+  // Visores en vivo por canal (VPS: /api/viewers)
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const resp = await fetch("/api/viewers");
+        if (!resp.ok) return;
+        const ct = resp.headers.get("content-type") || "";
+        if (!ct.includes("application/json")) return;
+        const data = await resp.json();
+        if (alive && data?.by_pid) setViewers(data.by_pid as Record<string, number>);
+      } catch { /* /api no disponible fuera del VPS */ }
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+
   // Reloj
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
