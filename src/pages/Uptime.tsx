@@ -256,6 +256,14 @@ export default function Uptime() {
                   className="absolute inset-0 opacity-[0.10]"
                   style={{ background: `radial-gradient(circle at 50% 30%, ${c.color}, transparent 70%)` }}
                 />
+                <div
+                  className="absolute top-[1.2vmin] right-[1.4vmin] flex items-center gap-[0.8vmin] rounded-full border px-[1.2vmin] py-[0.4vmin] font-mono tabular-nums"
+                  style={{ borderColor: `${c.color}55`, color: c.color, fontSize: big ? "2.4vmin" : "1.8vmin" }}
+                  title="Visores consultando la URL ahora"
+                >
+                  <Eye style={{ width: big ? "2.6vmin" : "2vmin", height: big ? "2.6vmin" : "2vmin" }} />
+                  <span>{c.viewers == null ? "—" : c.viewers}</span>
+                </div>
                 <div className="relative flex items-center gap-[1.2vmin] mb-[1vmin]">
                   <span
                     className="rounded-full animate-pulse"
