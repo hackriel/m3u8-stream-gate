@@ -186,11 +186,12 @@ export default function Uptime() {
           fps: st?.fps ?? null,
           drop: st?.drop ?? null,
           dup: st?.dup ?? null,
+          viewers: viewers[String(r.id)] ?? null,
         };
       })
       .filter((c) => c.live)
       .sort((a, b) => b.seconds - a.seconds);
-  }, [rows, now, stats]);
+  }, [rows, now, stats, viewers]);
 
   const slots = forced > 0 ? Math.min(forced, 8) : autoSlots(dims.w, dims.h);
   const pages = Math.max(1, Math.ceil(cards.length / slots));
