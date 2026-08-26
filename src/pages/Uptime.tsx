@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Eye } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 /** Canales ocultos en el dashboard (no tiene sentido mostrarlos aquí tampoco) */
