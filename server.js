@@ -258,27 +258,81 @@ function clearHlsSlugForPid(pid, logTag = null) {
 // Un "visor" = cliente único visto en los últimos VIEWER_TTL_MS.
 // ───────────────────────────────────────────────────────────────────────
 const VIEWER_TTL_MS = Number(process.env.VIEWER_TTL_MS || 45000);
-const hlsViewers = new Map(); // slug -> Map(clientKey -> lastSeenMs)
+const hlsViewers = new Map(); // slug -> Map(clientKey -> {ip, ua, firstSeen, lastSeen, hits, lastPath})
 
 function trackViewer(slug, req) {
   if (!slug) return;
-  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+  let ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
     || req.socket?.remoteAddress || 'unknown';
-  const key = `${ip}|${(req.headers['user-agent'] || '').slice(0, 60)}`;
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+  const ua = (req.headers['user-agent'] || '').slice(0, 160);
+  const key = `${ip}|${ua.slice(0, 60)}`;
   let m = hlsViewers.get(slug);
   if (!m) { m = new Map(); hlsViewers.set(slug, m); }
-  m.set(key, Date.now());
+  const now = Date.now();
+  const prev = m.get(key);
+  m.set(key, {
+    ip,
+    ua,
+    firstSeen: prev?.firstSeen || now,
+    lastSeen: now,
+    hits: (prev?.hits || 0) + 1,
+    lastPath: req.originalUrl || req.path,
+  });
+}
+
+function pruneViewers() {
+  const cutoff = Date.now() - VIEWER_TTL_MS;
+  for (const [slug, m] of hlsViewers.entries()) {
+    for (const [k, v] of m.entries()) if ((v?.lastSeen || 0) < cutoff) m.delete(k);
+    if (m.size === 0) hlsViewers.delete(slug);
+  }
 }
 
 function viewerCounts() {
-  const cutoff = Date.now() - VIEWER_TTL_MS;
+  pruneViewers();
   const out = {};
-  for (const [slug, m] of hlsViewers.entries()) {
-    for (const [k, ts] of m.entries()) if (ts < cutoff) m.delete(k);
-    if (m.size === 0) { hlsViewers.delete(slug); continue; }
-    out[slug] = m.size;
-  }
+  for (const [slug, m] of hlsViewers.entries()) out[slug] = m.size;
   return out;
+}
+
+// Cache de geolocalización/ASN por IP (24h) usando ip-api.com (gratis, sin key)
+const ipInfoCache = new Map(); // ip -> { data, ts }
+const IP_INFO_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function lookupIpInfo(ip) {
+  if (!ip || ip === 'unknown') return null;
+  const cached = ipInfoCache.get(ip);
+  if (cached && Date.now() - cached.ts < IP_INFO_TTL_MS) return cached.data;
+  // IPs privadas / locales
+  if (/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1|fe80:)/.test(ip)) {
+    const data = { ip, private: true, org: 'Red local / privada', country: '—', city: '—' };
+    ipInfoCache.set(ip, { data, ts: Date.now() });
+    return data;
+  }
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4000);
+    const r = await fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,regionName,city,isp,org,as,asname,proxy,hosting,mobile,query`, { signal: ctrl.signal });
+    clearTimeout(t);
+    const j = await r.json();
+    const data = j && j.status === 'success' ? {
+      ip,
+      country: j.country || '—',
+      region: j.regionName || '',
+      city: j.city || '—',
+      isp: j.isp || '',
+      org: j.org || j.isp || j.asname || '—',
+      as: j.as || '',
+      proxy: !!j.proxy,
+      hosting: !!j.hosting,
+      mobile: !!j.mobile,
+    } : { ip, org: '—', country: '—', city: '—' };
+    ipInfoCache.set(ip, { data, ts: Date.now() });
+    return data;
+  } catch (_) {
+    return { ip, org: '—', country: '—', city: '—' };
+  }
 }
 
 app.get('/api/viewers', (req, res) => {
@@ -290,6 +344,29 @@ app.get('/api/viewers', (req, res) => {
   const total = Object.values(bySlug).reduce((a, b) => a + b, 0);
   res.json({ success: true, ttl_ms: VIEWER_TTL_MS, by_slug: bySlug, by_pid: byPid, total });
 });
+
+// Detalle de visores: IPs, user-agent, geolocalización/ISP y tiempo conectado.
+// GET /api/viewers/details?slug=Disney7  ó  ?pid=0
+app.get('/api/viewers/details', async (req, res) => {
+  pruneViewers();
+  const pid = req.query.pid != null ? String(req.query.pid) : null;
+  const slug = req.query.slug ? String(req.query.slug) : (pid ? (HLS_SLUG_MAP || {})[pid] : null);
+  if (!slug) return res.json({ success: false, error: 'slug o pid requerido', viewers: [] });
+  const m = hlsViewers.get(slug) || new Map();
+  const now = Date.now();
+  const list = Array.from(m.values()).sort((a, b) => b.lastSeen - a.lastSeen).slice(0, 100);
+  const viewers = await Promise.all(list.map(async (v) => ({
+    ip: v.ip,
+    user_agent: v.ua,
+    hits: v.hits,
+    connected_ms: now - v.firstSeen,
+    last_seen_ms: now - v.lastSeen,
+    last_path: v.lastPath,
+    info: await lookupIpInfo(v.ip),
+  })));
+  res.json({ success: true, slug, count: viewers.length, ttl_ms: VIEWER_TTL_MS, viewers });
+});
+
 
 // Servir segmentos HLS con headers correctos para XUI/IPTV
 app.use('/live', (req, res, next) => {

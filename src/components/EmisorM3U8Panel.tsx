@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
+import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
@@ -357,6 +358,8 @@ export default function EmisorM3U8Panel() {
   const [healthMap, setHealthMap] = useState<Record<string, { unstable: boolean; gaps60s: number }>>({});
   // Visores en vivo por proceso (clientes únicos consultando la URL HLS)
   const [viewersMap, setViewersMap] = useState<Record<string, number>>({});
+  const [viewerDialog, setViewerDialog] = useState<{ pid: number; name: string } | null>(null);
+
 
   useEffect(() => {
     let alive = true;
@@ -3477,13 +3480,16 @@ export default function EmisorM3U8Panel() {
                               </h3>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <span
-                                title="Visores únicos consultando la URL ahora (últimos 45s)"
-                                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-sky-500/15 text-sky-300 border-sky-500/40 tabular-nums"
+                              <button
+                                type="button"
+                                onClick={() => setViewerDialog({ pid: i, name: color.name })}
+                                title="Ver IPs que están consultando la URL ahora (últimos 45s)"
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-sky-500/15 text-sky-300 border-sky-500/40 tabular-nums hover:bg-sky-500/30 transition-colors cursor-pointer"
                               >
                                 <Eye className="h-3 w-3" />
                                 {viewersMap[i.toString()] ?? '—'}
-                              </span>
+                              </button>
+
                               <span
                                 title={
                                   unstable
@@ -3788,6 +3794,14 @@ export default function EmisorM3U8Panel() {
           )}
         </section>
       </div>
+      {viewerDialog && (
+        <ViewerDetailsDialog
+          open={!!viewerDialog}
+          onOpenChange={(o) => { if (!o) setViewerDialog(null); }}
+          pid={viewerDialog.pid}
+          channelName={viewerDialog.name}
+        />
+      )}
     </div>
   );
 }
