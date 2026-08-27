@@ -9,3 +9,9 @@ type: feature
 - `GET /api/viewers/details?pid=<id>` (o `?slug=`) → lista de visores con IP, user-agent, hits, tiempo conectado y `info` geo/ASN (ip-api.com, cache 24h, flags proxy/hosting/mobile).
 - El ojo es un botón: abre `ViewerDetailsDialog` (compartido por `/uptime` y `EmisorM3U8Panel`), refresca cada 10s e infiere el cliente (FFmpeg/XUI = posible re-stream, VLC, ExoPlayer, navegador, etc.).
 - Fuera del VPS muestra `—` y el diálogo avisa que el detalle solo existe en el servidor.
+
+## Baneo de visores (por IP)
+- Modal con tabs **Principal** (visores activos, botón "Banear") y **Baneados** (botón "Quitar bloqueo").
+- Persistencia en `viewer-bans.json` del VPS: `{ "<slug>": { "<ip>": {ip, ua, note, created_at} } }`.
+- Endpoints: `GET /api/viewers/bans?pid=`, `POST /api/viewers/ban`, `POST /api/viewers/unban`.
+- Bloqueo aplicado con 403 en el middleware `/live/<slug>/*` y en `/canal6.ts`. El baneo es por slug (canal), no global.
