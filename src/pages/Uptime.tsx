@@ -331,6 +331,14 @@ export default function Uptime() {
           </div>
         )}
       </div>
+      {viewerDialog && (
+        <ViewerDetailsDialog
+          open={!!viewerDialog}
+          onOpenChange={(o) => { if (!o) setViewerDialog(null); }}
+          pid={viewerDialog.pid}
+          channelName={viewerDialog.name}
+        />
+      )}
     </main>
   );
 }
