@@ -367,6 +367,85 @@ app.get('/api/viewers/details', async (req, res) => {
   res.json({ success: true, slug, count: viewers.length, ttl_ms: VIEWER_TTL_MS, viewers });
 });
 
+// ───────────────────────────────────────────────────────────────────────
+// BANEO DE VISORES POR IP (persistente en viewer-bans.json)
+// Estructura: { "<slug>": { "<ip>": { ip, note, ua, created_at } } }
+// El baneo se aplica por slug (cada ojito = su canal) y bloquea /live/<slug>/*
+// y /canal6.ts con 403 hasta que se elimine de la lista.
+// ───────────────────────────────────────────────────────────────────────
+const VIEWER_BANS_FILE = path.join(__dirname, 'viewer-bans.json');
+let viewerBans = {};
+try {
+  if (fs.existsSync(VIEWER_BANS_FILE)) {
+    viewerBans = JSON.parse(fs.readFileSync(VIEWER_BANS_FILE, 'utf8')) || {};
+  }
+} catch (e) {
+  console.warn('[bans] No se pudo leer viewer-bans.json:', e.message);
+  viewerBans = {};
+}
+function persistViewerBans() {
+  try { fs.writeFileSync(VIEWER_BANS_FILE, JSON.stringify(viewerBans, null, 2)); } catch (_) {}
+}
+function normalizeIp(raw) {
+  let ip = String(raw || '').trim();
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+  return ip;
+}
+function reqIp(req) {
+  return normalizeIp((req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || '');
+}
+function isBanned(slug, ip) {
+  if (!slug || !ip) return false;
+  return !!(viewerBans[slug] && viewerBans[slug][ip]);
+}
+function resolveSlug(req) {
+  const pid = req.query.pid != null ? String(req.query.pid) : (req.body?.pid != null ? String(req.body.pid) : null);
+  const slugQ = req.query.slug || req.body?.slug;
+  return slugQ ? String(slugQ) : (pid ? (HLS_SLUG_MAP || {})[pid] : null);
+}
+
+// Lista de baneados de un canal
+app.get('/api/viewers/bans', (req, res) => {
+  const slug = resolveSlug(req);
+  if (!slug) return res.json({ success: false, error: 'slug o pid requerido', bans: [] });
+  const bans = Object.values(viewerBans[slug] || {});
+  res.json({ success: true, slug, bans });
+});
+
+// Banear una IP en un canal
+app.post('/api/viewers/ban', (req, res) => {
+  const slug = resolveSlug(req);
+  const ip = normalizeIp(req.body?.ip);
+  if (!slug || !ip) return res.json({ success: false, error: 'slug/pid e ip requeridos' });
+  if (!viewerBans[slug]) viewerBans[slug] = {};
+  viewerBans[slug][ip] = {
+    ip,
+    ua: String(req.body?.ua || '').slice(0, 160),
+    note: String(req.body?.note || '').slice(0, 200),
+    created_at: new Date().toISOString(),
+  };
+  persistViewerBans();
+  // Sacarlo de los visores activos inmediatamente
+  const m = hlsViewers.get(slug);
+  if (m) for (const [k, v] of m.entries()) if (v?.ip === ip) m.delete(k);
+  res.json({ success: true, slug, bans: Object.values(viewerBans[slug]) });
+});
+
+// Quitar el baneo
+app.post('/api/viewers/unban', (req, res) => {
+  const slug = resolveSlug(req);
+  const ip = normalizeIp(req.body?.ip);
+  if (!slug || !ip) return res.json({ success: false, error: 'slug/pid e ip requeridos' });
+  if (viewerBans[slug]) {
+    delete viewerBans[slug][ip];
+    if (Object.keys(viewerBans[slug]).length === 0) delete viewerBans[slug];
+    persistViewerBans();
+  }
+  res.json({ success: true, slug, bans: Object.values(viewerBans[slug] || {}) });
+});
+
+
+
 
 // Servir segmentos HLS con headers correctos para XUI/IPTV
 app.use('/live', (req, res, next) => {
