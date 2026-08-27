@@ -3477,13 +3477,16 @@ export default function EmisorM3U8Panel() {
                               </h3>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <span
-                                title="Visores únicos consultando la URL ahora (últimos 45s)"
-                                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-sky-500/15 text-sky-300 border-sky-500/40 tabular-nums"
+                              <button
+                                type="button"
+                                onClick={() => setViewerDialog({ pid: i, name: color.name })}
+                                title="Ver IPs que están consultando la URL ahora (últimos 45s)"
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-sky-500/15 text-sky-300 border-sky-500/40 tabular-nums hover:bg-sky-500/30 transition-colors cursor-pointer"
                               >
                                 <Eye className="h-3 w-3" />
                                 {viewersMap[i.toString()] ?? '—'}
-                              </span>
+                              </button>
+
                               <span
                                 title={
                                   unstable
