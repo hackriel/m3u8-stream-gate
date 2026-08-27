@@ -455,6 +455,9 @@ app.use('/live', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', '*');
   // Contador de visores (por slug = primer segmento de la ruta)
   const slug = req.path.split('/').filter(Boolean)[0];
+  if (slug && isBanned(slug, reqIp(req))) {
+    return res.status(403).type('text/plain').send('Forbidden');
+  }
   if (slug && (req.path.endsWith('.m3u8') || req.path.endsWith('.ts'))) trackViewer(slug, req);
   // Cache headers para HLS: segmentos .ts se cachean, playlist .m3u8 no
   if (req.path.endsWith('.m3u8')) {
