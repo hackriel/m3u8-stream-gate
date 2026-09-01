@@ -501,8 +501,8 @@ export default function EmisorM3U8Panel() {
           const profilesFromDb: Record<number, OutputProfile> = {};
           for (const row of data) {
             const raw = (row as unknown as { output_profile?: string }).output_profile;
-            if (raw === 'normal' || raw === 'balanced' || raw === 'optimized' || raw === 'passthrough') {
-              profilesFromDb[row.id] = raw;
+            if (raw && VALID_OUTPUT_PROFILES.has(raw)) {
+              profilesFromDb[row.id] = raw as OutputProfile;
             }
           }
           if (Object.keys(profilesFromDb).length > 0) {
