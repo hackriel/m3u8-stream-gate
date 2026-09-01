@@ -111,14 +111,18 @@ const FOXMAS_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9005?streamid=foxmas&la
 const FOX_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9006?streamid=fox&latency=2000000`;
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
-type OutputProfile = "passthrough" | "normal" | "balanced" | "optimized";
+type OutputProfile = "passthrough" | "highquality" | "normal" | "balanced" | "optimized";
 const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
 const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   passthrough: "Passthrough · tal cual lo manda OBS (sin re-encode)",
+  highquality: "Alta Calidad · 720p CBR 4000k + AAC 192k (faster)",
   normal: "Normal · 720p CBR 2000k + AAC 128k",
   balanced: "Balanceada · 540p CBR 1500k + AAC 128k (faster)",
   optimized: "Optimizada · 480p CBR 1200k + AAC 128k (faster)",
 };
+const VALID_OUTPUT_PROFILES = new Set<string>([
+  "passthrough", "highquality", "normal", "balanced", "optimized",
+]);
 // IDs SRT ingest: arrancan por defecto en Passthrough (sin re-encode).
 const SRT_INGEST_INDEXES = new Set<number>([16, 18, 20, 21, 22, 23]);
 // IDs HLS de baja prioridad (Canal 8 / Canal 2 Telecable): por petición del
@@ -497,8 +501,8 @@ export default function EmisorM3U8Panel() {
           const profilesFromDb: Record<number, OutputProfile> = {};
           for (const row of data) {
             const raw = (row as unknown as { output_profile?: string }).output_profile;
-            if (raw === 'normal' || raw === 'balanced' || raw === 'optimized' || raw === 'passthrough') {
-              profilesFromDb[row.id] = raw;
+            if (raw && VALID_OUTPUT_PROFILES.has(raw)) {
+              profilesFromDb[row.id] = raw as OutputProfile;
             }
           }
           if (Object.keys(profilesFromDb).length > 0) {
@@ -545,7 +549,7 @@ export default function EmisorM3U8Panel() {
             // en tiempo real (cuando se cambia desde otro dispositivo).
             const rawProfile = (row as unknown as { output_profile?: string }).output_profile;
             if (
-              (rawProfile === 'normal' || rawProfile === 'balanced' || rawProfile === 'optimized' || rawProfile === 'passthrough') &&
+              (!!rawProfile && VALID_OUTPUT_PROFILES.has(rawProfile)) &&
               row.id >= 0 && row.id < NUM_PROCESSES
             ) {
               // Si el usuario cambió el perfil localmente hace <PROFILE_WRITE_GUARD_MS,
@@ -555,7 +559,7 @@ export default function EmisorM3U8Panel() {
               const fresh = Date.now() - lastLocal < PROFILE_WRITE_GUARD_MS;
               if (!fresh) {
                 setOutputProfiles((prev) =>
-                  prev[row.id] === rawProfile ? prev : { ...prev, [row.id]: rawProfile },
+                  prev[row.id] === rawProfile ? prev : { ...prev, [row.id]: rawProfile as OutputProfile },
                 );
               }
             }
@@ -859,7 +863,7 @@ export default function EmisorM3U8Panel() {
     try {
       const parsed = JSON.parse(sessionStorage.getItem("emisor-output-profiles") || "{}");
       return Object.fromEntries(
-        Object.entries(parsed).filter(([, value]) => value === "normal" || value === "balanced" || value === "optimized" || value === "passthrough"),
+        Object.entries(parsed).filter(([, value]) => typeof value === "string" && VALID_OUTPUT_PROFILES.has(value)),
       ) as Record<number, OutputProfile>;
     } catch {
       return {};
@@ -2856,6 +2860,7 @@ export default function EmisorM3U8Panel() {
                 {PASSTHROUGH_ALLOWED_INDEXES.has(processIndex) && (
                   <option value="passthrough">{OUTPUT_PROFILE_LABELS.passthrough}</option>
                 )}
+                <option value="highquality">{OUTPUT_PROFILE_LABELS.highquality}</option>
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
                 <option value="balanced">{OUTPUT_PROFILE_LABELS.balanced}</option>
                 <option value="optimized">{OUTPUT_PROFILE_LABELS.optimized}</option>
@@ -2863,6 +2868,8 @@ export default function EmisorM3U8Panel() {
               <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                 {outputProfile === 'passthrough'
                   ? 'La señal sale del VPS EXACTAMENTE como la manda OBS (resolución/bitrate/codec). Cero re-encode, cero pérdida de calidad, CPU ~3%. Recomendado para SRT: configurá OBS en 720p · 2000-3000 kbps CBR · H264 main · keyframe 2s · AAC 128k 48 kHz.'
+                  : outputProfile === 'highquality'
+                  ? 'Máxima nitidez (720p · CBR 4000k · AAC 192k · preset faster · GOP 2s · main profile). Ideal para deportes y fuentes que llegan a 3-4 Mbps (SRT/OBS, FOX+, FOX, Teletica, Canal 6, Disney 8). Consume ~2x CPU y ~2x ancho de banda que Normal; si la fuente llega por debajo de 2 Mbps no vas a ganar detalle.'
                   : outputProfile === 'optimized'
                   ? 'Máximo ahorro de ancho de banda (480p · 1200k). Ideal para eventos masivos donde el LB suele caer. Calidad buena en celular/tablet.'
                   : outputProfile === 'balanced'
