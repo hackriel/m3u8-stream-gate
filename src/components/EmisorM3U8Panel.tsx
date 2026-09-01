@@ -549,7 +549,7 @@ export default function EmisorM3U8Panel() {
             // en tiempo real (cuando se cambia desde otro dispositivo).
             const rawProfile = (row as unknown as { output_profile?: string }).output_profile;
             if (
-              (rawProfile === 'normal' || rawProfile === 'balanced' || rawProfile === 'optimized' || rawProfile === 'passthrough') &&
+              (!!rawProfile && VALID_OUTPUT_PROFILES.has(rawProfile)) &&
               row.id >= 0 && row.id < NUM_PROCESSES
             ) {
               // Si el usuario cambió el perfil localmente hace <PROFILE_WRITE_GUARD_MS,
