@@ -5,3 +5,4 @@
 - [Diagnóstico Streaming](mem://features/streaming-diagnostics-module) — /api/diag + página /diagnostico: red, kernel, NIC, MTR vs YouTube, stress iperf3
 - [SRT Feed-Loss Guard](mem://features/srt-feed-loss-guard) — borra playlist HLS cuando el publisher SRT corta, evita loop del último fragmento en XUI
 - [Uptime Viewers](mem://features/uptime-viewers-counter) — Badge ojo+número por canal en /uptime vía /api/viewers (IP+UA únicos 45s)
+- [Alta Calidad](mem://features/output-profile-alta-calidad) — perfil 'highquality' 720p CBR 4000k + AAC 192k, disponible en todos los canales
