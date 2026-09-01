@@ -2860,6 +2860,7 @@ export default function EmisorM3U8Panel() {
                 {PASSTHROUGH_ALLOWED_INDEXES.has(processIndex) && (
                   <option value="passthrough">{OUTPUT_PROFILE_LABELS.passthrough}</option>
                 )}
+                <option value="highquality">{OUTPUT_PROFILE_LABELS.highquality}</option>
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
                 <option value="balanced">{OUTPUT_PROFILE_LABELS.balanced}</option>
                 <option value="optimized">{OUTPUT_PROFILE_LABELS.optimized}</option>
@@ -2867,6 +2868,8 @@ export default function EmisorM3U8Panel() {
               <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                 {outputProfile === 'passthrough'
                   ? 'La señal sale del VPS EXACTAMENTE como la manda OBS (resolución/bitrate/codec). Cero re-encode, cero pérdida de calidad, CPU ~3%. Recomendado para SRT: configurá OBS en 720p · 2000-3000 kbps CBR · H264 main · keyframe 2s · AAC 128k 48 kHz.'
+                  : outputProfile === 'highquality'
+                  ? 'Máxima nitidez (720p · CBR 4000k · AAC 192k · preset faster · GOP 2s · main profile). Ideal para deportes y fuentes que llegan a 3-4 Mbps (SRT/OBS, FOX+, FOX, Teletica, Canal 6, Disney 8). Consume ~2x CPU y ~2x ancho de banda que Normal; si la fuente llega por debajo de 2 Mbps no vas a ganar detalle.'
                   : outputProfile === 'optimized'
                   ? 'Máximo ahorro de ancho de banda (480p · 1200k). Ideal para eventos masivos donde el LB suele caer. Calidad buena en celular/tablet.'
                   : outputProfile === 'balanced'
