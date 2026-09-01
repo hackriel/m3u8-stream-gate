@@ -559,7 +559,7 @@ export default function EmisorM3U8Panel() {
               const fresh = Date.now() - lastLocal < PROFILE_WRITE_GUARD_MS;
               if (!fresh) {
                 setOutputProfiles((prev) =>
-                  prev[row.id] === rawProfile ? prev : { ...prev, [row.id]: rawProfile },
+                  prev[row.id] === rawProfile ? prev : { ...prev, [row.id]: rawProfile as OutputProfile },
                 );
               }
             }
