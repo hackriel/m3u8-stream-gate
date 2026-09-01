@@ -1014,6 +1014,7 @@ const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 //   - audioBitrate: 128k es el "sweet spot"; bajar a 96k apenas ahorra ancho de banda total.
 const OUTPUT_PROFILES = {
   passthrough:{ key: 'passthrough',label: 'Passthrough (sin re-encode)', width: '', videoBitrate: '', bufsize: '', audioBitrate: '', preset: '', x264Params: '', passthrough: true },
+  highquality:{ key: 'highquality',label: 'Alta Calidad', width: '720', videoBitrate: '4000k', bufsize: '8000k', audioBitrate: '192k', preset: 'faster',   x264Params: 'rc-lookahead=30:ref=3:bframes=2' },
   normal:     { key: 'normal',     label: 'Normal',     width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'veryfast', x264Params: '' },
   balanced:   { key: 'balanced',   label: 'Balanceada', width: '540', videoBitrate: '1500k', bufsize: '3000k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
   optimized:  { key: 'optimized',  label: 'Optimizada', width: '480', videoBitrate: '1200k', bufsize: '2400k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
