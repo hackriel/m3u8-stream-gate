@@ -863,7 +863,7 @@ export default function EmisorM3U8Panel() {
     try {
       const parsed = JSON.parse(sessionStorage.getItem("emisor-output-profiles") || "{}");
       return Object.fromEntries(
-        Object.entries(parsed).filter(([, value]) => value === "normal" || value === "balanced" || value === "optimized" || value === "passthrough"),
+        Object.entries(parsed).filter(([, value]) => typeof value === "string" && VALID_OUTPUT_PROFILES.has(value)),
       ) as Record<number, OutputProfile>;
     } catch {
       return {};
