@@ -111,14 +111,18 @@ const FOXMAS_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9005?streamid=foxmas&la
 const FOX_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9006?streamid=fox&latency=2000000`;
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
-type OutputProfile = "passthrough" | "normal" | "balanced" | "optimized";
+type OutputProfile = "passthrough" | "highquality" | "normal" | "balanced" | "optimized";
 const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
 const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   passthrough: "Passthrough · tal cual lo manda OBS (sin re-encode)",
+  highquality: "Alta Calidad · 720p CBR 4000k + AAC 192k (faster)",
   normal: "Normal · 720p CBR 2000k + AAC 128k",
   balanced: "Balanceada · 540p CBR 1500k + AAC 128k (faster)",
   optimized: "Optimizada · 480p CBR 1200k + AAC 128k (faster)",
 };
+const VALID_OUTPUT_PROFILES = new Set<string>([
+  "passthrough", "highquality", "normal", "balanced", "optimized",
+]);
 // IDs SRT ingest: arrancan por defecto en Passthrough (sin re-encode).
 const SRT_INGEST_INDEXES = new Set<number>([16, 18, 20, 21, 22, 23]);
 // IDs HLS de baja prioridad (Canal 8 / Canal 2 Telecable): por petición del
