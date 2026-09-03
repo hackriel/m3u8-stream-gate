@@ -7248,6 +7248,50 @@ app.post('/api/telecable/:pid/refresh', async (req, res) => {
   }
 });
 
+// Diagnóstico sin efectos persistentes: valida login, playlist, resolución del
+// canal y que el HLS firmado responda HTTP 200. Pensado para update.sh/VPS.
+app.get('/api/telecable/:pid/validate', async (req, res) => {
+  const pid = String(req.params.pid);
+  if (!TELECABLE_PROCESSES.has(pid)) {
+    return res.status(404).json({ ok: false, error: `pid ${pid} no soporta Telecable` });
+  }
+
+  try {
+    const overrideCid = req.query.content_id ? String(req.query.content_id) : null;
+    const st = await telecableLoginAndResolve(pid, overrideCid);
+    const streamResp = await fetch(st.url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': TELECABLE_UA,
+        'Accept': 'application/vnd.apple.mpegurl, application/x-mpegURL, */*',
+        'Cookie': `PHPSESSID=${st.phpsessid}; _nss=1`,
+      },
+      dispatcher: teleDispatcher,
+      signal: AbortSignal.timeout(15_000),
+    });
+    // Consumir/cancelar el body evita dejar sockets abiertos sin descargar el stream.
+    await streamResp.body?.cancel();
+
+    if (streamResp.status !== 200) {
+      return res.status(502).json({
+        ok: false,
+        channel: st.contentId,
+        source_http: streamResp.status,
+        error: `stream_http_${streamResp.status}`,
+      });
+    }
+
+    res.json({
+      ok: true,
+      channel: st.contentId,
+      quality: st.quality,
+      source_http: 200,
+    });
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message });
+  }
+});
+
 // Discovery: lista TODOS los canales que devuelve la playlist Telecable.
 // Útil para ajustar TELECABLE_CHANNEL_MATCHERS si los content-id reales no matchean.
 app.get('/api/telecable/channels', async (req, res) => {
