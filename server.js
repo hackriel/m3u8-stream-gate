@@ -7266,7 +7266,6 @@ app.get('/api/telecable/:pid/validate', async (req, res) => {
         'Accept': 'application/vnd.apple.mpegurl, application/x-mpegURL, */*',
         'Cookie': `PHPSESSID=${st.phpsessid}; _nss=1`,
       },
-      dispatcher: teleDispatcher,
       signal: AbortSignal.timeout(15_000),
     });
     // Consumir/cancelar el body evita dejar sockets abiertos sin descargar el stream.

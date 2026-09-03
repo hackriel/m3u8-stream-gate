@@ -35,11 +35,14 @@ if $CONFIGURE_TELECABLE; then
 
   install -d -m 0755 "/etc/systemd/system/${SERVICE_NAME}.service.d"
   umask 077
-  cat > "/etc/systemd/system/${SERVICE_NAME}.service.d/20-telecable.conf" <<EOF
+  # El prefijo zz hace que estas credenciales prevalezcan sobre override.conf
+  # u otros drop-ins antiguos que systemd procesa en orden lexicográfico.
+  cat > "/etc/systemd/system/${SERVICE_NAME}.service.d/zz-telecable.conf" <<EOF
 [Service]
 Environment="TELECABLE_DEVICE_ID=${TELECABLE_DEVICE_ID}"
 Environment="TELECABLE_DEVICE_PASSWORD=${TELECABLE_DEVICE_PASSWORD}"
 EOF
+  rm -f "/etc/systemd/system/${SERVICE_NAME}.service.d/20-telecable.conf"
   unset TELECABLE_DEVICE_ID TELECABLE_DEVICE_PASSWORD
   ok "Credenciales guardadas en systemd"
 fi
