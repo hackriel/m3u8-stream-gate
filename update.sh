@@ -79,7 +79,7 @@ systemctl restart "$SERVICE_NAME"
 echo "⏳ Esperando que el servicio responda..."
 READY=false
 for _ in $(seq 1 30); do
-  if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/processes" >/dev/null 2>&1; then
+  if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
     READY=true
     break
   fi
