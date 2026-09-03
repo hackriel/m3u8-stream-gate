@@ -18,11 +18,12 @@ La URL devuelta por `/api/playlist` lleva `signature-ip` atado a la IP que hizo 
 ## Credenciales
 
 Secrets de Lovable Cloud (también disponibles como env vars en el VPS):
-- `TELECABLE_DEVICE_ID` (deviceId permanente del pairing iOS, actual `530512195`)
-- `TELECABLE_DEVICE_PASSWORD` (devicePassword permanente, actual `f8aj1apw0gebpzu7qh45`)
+- `TELECABLE_DEVICE_ID` (deviceId permanente del pairing iOS, actualizado tras cambio de aparato)
+- `TELECABLE_DEVICE_PASSWORD` (password permanente correspondiente al pairing actual)
 
 > Al cambiar el aparato físico de Telecable el pairing viejo se revoca (`status=0 error=bad login`).
 > Recapturar `deviceId`/`password` desde `GET /api/pairing-state` y actualizar secret + env del VPS.
+> Login validado el 2026-09-03 con `unit=mastele`, `version=4.1.0`: `status=1`. El `PHPSESSID` devuelto es temporal y no se persiste.
 
 Username/password del usuario (`3737604` / `3737604`) NO se usa — el pairing ya consumió esa credencial.
 
