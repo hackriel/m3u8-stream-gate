@@ -2478,7 +2478,7 @@ setInterval(() => {
       // SOURCE OFF = SOURCE COMPLETELY DEAD: matamos el proceso para destruir
       // todo el estado de la sesión (socket SRT, cola MPEG-TS, timestamps,
       // numeración de segmentos). El recovery crea una sesión nueva desde cero.
-      if (SRT_FEED_LOSS_KILL && !isManualStop(pid)) {
+      if (SRT_FEED_LOSS_KILL && !isProcessManuallyStopped(pid)) {
         const child = processData.process;
         const childPid = child.pid;
         try {
