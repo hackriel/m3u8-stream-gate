@@ -4598,6 +4598,10 @@ app.post('/api/emit', async (req, res) => {
       }
     }
 
+    sendLog(process_id, 'info', isNaturalCadence
+      ? `\u{1F3AC} Cadencia NATURAL (${outputProfile.label}): salida sigue el ritmo de la fuente (sin -r/CFR), GOP ${gopSize}`
+      : `\u{1F3AC} Cadencia FORZADA: ${outputFps}fps CFR (GOP ${gopSize})`);
+
     // Saneo de timestamps para evitar audio repetido / saltos hacia atrás
     // y reloads del player por EXT-X-DISCONTINUITY.
     // Canal 6 URL (15) requiere el mismo saneo que los scrapeados, pero con salida 30fps.
