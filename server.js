@@ -2423,176 +2423,6 @@ setInterval(() => {
   }
 }, WATCHDOG_CHECK_INTERVAL);
 
-// ───────────────────────────────────────────────────────────────────────
-// TDMAX SOURCE HEALTH PROBE (vigilancia proactiva de la fuente scrapeada)
-//
-// El watchdog solo actúa cuando FFmpeg YA dejó de producir frames (75s en
-// canales scrapeados). En un evento importante eso son 75s de aire perdido.
-// Este probe mira la FUENTE directamente (la misma sub-playlist HLS que lee
-// FFmpeg, con los mismos headers) cada SOURCE_PROBE_INTERVAL_MS y detecta
-// el problema ANTES de que se corte la salida:
-//
-//   • HTTP 403/404/410  → token wmsAuthSign vencido / sesión muerta en TDMax
-//     → recovery inmediato (scrape fresco), sin esperar al watchdog.
-//   • MEDIA-SEQUENCE congelado > SOURCE_PROBE_FREEZE_MS → el origen de TDMax
-//     dejó de publicar segmentos nuevos (problema en SUS servidores).
-//     → recovery: normalmente un re-scrape cae en otro edge del CDN.
-//   • Errores de red aislados → solo se avisa (no se actúa) para no matar
-//     una emisión sana por un timeout puntual.
-//
-// Es READ-ONLY: un GET al playlist (unos pocos KB). No hace login extra ni
-// toca la sesión de TDMax, así que no puede invalidar el stream en curso.
-// Desactivable con SOURCE_PROBE=0.
-// ───────────────────────────────────────────────────────────────────────
-const SOURCE_PROBE_ENABLED = process.env.SOURCE_PROBE !== '0';
-const SOURCE_PROBE_INTERVAL_MS = parseInt(process.env.SOURCE_PROBE_INTERVAL_MS || '15000', 10);
-const SOURCE_PROBE_FREEZE_MS = parseInt(process.env.SOURCE_PROBE_FREEZE_MS || '45000', 10);
-const SOURCE_PROBE_MIN_UPTIME_MS = 40000; // no molestar durante el arranque
-const SOURCE_PROBE_COOLDOWN_MS = 90000;   // no disparar dos recoveries seguidos
-// pids scrapeados de TDMax vigilados (los mismos con token de vida corta)
-const SOURCE_PROBE_PROCESSES = new Set(['11', '13', '14', '24', '25']);
-const sourceProbeState = new Map(); // pid -> { seq, seqSince, lastAction, lastStatus, lastCheck, netFails }
-
-const getSourceProbeState = (pid) => {
-  const key = String(pid);
-  if (!sourceProbeState.has(key)) {
-    sourceProbeState.set(key, { seq: null, seqSince: Date.now(), lastAction: 0, lastStatus: 'unknown', lastCheck: 0, netFails: 0 });
-  }
-  return sourceProbeState.get(key);
-};
-
-const resetSourceProbe = (pid) => { sourceProbeState.delete(String(pid)); };
-
-const probeTdmaxSource = async (pid) => {
-  const key = String(pid);
-  const st = getSourceProbeState(key);
-  const remembered = getRememberedStreamState(key);
-  const url = remembered?.source_m3u8;
-  if (!url || !/^https?:/i.test(url)) return;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
-  try {
-    const resp = await fetch(url, {
-      headers: {
-        'User-Agent': TDMAX_WEB_USER_AGENT,
-        'Referer': TDMAX_APP_REFERER,
-        'Origin': TDMAX_APP_ORIGIN,
-        'Accept': '*/*',
-      },
-      signal: controller.signal,
-    });
-    st.lastCheck = Date.now();
-
-    if (resp.status === 403 || resp.status === 404 || resp.status === 410) {
-      st.lastStatus = `http_${resp.status}`;
-      st.netFails = 0;
-      sendLog(key, 'warn', `🔎 FUENTE TDMax responde HTTP ${resp.status} — token/sesión vencida. Adelantando recovery (no esperamos al watchdog).`);
-      triggerSourceProbeRecovery(key, `fuente HTTP ${resp.status}`);
-      return;
-    }
-    if (!resp.ok) {
-      st.lastStatus = `http_${resp.status}`;
-      return; // 5xx puntual: FFmpeg reintenta solo
-    }
-
-    const text = await resp.text();
-    const seqMatch = text.match(/#EXT-X-MEDIA-SEQUENCE:(\d+)/);
-    const seq = seqMatch ? parseInt(seqMatch[1], 10) : null;
-    st.netFails = 0;
-
-    if (/#EXT-X-ENDLIST/i.test(text)) {
-      st.lastStatus = 'endlist';
-      sendLog(key, 'warn', '🔎 FUENTE TDMax cerró el live (#EXT-X-ENDLIST). Pidiendo URL nueva...');
-      triggerSourceProbeRecovery(key, 'fuente cerró el live (ENDLIST)');
-      return;
-    }
-
-    if (seq === null) { st.lastStatus = 'sin_secuencia'; return; }
-
-    if (st.seq === null || seq > st.seq) {
-      st.seq = seq;
-      st.seqSince = Date.now();
-      st.lastStatus = 'ok';
-      return;
-    }
-
-    // Secuencia congelada: el origen no publica segmentos nuevos
-    const frozenMs = Date.now() - st.seqSince;
-    st.lastStatus = frozenMs > 20000 ? 'congelada' : 'ok';
-    if (frozenMs > SOURCE_PROBE_FREEZE_MS) {
-      sendLog(key, 'warn', `🔎 FUENTE TDMax congelada: sin segmentos nuevos hace ${Math.floor(frozenMs / 1000)}s (problema en el origen). Pidiendo URL nueva para caer en otro edge...`);
-      triggerSourceProbeRecovery(key, `fuente congelada ${Math.floor(frozenMs / 1000)}s`);
-    }
-  } catch (e) {
-    st.netFails = (st.netFails || 0) + 1;
-    st.lastStatus = 'red';
-    if (st.netFails === 3) {
-      sendLog(key, 'info', `🔎 Probe de fuente TDMax sin respuesta (${e.message}) — solo aviso, la emisión sigue.`);
-    }
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-function triggerSourceProbeRecovery(pid, reason) {
-  const key = String(pid);
-  const st = getSourceProbeState(key);
-  if (Date.now() - st.lastAction < SOURCE_PROBE_COOLDOWN_MS) return;
-  if (autoRecoveryInProgress.get(key)) return;
-  if (isProcessManuallyStopped(key)) return;
-  st.lastAction = Date.now();
-  st.seq = null;
-  st.seqSince = Date.now();
-  const ch = CHANNEL_MAP[key];
-  const proc = ffmpegProcesses.get(key);
-  sendLog(key, 'error', `🚑 Recovery anticipado por salud de fuente: ${reason}`);
-  try {
-    if (proc?.process && !proc.process.killed) proc.process.kill('SIGKILL');
-  } catch (_) {}
-  // El handler de cierre de FFmpeg dispara el recovery normal (scrape fresco).
-  // Si por alguna razón no hay proceso vivo, lo lanzamos nosotros.
-  if (!proc && ch) {
-    autoRecoverChannel(key, ch.channelId, ch.channelName).catch(err =>
-      console.error(`[source-probe] recovery error pid=${key}:`, err.message));
-  }
-}
-
-if (SOURCE_PROBE_ENABLED) {
-  setInterval(() => {
-    for (const pid of SOURCE_PROBE_PROCESSES) {
-      const status = emissionStatuses.get(pid);
-      if (status !== 'running') { resetSourceProbe(pid); continue; }
-      if (isTelecableMode(pid)) { resetSourceProbe(pid); continue; }
-      const lastFrame = lastFrameTime.get(pid);
-      if (!lastFrame || Date.now() - lastFrame > SOURCE_PROBE_MIN_UPTIME_MS) {
-        // Sin frames recientes ya es trabajo del watchdog; el probe no interfiere.
-      }
-      const started = getRememberedStreamState(pid)?.updatedAt || 0;
-      if (Date.now() - started < SOURCE_PROBE_MIN_UPTIME_MS) continue;
-      probeTdmaxSource(pid).catch(() => {});
-    }
-  }, SOURCE_PROBE_INTERVAL_MS);
-}
-
-// Estado de salud de fuentes TDMax (para el panel / diagnóstico)
-app.get('/api/source-health', (req, res) => {
-  const out = {};
-  for (const pid of SOURCE_PROBE_PROCESSES) {
-    const st = sourceProbeState.get(pid);
-    out[pid] = {
-      channel: CHANNEL_MAP[pid]?.channelName || pid,
-      emitting: emissionStatuses.get(pid) === 'running',
-      status: st?.lastStatus || 'idle',
-      last_check: st?.lastCheck || null,
-      media_sequence: st?.seq ?? null,
-      frozen_ms: st ? Date.now() - st.seqSince : null,
-    };
-  }
-  res.json({ enabled: SOURCE_PROBE_ENABLED, interval_ms: SOURCE_PROBE_INTERVAL_MS, processes: out });
-});
-
-
 
 // ───────────────────────────────────────────────────────────────────────
 // SRT FEED-LOSS GUARD (corta el "loop" del último fragmento en XUI)
@@ -5472,13 +5302,16 @@ app.post('/api/emit', async (req, res) => {
     const PLAYLIST_404_THRESHOLD = 6;
     const isCanal6Stream = process_id === '5';
 
-    // ── FOX URL (25) / FOX+ URL (24): kill ULTRA-rápido en 404 de playlist ──
-    // Estos canales usan URL de TDMax (cdn12.teletica.com). Cuando el token o
-    // la sesión expira, el playlist responde 404 inmediato. Esperar al watchdog
-    // (75s) o al detector Canal 6 (6 fails / 8s) deja a los clientes con
-    // pantalla negra muchos segundos. Aquí cortamos al 2º "Failed to reload
-    // playlist" dentro de 5s → mata FFmpeg, invalida cache, fuerza scrape
-    // fresco vía la auto-recovery existente (Quick Retry + full re-scrape).
+    // ── Canales TDMax scrapeados: kill ULTRA-rápido en 404 de playlist ──
+    // FUTV URL (11), TELETICA URL (13), TDMAS 1 URL (14), FOX+ URL (24) y
+    // FOX URL (25) usan URL firmada de TDMax (wmsAuthSign de vida corta).
+    // Cuando el token o la sesión expira, el playlist responde 404 inmediato.
+    // Esperar al watchdog (75s) o al detector Canal 6 (6 fails / 8s) deja a los
+    // clientes con pantalla negra muchos segundos. Aquí cortamos al 2º "Failed
+    // to reload playlist" dentro de 5s → mata FFmpeg, invalida cache, fuerza
+    // scrape fresco vía la auto-recovery existente.
+    // REACTIVO: no consulta la URL por su cuenta; solo lee lo que FFmpeg ya
+    // reporta. Mientras la fuente camine bien, no hay tráfico ni ruido extra.
     const foxUrlFast404State = {
       count: 0,
       windowStart: Date.now(),
@@ -5486,7 +5319,9 @@ app.post('/api/emit', async (req, res) => {
     };
     const FOX_URL_404_WINDOW_MS = 5_000;
     const FOX_URL_404_THRESHOLD = 2;
-    const isFoxUrlScrapedStream = process_id === '24' || process_id === '25';
+    const TDMAX_FAST_404_PROCESSES = new Set(['11', '13', '14', '24', '25']);
+    const isFoxUrlScrapedStream = TDMAX_FAST_404_PROCESSES.has(String(process_id));
+
 
     // Manejar errores con análisis mejorado
     ffmpegProcess.stderr.on('data', (data) => {
@@ -5541,7 +5376,7 @@ app.post('/api/emit', async (req, res) => {
           foxUrlFast404State.count += reloadFails;
           if (foxUrlFast404State.count >= FOX_URL_404_THRESHOLD) {
             foxUrlFast404State.restartTriggered = true;
-            sendLog(process_id, 'error', `⚡ FOX URL: 404 de playlist (${foxUrlFast404State.count} fails en ${Math.round((now - foxUrlFast404State.windowStart)/1000)}s) → fast-kill para scrape inmediato`);
+            sendLog(process_id, 'error', `⚡ TDMax: 404 de playlist (${foxUrlFast404State.count} fails en ${Math.round((now - foxUrlFast404State.windowStart)/1000)}s) → fast-kill para scrape inmediato`);
             try {
               scrapeSessionCache.delete(process_id);
               // Invalidar lastKnownStreamState para que la recovery NO use Quick
