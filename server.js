@@ -5302,13 +5302,16 @@ app.post('/api/emit', async (req, res) => {
     const PLAYLIST_404_THRESHOLD = 6;
     const isCanal6Stream = process_id === '5';
 
-    // ── FOX URL (25) / FOX+ URL (24): kill ULTRA-rápido en 404 de playlist ──
-    // Estos canales usan URL de TDMax (cdn12.teletica.com). Cuando el token o
-    // la sesión expira, el playlist responde 404 inmediato. Esperar al watchdog
-    // (75s) o al detector Canal 6 (6 fails / 8s) deja a los clientes con
-    // pantalla negra muchos segundos. Aquí cortamos al 2º "Failed to reload
-    // playlist" dentro de 5s → mata FFmpeg, invalida cache, fuerza scrape
-    // fresco vía la auto-recovery existente (Quick Retry + full re-scrape).
+    // ── Canales TDMax scrapeados: kill ULTRA-rápido en 404 de playlist ──
+    // FUTV URL (11), TELETICA URL (13), TDMAS 1 URL (14), FOX+ URL (24) y
+    // FOX URL (25) usan URL firmada de TDMax (wmsAuthSign de vida corta).
+    // Cuando el token o la sesión expira, el playlist responde 404 inmediato.
+    // Esperar al watchdog (75s) o al detector Canal 6 (6 fails / 8s) deja a los
+    // clientes con pantalla negra muchos segundos. Aquí cortamos al 2º "Failed
+    // to reload playlist" dentro de 5s → mata FFmpeg, invalida cache, fuerza
+    // scrape fresco vía la auto-recovery existente.
+    // REACTIVO: no consulta la URL por su cuenta; solo lee lo que FFmpeg ya
+    // reporta. Mientras la fuente camine bien, no hay tráfico ni ruido extra.
     const foxUrlFast404State = {
       count: 0,
       windowStart: Date.now(),
@@ -5316,7 +5319,9 @@ app.post('/api/emit', async (req, res) => {
     };
     const FOX_URL_404_WINDOW_MS = 5_000;
     const FOX_URL_404_THRESHOLD = 2;
-    const isFoxUrlScrapedStream = process_id === '24' || process_id === '25';
+    const TDMAX_FAST_404_PROCESSES = new Set(['11', '13', '14', '24', '25']);
+    const isFoxUrlScrapedStream = TDMAX_FAST_404_PROCESSES.has(String(process_id));
+
 
     // Manejar errores con análisis mejorado
     ffmpegProcess.stderr.on('data', (data) => {
