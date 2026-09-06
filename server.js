@@ -4645,9 +4645,10 @@ app.post('/api/emit', async (req, res) => {
         '-maxrate', outputProfile.videoBitrate,
         '-bufsize', outputProfile.bufsize,
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
-        '-vf', isCanal6UrlProcess ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
-        '-r', outputFps,
-        ...(isCfrOutput || isCanal6UrlProcess ? ['-vsync', 'cfr'] : []),
+        '-vf', (isCanal6UrlProcess && !isNaturalCadence) ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
+        ...(isNaturalCadence ? ['-vsync', 'passthrough'] : ['-r', outputFps]),
+        ...(!isNaturalCadence && (isCfrOutput || isCanal6UrlProcess) ? ['-vsync', 'cfr'] : []),
+
         '-g', gopSize,
         '-keyint_min', gopSize,
         '-sc_threshold', '0',
