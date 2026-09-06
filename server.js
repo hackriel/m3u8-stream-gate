@@ -2435,7 +2435,13 @@ setInterval(() => {
 // y caen a su URL de backup. Cuando el publisher vuelve, FFmpeg reescribe
 // el playlist (append_list + epoch) y el canal revive solo.
 // ───────────────────────────────────────────────────────────────────────
-const SRT_FEED_LOSS_MS = parseInt(process.env.SRT_FEED_LOSS_MS || '12000', 10);
+const SRT_FEED_LOSS_MS = parseInt(process.env.SRT_FEED_LOSS_MS || '8000', 10);
+// SESSION KILL: además de borrar el playlist, matamos el FFmpeg listener para
+// que la sesión anterior (sockets SRT, cola MPEG-TS, PTS/DTS, numeración de
+// segmentos, buffers del muxer) desaparezca por completo. El auto-recovery
+// levanta un listener NUEVO, así que cuando el publisher vuelve se crea una
+// sesión limpia y no puede reproducirse contenido de la emisión anterior.
+const SRT_FEED_LOSS_KILL = (process.env.SRT_FEED_LOSS_KILL || '1') !== '0';
 const srtFeedLossCleared = new Set(); // pids ya limpiados (evita spam de logs)
 
 setInterval(() => {
@@ -2466,11 +2472,45 @@ setInterval(() => {
       } catch (_) {}
       srtFeedLossCleared.add(pid);
       try {
-        sendLog(pid, 'warn', `📴 SEÑAL SRT CORTADA (${Math.floor(stalledMs / 1000)}s sin frames) — playlist HLS eliminado (${removed} archivos). XUI dejará de loopear el último fragmento y caerá a backup.`);
+        sendLog(pid, 'warn', `📴 FUENTE SRT CAÍDA — último frame hace ${Math.floor(stalledMs / 1000)}s. Playlist HLS eliminado (${removed} archivos) → XUI recibe 404 y salta a su URL de backup.`);
       } catch (_) {}
+
+      // SOURCE OFF = SOURCE COMPLETELY DEAD: matamos el proceso para destruir
+      // todo el estado de la sesión (socket SRT, cola MPEG-TS, timestamps,
+      // numeración de segmentos). El recovery crea una sesión nueva desde cero.
+      if (SRT_FEED_LOSS_KILL && !isProcessManuallyStopped(pid)) {
+        const child = processData.process;
+        const childPid = child.pid;
+        try {
+          sendLog(pid, 'warn', `🔪 Cerrando sesión SRT anterior — matando FFmpeg PID ${childPid} (SIGTERM)`);
+          child.kill('SIGTERM');
+          setTimeout(() => {
+            try {
+              if (child.exitCode === null && !child.killed) {
+                child.kill('SIGKILL');
+                sendLog(pid, 'warn', `🔪 FFmpeg PID ${childPid} no cerró en 3s → SIGKILL`);
+              }
+            } catch (_) {}
+          }, 3000);
+        } catch (err) {
+          try { sendLog(pid, 'error', `No se pudo cerrar FFmpeg PID ${childPid}: ${err.message}`); } catch (_) {}
+        }
+        // Limpieza final del directorio (incluye .tmp/parciales del muxer).
+        try {
+          if (fs.existsSync(dir)) {
+            for (const f of fs.readdirSync(dir)) {
+              try { fs.unlinkSync(path.join(dir, f)); } catch (_) {}
+            }
+          }
+        } catch (_) {}
+        lastFrameTime.delete(processId);
+        lastFrameTime.delete(pid);
+        lastFrameTime.delete(Number(pid));
+        srtFeedLossCleared.delete(pid);
+      }
     } else if (srtFeedLossCleared.has(pid)) {
       srtFeedLossCleared.delete(pid);
-      try { sendLog(pid, 'success', `📡 SEÑAL SRT RESTABLECIDA — regenerando playlist HLS`); } catch (_) {}
+      try { sendLog(pid, 'success', `📡 NUEVA SESIÓN SRT detectada — llegando frames, regenerando playlist HLS limpio`); } catch (_) {}
     }
   }
 }, 3000);
