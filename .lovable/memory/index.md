@@ -7,3 +7,4 @@
 - [Uptime Viewers](mem://features/uptime-viewers-counter) — Badge ojo+número por canal en /uptime vía /api/viewers (IP+UA únicos 45s)
 - [Alta Calidad](mem://features/output-profile-alta-calidad) — perfil 'highquality' 720p CBR 4000k + AAC 192k, disponible en todos los canales
 - [TDMax Fast-404](mem://features/tdmax-fast-404-reactivo) — detección reactiva en stderr de FFmpeg (11/13/14/24/25); PROHIBIDO sondear la URL periódicamente
+- [Cadencia Natural vs CFR](mem://features/cadencia-natural-vs-cfr) — Alta Calidad/Normal siguen el fps de la fuente; Deportes 1800/1500 y SRT a 30fps forzado
