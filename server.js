@@ -1016,6 +1016,10 @@ const OUTPUT_PROFILES = {
   passthrough:{ key: 'passthrough',label: 'Passthrough (sin re-encode)', width: '', videoBitrate: '', bufsize: '', audioBitrate: '', preset: '', x264Params: '', passthrough: true },
   highquality:{ key: 'highquality',label: 'Alta Calidad', width: '720', videoBitrate: '4000k', bufsize: '8000k', audioBitrate: '192k', preset: 'faster',   x264Params: 'rc-lookahead=30:ref=3:bframes=2' },
   normal:     { key: 'normal',     label: 'Normal',     width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'veryfast', x264Params: '' },
+  // Perfiles "Deportes": 720p con VBV corto (bufsize = 1x bitrate) → salida plana,
+  // sin bursts, GOP fijo de 2s. Pensados para movimiento rápido con menos ancho de banda.
+  sports1800: { key: 'sports1800', label: 'Deportes 1800', width: '720', videoBitrate: '1800k', bufsize: '1800k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2:scenecut=0' },
+  sports1500: { key: 'sports1500', label: 'Deportes Ultra Estable 1500', width: '720', videoBitrate: '1500k', bufsize: '1500k', audioBitrate: '128k', preset: 'veryfast', x264Params: 'rc-lookahead=10:ref=2:bframes=0:scenecut=0' },
   balanced:   { key: 'balanced',   label: 'Balanceada', width: '540', videoBitrate: '1500k', bufsize: '3000k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
   optimized:  { key: 'optimized',  label: 'Optimizada', width: '480', videoBitrate: '1200k', bufsize: '2400k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
 };
@@ -1028,7 +1032,7 @@ try {
   console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
 }
 const normalizeOutputProfile = (profile) => {
-  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality') return profile;
+  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality' || profile === 'sports1800' || profile === 'sports1500') return profile;
   return 'normal';
 };
 const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
