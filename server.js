@@ -4557,6 +4557,22 @@ app.post('/api/emit', async (req, res) => {
     let outputFps = isCfrOutput ? '29.97' : '30';
     let gopSize  = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
+    // ── CADENCIA NATURAL vs CFR FORZADO ────────────────────────────────
+    // Regla acordada:
+    //   • Alta Calidad / Normal (fuentes HLS scrapeadas) → cadencia natural
+    //     de la fuente: sin -r ni -vsync cfr, evita DUP/DROP cosméticos.
+    //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
+    //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
+    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal';
+    const isNaturalCadence = isStandardProfile
+      && !isPassthroughBlock
+      && !isSrtIngest
+      && !isRtmpInputSource
+      && !isTigoHdmiProcess
+      && typeof inputSourceUrl === 'string'
+      && /^https?:\/\//i.test(inputSourceUrl);
+
+
     // 🎯 Auto-detección de FPS de la fuente vía ffprobe.
     // Mapea al estándar limpio más cercano (23.976/24/25/29.97/30/50/59.94/60)
     // para que la salida coincida con el ingreso y evitemos frames duplicados/perdidos.
@@ -4581,6 +4597,10 @@ app.post('/api/emit', async (req, res) => {
         sendLog(process_id, 'warn', `🎯 FPS auto-detect falló: ${e.message} → fallback ${outputFps}fps`);
       }
     }
+
+    sendLog(process_id, 'info', isNaturalCadence
+      ? `\u{1F3AC} Cadencia NATURAL (${outputProfile.label}): salida sigue el ritmo de la fuente (sin -r/CFR), GOP ${gopSize}`
+      : `\u{1F3AC} Cadencia FORZADA: ${outputFps}fps CFR (GOP ${gopSize})`);
 
     // Saneo de timestamps para evitar audio repetido / saltos hacia atrás
     // y reloads del player por EXT-X-DISCONTINUITY.
@@ -4629,9 +4649,10 @@ app.post('/api/emit', async (req, res) => {
         '-maxrate', outputProfile.videoBitrate,
         '-bufsize', outputProfile.bufsize,
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
-        '-vf', isCanal6UrlProcess ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
-        '-r', outputFps,
-        ...(isCfrOutput || isCanal6UrlProcess ? ['-vsync', 'cfr'] : []),
+        '-vf', (isCanal6UrlProcess && !isNaturalCadence) ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
+        ...(isNaturalCadence ? ['-vsync', 'passthrough'] : ['-r', outputFps]),
+        ...(!isNaturalCadence && (isCfrOutput || isCanal6UrlProcess) ? ['-vsync', 'cfr'] : []),
+
         '-g', gopSize,
         '-keyint_min', gopSize,
         '-sc_threshold', '0',
