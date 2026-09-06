@@ -4557,6 +4557,22 @@ app.post('/api/emit', async (req, res) => {
     let outputFps = isCfrOutput ? '29.97' : '30';
     let gopSize  = isCfrOutput ? '59.94' : '60'; // GOP = 2 segundos a fps nativo
 
+    // ── CADENCIA NATURAL vs CFR FORZADO ────────────────────────────────
+    // Regla acordada:
+    //   • Alta Calidad / Normal (fuentes HLS scrapeadas) → cadencia natural
+    //     de la fuente: sin -r ni -vsync cfr, evita DUP/DROP cosméticos.
+    //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
+    //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
+    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal';
+    const isNaturalCadence = isStandardProfile
+      && !isPassthroughBlock
+      && !isSrtIngest
+      && !isRtmpInputSource
+      && !isTigoHdmiProcess
+      && typeof inputSourceUrl === 'string'
+      && /^https?:\/\//i.test(inputSourceUrl);
+
+
     // 🎯 Auto-detección de FPS de la fuente vía ffprobe.
     // Mapea al estándar limpio más cercano (23.976/24/25/29.97/30/50/59.94/60)
     // para que la salida coincida con el ingreso y evitemos frames duplicados/perdidos.
