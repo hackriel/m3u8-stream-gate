@@ -5376,7 +5376,7 @@ app.post('/api/emit', async (req, res) => {
           foxUrlFast404State.count += reloadFails;
           if (foxUrlFast404State.count >= FOX_URL_404_THRESHOLD) {
             foxUrlFast404State.restartTriggered = true;
-            sendLog(process_id, 'error', `⚡ FOX URL: 404 de playlist (${foxUrlFast404State.count} fails en ${Math.round((now - foxUrlFast404State.windowStart)/1000)}s) → fast-kill para scrape inmediato`);
+            sendLog(process_id, 'error', `⚡ TDMax: 404 de playlist (${foxUrlFast404State.count} fails en ${Math.round((now - foxUrlFast404State.windowStart)/1000)}s) → fast-kill para scrape inmediato`);
             try {
               scrapeSessionCache.delete(process_id);
               // Invalidar lastKnownStreamState para que la recovery NO use Quick
