@@ -1032,7 +1032,7 @@ try {
   console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
 }
 const normalizeOutputProfile = (profile) => {
-  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality') return profile;
+  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality' || profile === 'sports1800' || profile === 'sports1500') return profile;
   return 'normal';
 };
 const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
