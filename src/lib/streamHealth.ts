@@ -66,6 +66,13 @@ interface Sample {
   q: number | null;
 }
 
+interface HistoryBucket {
+  /** Marca de inicio del bucket (múltiplo de BUCKET_MS). */
+  ts: number;
+  /** Peor nivel observado dentro del bucket. */
+  level: HealthLevel;
+}
+
 interface ChannelState {
   samples: Sample[];
   firstTs: number;
@@ -75,7 +82,13 @@ interface ChannelState {
   recoveryMarks: number[];
   lastRecoveryCount: number;
   lastStatus: string;
+  history: HistoryBucket[];
 }
+
+/** Cada barra del historial resume 30 segundos. */
+export const BUCKET_MS = 30_000;
+/** 30 barras = últimos 15 minutos de comportamiento. */
+export const HISTORY_BUCKETS = 30;
 
 const states = new Map<string, ChannelState>();
 
