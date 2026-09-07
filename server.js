@@ -176,6 +176,23 @@ const sendLog = (processId, level, message, details = null) => {
     // No romper sendLog por un error de buffer
   }
 
+  // ── Persistencia en disco (/var/log/m3u8-emitter.log vía stdout de systemd) ──
+  // Hasta ahora sendLog SOLO iba al WebSocket del panel: si nadie tenía el panel
+  // abierto, el evento se perdía y era imposible investigar un incidente después.
+  // Escribimos a stdout los logs relevantes (warn/error/éxito) y las auditorías,
+  // dejando fuera el ruido de progreso periódico.
+  try {
+    const lvl = String(level).toLowerCase();
+    const isAudit = typeof message === 'string' && message.includes('🧪');
+    if (isAudit || lvl === 'warn' || lvl === 'error' || lvl === 'success') {
+      const ts = new Date(logData.timestamp).toISOString();
+      const line = `[${ts}] [PID ${processId}] [${lvl.toUpperCase()}] ${message}`;
+      if (lvl === 'error') console.error(line); else console.log(line);
+    }
+  } catch (_) {}
+
+
+
   connectedClients.forEach((client) => {
     if (client.readyState === 1) { // WebSocket.OPEN
       try {
