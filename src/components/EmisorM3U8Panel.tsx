@@ -978,7 +978,7 @@ export default function EmisorM3U8Panel() {
       try {
         const [r0, r10] = await Promise.all([
           fetch(apiUrl('/api/telecable/0/source-mode')),
-          fetch(apiUrl('/api/telecable/10/source-mode')), {
+          fetch(apiUrl('/api/telecable/10/source-mode')),
         ]);
         if (cancelled) return;
         if (r0.ok) {
