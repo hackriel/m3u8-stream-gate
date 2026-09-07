@@ -66,7 +66,7 @@ async function scrapeChannelWithFallback(
 
   // 1) Intento local (producción VPS)
   try {
-    const resp = await fetch(apiUrl('/api//api/local-scrape')'
+    const resp = await fetch(apiUrl('/api/local-scrape')),
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -373,7 +373,7 @@ export default function EmisorM3U8Panel() {
     let alive = true;
     const load = async () => {
       try {
-        const resp = await fetch(apiUrl('/api//api/viewers')'
+        const resp = await fetch(apiUrl('/api/viewers')));
         if (!resp.ok) return;
         const ct = resp.headers.get('content-type') || '';
         if (!ct.includes('application/json')) return;
@@ -391,7 +391,7 @@ export default function EmisorM3U8Panel() {
     let alive = true;
     const load = async () => {
       try {
-        const resp = await fetch(apiUrl('/api//api/health-history')'
+        const resp = await fetch(apiUrl('/api/health-history')));
         if (!resp.ok) return;
         const ct = resp.headers.get('content-type') || '';
         if (!ct.includes('application/json')) return;
@@ -408,7 +408,7 @@ export default function EmisorM3U8Panel() {
 
   const reconcileWithServerStatus = useCallback(async () => {
     try {
-      const resp = await fetch(apiUrl('/api//api/status')'
+      const resp = await fetch(apiUrl('/api/status')));
       if (!resp.ok) return;
 
       const data = await resp.json();
@@ -702,7 +702,7 @@ export default function EmisorM3U8Panel() {
     let lastServerMode: 'official' | 'scraping' | null = null;
     const interval = setInterval(async () => {
       try {
-        const r = await fetch(apiUrl('/api//api/teletica/source-mode')'
+        const r = await fetch(apiUrl('/api/teletica/source-mode')));
         if (!r.ok) return;
         const { mode } = await r.json();
         if (mode !== 'official' && mode !== 'scraping') return;
@@ -740,7 +740,7 @@ export default function EmisorM3U8Panel() {
     let lastServerMode: 'official' | 'scraping' | null = null;
     const interval = setInterval(async () => {
       try {
-        const r = await fetch(apiUrl('/api//api/canal6/source-mode')'
+        const r = await fetch(apiUrl('/api/canal6/source-mode')));
         if (!r.ok) return;
         const { mode } = await r.json();
         if (mode !== 'official' && mode !== 'scraping') return;
@@ -870,7 +870,7 @@ export default function EmisorM3U8Panel() {
     let cancelled = false;
     const tick = async () => {
       try {
-        const r = await fetch(apiUrl('/api//api/cr-tunnel/health')'
+        const r = await fetch(apiUrl('/api/cr-tunnel/health')));
         if (!r.ok) return;
         const j = await r.json();
         if (cancelled) return;
@@ -977,8 +977,8 @@ export default function EmisorM3U8Panel() {
     (async () => {
       try {
         const [r0, r10] = await Promise.all([
-          fetch(apiUrl('/api//api/telecable/0/source-mode')'
-          fetch(apiUrl('/api//api/telecable/10/source-mode')'
+          fetch(apiUrl('/api/telecable/0/source-mode')));
+          fetch(apiUrl('/api/telecable/10/source-mode'))),
         ]);
         if (cancelled) return;
         if (r0.ok) {
@@ -1429,7 +1429,7 @@ export default function EmisorM3U8Panel() {
     updateProcess(processIndex, { alwaysOn: checked });
 
     try {
-      const resp = await fetch(apiUrl('/api//api/always-on')'
+      const resp = await fetch(apiUrl('/api/always-on')),
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ process_id: processIndex, enabled: checked }),
@@ -1712,7 +1712,7 @@ export default function EmisorM3U8Panel() {
         if (processes[otherIdx]?.isEmitiendo) {
           toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Disney7)...`);
           try {
-            await fetch(apiUrl("/api//api/emit/stop")"
+            await fetch(apiUrl("/api/emit/stop")),
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ process_id: otherIdx.toString() })
@@ -1730,7 +1730,7 @@ export default function EmisorM3U8Panel() {
       if (processes[otherIdx]?.isEmitiendo) {
         toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Canal6)...`);
         try {
-          await fetch(apiUrl("/api//api/emit/stop")"
+          await fetch(apiUrl("/api/emit/stop")),
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ process_id: otherIdx.toString() })
@@ -1747,7 +1747,7 @@ export default function EmisorM3U8Panel() {
       if (processes[otherIdx]?.isEmitiendo) {
         toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida Teletica)...`);
         try {
-          await fetch(apiUrl("/api//api/emit/stop")"
+          await fetch(apiUrl("/api/emit/stop")),
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ process_id: otherIdx.toString() })
@@ -1767,7 +1767,7 @@ export default function EmisorM3U8Panel() {
         if (processes[otherIdx]?.isEmitiendo) {
           toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida FOX+)...`);
           try {
-            await fetch(apiUrl("/api//api/emit/stop")"
+            await fetch(apiUrl("/api/emit/stop")),
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ process_id: otherIdx.toString() })
@@ -1785,7 +1785,7 @@ export default function EmisorM3U8Panel() {
       if (processes[otherIdx]?.isEmitiendo) {
         toast.info(`Deteniendo ${CHANNEL_CONFIGS[otherIdx].name} (comparten salida FOX)...`);
         try {
-          await fetch(apiUrl("/api//api/emit/stop")"
+          await fetch(apiUrl("/api/emit/stop")),
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ process_id: otherIdx.toString() })
@@ -1819,7 +1819,7 @@ export default function EmisorM3U8Panel() {
     });
 
     try {
-      const resp = await fetch(apiUrl("/api//api/emit")"
+      const resp = await fetch(apiUrl("/api/emit")),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1899,7 +1899,7 @@ export default function EmisorM3U8Panel() {
     });
     
     try {
-      const resp = await fetch(apiUrl("/api//api/emit/stop")"
+      const resp = await fetch(apiUrl("/api/emit/stop")),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ process_id: processIndex.toString() })
@@ -2005,7 +2005,7 @@ export default function EmisorM3U8Panel() {
     // SIEMPRE pedir al server que detenga FFmpeg, aunque la UI diga isEmitiendo=false.
     // (Cubre el caso de FFmpeg zombi del lado del server tras un error/recovery fallido).
     try {
-      await fetch(apiUrl("/api//api/emit/stop")"
+      await fetch(apiUrl("/api/emit/stop")),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ process_id: processIndex.toString() })
@@ -2015,7 +2015,7 @@ export default function EmisorM3U8Panel() {
     }
 
     if (processIndex === FILE_UPLOAD_INDEX && uploadedFiles.length > 0) {
-      fetch(apiUrl('/api//api/emit/files')'
+      fetch(apiUrl('/api/emit/files')),
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ process_id: processIndex.toString() })
@@ -2081,7 +2081,7 @@ export default function EmisorM3U8Panel() {
     });
 
     try {
-      const resp = await fetch(apiUrl("/api//api/emit/restart")"
+      const resp = await fetch(apiUrl("/api/emit/restart")),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
