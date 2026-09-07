@@ -3505,25 +3505,39 @@ export default function EmisorM3U8Panel() {
                                 {viewersMap[i.toString()] ?? '—'}
                               </button>
 
-                              <span
-                                title={
-                                  unstable
-                                    ? `Inestable — ${gaps60s} gap${gaps60s === 1 ? '' : 's'} (drop/dup frames) en los últimos 60s`
-                                    : 'Sano — sin gaps en los últimos 60s'
-                                }
-                                className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${
-                                  unstable
-                                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
-                                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
-                                }`}
-                              >
-                                <span
-                                  className={`inline-block h-1.5 w-1.5 rounded-full ${
-                                    unstable ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'
-                                  }`}
-                                />
-                                {unstable ? `Inestable · ${gaps60s}` : 'Sano'}
-                              </span>
+                              {(() => {
+                                const hr = computeStreamHealth({
+                                  status: p.emitStatus,
+                                  fps: live?.fps ?? null,
+                                  speed: live?.speed ?? null,
+                                  q: qValue ?? null,
+                                  recoveryCount: p.recoveryCount ?? 0,
+                                  passthrough: isPassthroughProfile,
+                                });
+                                const styles =
+                                  hr.level === 'stable'
+                                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                                    : hr.level === 'warning'
+                                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                                      : 'bg-red-500/15 text-red-300 border-red-500/40';
+                                const dot =
+                                  hr.level === 'stable'
+                                    ? 'bg-emerald-400'
+                                    : hr.level === 'warning'
+                                      ? 'bg-amber-400 animate-pulse'
+                                      : 'bg-red-400 animate-pulse';
+                                const extra = unstable ? ` · ${gaps60s} gaps/60s (drop+dup)` : '';
+                                return (
+                                  <span
+                                    title={healthTooltip(hr, isPassthroughProfile) + extra}
+                                    className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${styles}`}
+                                  >
+                                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
+                                    {hr.label}
+                                  </span>
+                                );
+                              })()}
+
                               <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${cardBadge}`}>
                                 {cardBadgeLabel}
                               </span>
