@@ -128,6 +128,7 @@ export function computeStreamHealthSmoothed(key: string, input: HealthInput): He
       recoveryMarks: [],
       lastRecoveryCount: input.recoveryCount,
       lastStatus: input.status,
+      history: [],
     };
     states.set(key, st);
   }
