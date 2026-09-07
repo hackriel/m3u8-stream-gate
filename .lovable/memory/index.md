@@ -8,3 +8,4 @@
 - [Alta Calidad](mem://features/output-profile-alta-calidad) — perfil 'highquality' 720p CBR 4000k + AAC 192k, disponible en todos los canales
 - [TDMax Fast-404](mem://features/tdmax-fast-404-reactivo) — detección reactiva en stderr de FFmpeg (11/13/14/24/25); PROHIBIDO sondear la URL periódicamente
 - [Cadencia Natural vs CFR](mem://features/cadencia-natural-vs-cfr) — Alta Calidad/Normal siguen el fps de la fuente; Deportes 1800/1500 y SRT a 30fps forzado
+- [SD Pro 1100](mem://features/output-profile-sd-pro-1100) — perfil 'eco1100' 480p VBR 1100k/1600k AAC 96k; sharp1800 baja a preset fast
