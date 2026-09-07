@@ -310,6 +310,25 @@ export default function Uptime() {
                   <Eye style={{ width: big ? "2.6vmin" : "2vmin", height: big ? "2.6vmin" : "2vmin" }} />
                   <span>{c.viewers == null ? "—" : c.viewers}</span>
                 </button>
+                <div
+                  className="absolute top-[1.2vmin] left-[1.4vmin] z-10 rounded-full px-[1.2vmin] py-[0.3vmin] font-bold uppercase tracking-wider"
+                  style={{
+                    fontSize: big ? "2vmin" : "1.5vmin",
+                    background:
+                      c.health === "stable" ? "rgba(34,197,94,0.15)" :
+                      c.health === "warning" ? "rgba(245,158,11,0.15)" : "rgba(239,68,68,0.15)",
+                    color:
+                      c.health === "stable" ? "#22c55e" :
+                      c.health === "warning" ? "#f59e0b" : "#ef4444",
+                    border: `1px solid ${
+                      c.health === "stable" ? "rgba(34,197,94,0.35)" :
+                      c.health === "warning" ? "rgba(245,158,11,0.35)" : "rgba(239,68,68,0.35)"
+                    }`,
+                  }}
+                  title={c.health === "stable" ? "FPS, velocidad y Q dentro de rangos saludables" : c.health === "warning" ? "Revisar: FPS bajo, velocidad fuera de rango, Q alto o recuperaciones recientes" : "Problemas: caída de frames, velocidad crítica, Q muy alto o muchas recuperaciones"}
+                >
+                  {c.health === "stable" ? "SANO" : c.health === "warning" ? "ATENCIÓN" : "INESTABLE"}
+                </div>
                 <div className="relative flex items-center gap-[1.2vmin] mb-[1vmin]">
                   <span
                     className="rounded-full animate-pulse"
