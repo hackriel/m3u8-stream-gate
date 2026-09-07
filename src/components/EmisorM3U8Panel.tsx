@@ -366,6 +366,8 @@ export default function EmisorM3U8Panel() {
   const [healthMap, setHealthMap] = useState<Record<string, { unstable: boolean; gaps60s: number }>>({});
   // Visores en vivo por proceso (clientes únicos consultando la URL HLS)
   const [viewersMap, setViewersMap] = useState<Record<string, number>>({});
+  // Historial de barras calculado en el VPS (persistente aunque cierres la pestaña)
+  const [serverHealthHistory, setServerHealthHistory] = useState<Record<string, HealthLevel[]>>({});
   const [viewerDialog, setViewerDialog] = useState<{ pid: number; name: string } | null>(null);
 
 
