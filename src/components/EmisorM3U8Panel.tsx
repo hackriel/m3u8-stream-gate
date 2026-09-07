@@ -113,20 +113,21 @@ const FOXMAS_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9005?streamid=foxmas&la
 const FOX_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9006?streamid=fox&latency=2000000`;
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
-type OutputProfile = "passthrough" | "highquality" | "normal" | "sportspro" | "sports1800" | "sports1500" | "balanced" | "optimized";
+type OutputProfile = "passthrough" | "highquality" | "normal" | "sportspro" | "sharp1800" | "sports1800" | "sports1500" | "balanced" | "optimized";
 const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
 const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   passthrough: "Passthrough · tal cual lo manda OBS (sin re-encode)",
   highquality: "Alta Calidad · 720p CBR 4000k + AAC 192k (faster)",
   normal: "Normal · 720p CBR 2000k + AAC 128k",
   sportspro: "Deportes Pro · 720p VBR 2600k (pico 2800k) + AAC 160k (fast)",
+  sharp1800: "Nítido 1800 · 576p VBR 1800k (pico 2000k) + AAC 128k (fast)",
   sports1800: "Deportes 1800 · 720p CBR 1800k + AAC 128k (faster)",
   sports1500: "Deportes Ultra Estable 1500 · 720p CBR 1500k + AAC 128k",
   balanced: "Balanceada · 540p CBR 1500k + AAC 128k (faster)",
   optimized: "Optimizada · 480p CBR 1200k + AAC 128k (faster)",
 };
 const VALID_OUTPUT_PROFILES = new Set<string>([
-  "passthrough", "highquality", "normal", "sportspro", "sports1800", "sports1500", "balanced", "optimized",
+  "passthrough", "highquality", "normal", "sportspro", "sharp1800", "sports1800", "sports1500", "balanced", "optimized",
 ]);
 // IDs SRT ingest: arrancan por defecto en Passthrough (sin re-encode).
 const SRT_INGEST_INDEXES = new Set<number>([16, 18, 20, 21, 22, 23]);
@@ -2868,6 +2869,7 @@ export default function EmisorM3U8Panel() {
                 <option value="highquality">{OUTPUT_PROFILE_LABELS.highquality}</option>
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
                 <option value="sportspro">{OUTPUT_PROFILE_LABELS.sportspro}</option>
+                <option value="sharp1800">{OUTPUT_PROFILE_LABELS.sharp1800}</option>
                 <option value="sports1800">{OUTPUT_PROFILE_LABELS.sports1800}</option>
                 <option value="sports1500">{OUTPUT_PROFILE_LABELS.sports1500}</option>
                 <option value="balanced">{OUTPUT_PROFILE_LABELS.balanced}</option>
@@ -2880,6 +2882,8 @@ export default function EmisorM3U8Panel() {
                   ? 'Máxima nitidez (720p · CBR 4000k · AAC 192k · preset faster · GOP 2s · main profile). Ideal para deportes y fuentes que llegan a 3-4 Mbps (SRT/OBS, FOX+, FOX, Teletica, Canal 6, Disney 8). Consume ~2x CPU y ~2x ancho de banda que Normal; si la fuente llega por debajo de 2 Mbps no vas a ganar detalle.'
                   : outputProfile === 'sportspro'
                   ? 'Deportes Pro (720p · 2600k con picos a 2800k · buffer amplio 2s · preset fast · B-frames 3 · AQ activo · AAC 160k · cadencia natural). Pensado para deportes: gasta más bits en las jugadas rápidas y ahorra en planos fijos. Calidad muy cercana a Alta Calidad usando ~35% menos ancho de banda y bastante menos CPU.'
+                  : outputProfile === 'sharp1800'
+                  ? 'Nítido 1800 (576p · 1800k con picos a 2000k · buffer 2s · preset fast · B-frames 3 · AQ activo · cadencia natural). Mismo ancho de banda que Deportes 1800 pero se ve mucho más limpio: al bajar de 720p a 576p cada píxel recibe casi el doble de bits, así que desaparecen los bloques en movimiento. En TV se ve suave, no es HD real pero es muy aceptable.'
                   : outputProfile === 'sports1800'
                   ? 'Deportes 1800 (720p · CBR 1800k · buffer corto 1s · GOP fijo 2s · preset faster). Casi idéntico a Normal a la vista, pero ~10% menos ancho de banda y salida más plana: menos picos, menos cortes en redes flojas.'
                   : outputProfile === 'sports1500'
