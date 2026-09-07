@@ -3523,6 +3523,12 @@ export default function EmisorM3U8Panel() {
                               </h3>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <span
+                                title={OUTPUT_PROFILE_LABELS[profile]}
+                                className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border bg-muted/30 text-muted-foreground border-border/50"
+                              >
+                                {OUTPUT_PROFILE_SHORT_LABELS[profile]}
+                              </span>
                               <button
                                 type="button"
                                 onClick={() => setViewerDialog({ pid: i, name: color.name })}
