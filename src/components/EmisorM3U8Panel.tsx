@@ -120,7 +120,7 @@ const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   highquality: "Alta Calidad · 720p CBR 4000k + AAC 192k (faster)",
   normal: "Normal · 720p CBR 2000k + AAC 128k",
   sportspro: "Deportes Pro · 720p VBR 2600k (pico 2800k) + AAC 160k (fast)",
-  sharp1800: "Nítido 1800 · 576p VBR 1800k (pico 2000k) + AAC 128k (fast)",
+  sharp1800: "Nítido 1800 · 576p VBR 1800k (pico 2400k) + AAC 128k (medium)",
   sports1800: "Deportes 1800 · 720p CBR 1800k + AAC 128k (faster)",
   sports1500: "Deportes Ultra Estable 1500 · 720p CBR 1500k + AAC 128k",
   balanced: "Balanceada · 540p CBR 1500k + AAC 128k (faster)",
