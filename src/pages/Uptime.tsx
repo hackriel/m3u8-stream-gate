@@ -119,7 +119,7 @@ export default function Uptime() {
     const load = async () => {
       const { data } = await supabase
         .from("emission_processes")
-        .select("id, emit_status, start_time, elapsed, is_emitting, source_mode");
+        .select("id, emit_status, start_time, elapsed, is_emitting, source_mode, recovery_count");
       if (alive && data) setRows(data as Row[]);
     };
     load();
