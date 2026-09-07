@@ -1,4 +1,4 @@
-const FALLBACK_VPS_HOST = "167.17.69.116";
+const FALLBACK_VPS_HOST = "216.152.154.29";
 
 export function getVpsHost(): string {
   if (typeof window === "undefined") return FALLBACK_VPS_HOST;
