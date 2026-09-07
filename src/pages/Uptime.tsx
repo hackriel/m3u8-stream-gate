@@ -95,6 +95,26 @@ function autoSlots(w: number, h: number) {
   return 1;                              // cuadrado tipo tablet / marco digital
 }
 
+/** Calcula etiqueta de estabilidad basada en telemetría en vivo */
+function computeHealth(c:: {
+  status: string;
+  fps: number | null;
+  speed: number | null;
+  q: number | null;
+  recoveryCount: number;
+}): Card["health"] {
+  if (c.status !== "running") return "warning";
+  if (c.fps != null && c.fps < 20) return "critical";
+  if (c.speed != null && (c.speed < 0.9 || c.speed > 1.15)) return "critical";
+  if (c.q != null && c.q >= 32) return "critical";
+  if (c.recoveryCount > 5) return "critical";
+  if (c.fps != null && c.fps < 25) return "warning";
+  if (c.speed != null && (c.speed < 0.95 || c.speed > 1.05)) return "warning";
+  if (c.q != null && c.q >= 28) return "warning";
+  if (c.recoveryCount > 0) return "warning";
+  return "stable";
+}
+
 export default function Uptime() {
   const params = new URLSearchParams(window.location.search);
   const forced = Number(params.get("count") || params.get("n") || 0);
