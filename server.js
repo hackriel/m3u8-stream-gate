@@ -1018,6 +1018,9 @@ const OUTPUT_PROFILES = {
   normal:     { key: 'normal',     label: 'Normal',     width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'veryfast', x264Params: '' },
   // Perfiles "Deportes": 720p con VBV corto (bufsize = 1x bitrate) → salida plana,
   // sin bursts, GOP fijo de 2s. Pensados para movimiento rápido con menos ancho de banda.
+  // "Nítido 1800": baja la altura a 576p para que los 1800k rindan mucho más
+  // (menos píxeles = más bits por píxel). Se ve limpio y sin bloques en TV.
+  sharp1800:  { key: 'sharp1800',  label: 'Nítido 1800 (576p)', width: '576', videoBitrate: '1800k', maxrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'fast', x264Params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=2:aq-strength=1.0' },
   sports1800: { key: 'sports1800', label: 'Deportes 1800', width: '720', videoBitrate: '1800k', bufsize: '1800k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2:scenecut=0' },
   // "Deportes Pro": VBV amplio (bufsize 2x, maxrate con 200k de holgura) →
   // el encoder puede gastar picos en jugadas rápidas y ahorrar en planos fijos.
@@ -1036,7 +1039,7 @@ try {
   console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
 }
 const normalizeOutputProfile = (profile) => {
-  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality' || profile === 'sports1800' || profile === 'sports1500' || profile === 'sportspro') return profile;
+  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality' || profile === 'sports1800' || profile === 'sports1500' || profile === 'sportspro' || profile === 'sharp1800') return profile;
   return 'normal';
 };
 const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
@@ -4567,7 +4570,7 @@ app.post('/api/emit', async (req, res) => {
     //     de la fuente: sin -r ni -vsync cfr, evita DUP/DROP cosméticos.
     //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
     //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
-    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'sportspro';
+    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'sportspro' || outputProfile.key === 'sharp1800';
     const isNaturalCadence = isStandardProfile
       && !isPassthroughBlock
       && !isSrtIngest
