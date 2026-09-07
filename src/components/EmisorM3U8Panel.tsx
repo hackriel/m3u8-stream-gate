@@ -10,7 +10,8 @@ import type { Tables } from "@/integrations/supabase/types";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
 import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
-import { computeStreamHealthSmoothed, healthTooltip } from "@/lib/streamHealth";
+import { computeStreamHealthSmoothed, healthTooltip, getHealthHistory } from "@/lib/streamHealth";
+import { HealthBars } from "@/components/HealthBars";
 
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
