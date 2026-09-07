@@ -3898,6 +3898,23 @@ app.post('/api/emit', async (req, res) => {
             manualStopProcesses.delete(Number(otherPid));
           }, 3000);
         }
+        // BARRIDO DE HUÉRFANOS: puede quedar un ffmpeg que ya no está en
+        // ffmpegProcesses (restart del servicio, mapa desincronizado) pero que
+        // sigue escribiendo a /live/<slug>/. Dos ffmpeg sobre el mismo destino
+        // producen segmentos intercalados → imagen negra en el player.
+        try {
+          const { execSync } = require('child_process');
+          const pattern = `${path.join(HLS_OUTPUT_DIR, mySlug)}/`;
+          const out = execSync(`pgrep -f "${pattern}" || true`, { encoding: 'utf8' }).trim();
+          const orphanPids = out.split('\n').map(s => s.trim()).filter(Boolean).map(Number).filter(n => Number.isFinite(n) && n !== process.pid);
+          if (orphanPids.length > 0) {
+            sendLog(process_id, 'warn', `🧹 Barrido: ${orphanPids.length} ffmpeg huérfano(s) escribiendo a /live/${mySlug}/ — terminando (${orphanPids.join(', ')})`);
+            for (const opid of orphanPids) {
+              try { process.kill(opid, 'SIGKILL'); } catch (_) {}
+            }
+            await new Promise(r => setTimeout(r, 500));
+          }
+        } catch (_) {}
         // Limpiar /live/<slug>/ (segmentos viejos + playlist) para que ningún cliente
         // reciba fragmentos del proceso anterior mientras arranca el nuevo.
         try {
