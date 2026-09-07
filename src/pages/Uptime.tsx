@@ -45,12 +45,17 @@ type Row = {
   elapsed: number | null;
   is_emitting: boolean | null;
   source_mode: string | null;
+  recovery_count: number | null;
 };
 
 type LiveStats = {
   fps?: number | null;
   drop?: number | null;
   dup?: number | null;
+  q?: number | null;
+  speed?: number | null;
+  bitrateKbps?: number | null;
+  srtRttMs?: number | null;
 };
 
 type Card = {
