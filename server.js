@@ -3862,7 +3862,16 @@ app.post('/api/emit', async (req, res) => {
           manualStopProcesses.add(Number(otherPid));
           if (otherProc && otherProc.process && !otherProc.process.killed) {
             try { otherProc.process.kill('SIGTERM'); } catch (_) {}
-            try { await waitForProcessDeath(otherProc.process, 2000); } catch (_) {}
+            let died = false;
+            try { died = await waitForProcessDeath(otherProc.process, 2000); } catch (_) {}
+            // ESCALADA OBLIGATORIA: si SIGTERM no lo mató, el ffmpeg viejo sigue
+            // escribiendo segmentos al MISMO /live/<slug>/ → colisión de fragmentos
+            // (pantalla negra momentánea en XUI). Forzamos SIGKILL.
+            if (!died && !otherProc.process.killed) {
+              sendLog(process_id, 'warn', `⛔ ${otherLabel} (ID ${otherPid}) no murió con SIGTERM — aplicando SIGKILL`);
+              try { otherProc.process.kill('SIGKILL'); } catch (_) {}
+              try { await waitForProcessDeath(otherProc.process, 3000); } catch (_) {}
+            }
             ffmpegProcesses.delete(otherPid);
           }
           // Si el pid víctima tiene listener SRT persistente (16/18/20/21/22/23), también lo bajamos.
