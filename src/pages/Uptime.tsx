@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye } from "lucide-react";
 import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
+import { apiUrl } from "@/lib/apiUrl";
 import { supabase } from "@/integrations/supabase/client";
 import { computeStreamHealthSmoothed } from "@/lib/streamHealth";
 
@@ -147,7 +148,7 @@ export default function Uptime() {
     let alive = true;
     const load = async () => {
       try {
-        const resp = await fetch("/api/status");
+        const resp = await fetch(apiUrl("/api/status"));
         if (!resp.ok) return;
         const data = await resp.json();
         const procs = data?.processes as Record<string, { live?: LiveStats | null }> | undefined;
@@ -167,7 +168,7 @@ export default function Uptime() {
     let alive = true;
     const load = async () => {
       try {
-        const resp = await fetch("/api/viewers");
+        const resp = await fetch(apiUrl("/api/viewers"));
         if (!resp.ok) return;
         const ct = resp.headers.get("content-type") || "";
         if (!ct.includes("application/json")) return;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { apiUrl } from "@/lib/apiUrl";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -151,8 +152,8 @@ const Diagnostics = () => {
     const tick = async () => {
       try {
         const [statusResp, metricsResp] = await Promise.all([
-          fetch("/api/status").then((r) => r.json()),
-          fetch("/api/metrics").then((r) => r.json()),
+          fetch(apiUrl("/api/status")).then((r) => r.json()),
+          fetch(apiUrl("/api/metrics")).then((r) => r.json()),
         ]);
         if (cancelled) return;
         const procs: any[] = Array.isArray(statusResp?.processes)
