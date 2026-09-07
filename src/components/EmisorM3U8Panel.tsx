@@ -10,7 +10,7 @@ import type { Tables } from "@/integrations/supabase/types";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
 import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
-import { computeStreamHealthSmoothed, healthTooltip, getHealthHistory } from "@/lib/streamHealth";
+import { computeStreamHealthSmoothed, healthTooltip, getHealthHistory, type HealthLevel } from "@/lib/streamHealth";
 import { HealthBars } from "@/components/HealthBars";
 
 
@@ -366,6 +366,8 @@ export default function EmisorM3U8Panel() {
   const [healthMap, setHealthMap] = useState<Record<string, { unstable: boolean; gaps60s: number }>>({});
   // Visores en vivo por proceso (clientes únicos consultando la URL HLS)
   const [viewersMap, setViewersMap] = useState<Record<string, number>>({});
+  // Historial de barras calculado en el VPS (persistente aunque cierres la pestaña)
+  const [serverHealthHistory, setServerHealthHistory] = useState<Record<string, HealthLevel[]>>({});
   const [viewerDialog, setViewerDialog] = useState<{ pid: number; name: string } | null>(null);
 
 
@@ -383,6 +385,24 @@ export default function EmisorM3U8Panel() {
     };
     load();
     const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  // Barras de comportamiento: historial persistente que calcula el VPS.
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const resp = await fetch('/api/health-history');
+        if (!resp.ok) return;
+        const ct = resp.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) return;
+        const data = await resp.json();
+        if (alive && data?.by_pid) setServerHealthHistory(data.by_pid as Record<string, HealthLevel[]>);
+      } catch { /* /api no disponible fuera del VPS */ }
+    };
+    load();
+    const t = setInterval(load, 15000);
     return () => { alive = false; clearInterval(t); };
   }, []);
 
@@ -3550,7 +3570,7 @@ export default function EmisorM3U8Panel() {
                                 {formatSeconds(elapsed)}
                               </div>
                             </div>
-                            <HealthBars history={getHealthHistory(String(i))} className="w-1/2 min-w-0" />
+                            <HealthBars history={serverHealthHistory[String(i)] ?? getHealthHistory(String(i))} className="w-1/2 min-w-0" />
                           </div>
 
                           <div className="grid grid-cols-3 gap-2 text-xs">
