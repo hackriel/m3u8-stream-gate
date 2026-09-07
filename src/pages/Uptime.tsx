@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye } from "lucide-react";
 import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
+import { apiUrl } from "@/lib/apiUrl";
 import { supabase } from "@/integrations/supabase/client";
 import { computeStreamHealthSmoothed } from "@/lib/streamHealth";
 

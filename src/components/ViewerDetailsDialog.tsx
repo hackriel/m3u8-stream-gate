@@ -3,6 +3,7 @@ import { Ban, Eye, Loader2, RefreshCw, Undo2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { apiUrl } from "@/lib/apiUrl";
 
 export interface ViewerInfo {
   ip: string;

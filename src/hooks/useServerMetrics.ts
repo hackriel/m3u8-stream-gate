@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from '@/lib/apiUrl';
 
 const METRICS_HISTORY_SECONDS = 30 * 60; // 30 minutes
 const METRICS_POLL_INTERVAL = 3000; // 3 seconds
