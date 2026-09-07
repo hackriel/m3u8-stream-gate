@@ -1019,6 +1019,10 @@ const OUTPUT_PROFILES = {
   // Perfiles "Deportes": 720p con VBV corto (bufsize = 1x bitrate) → salida plana,
   // sin bursts, GOP fijo de 2s. Pensados para movimiento rápido con menos ancho de banda.
   sports1800: { key: 'sports1800', label: 'Deportes 1800', width: '720', videoBitrate: '1800k', bufsize: '1800k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2:scenecut=0' },
+  // "Deportes Pro": VBV amplio (bufsize 2x, maxrate con 200k de holgura) →
+  // el encoder puede gastar picos en jugadas rápidas y ahorrar en planos fijos.
+  // ~35% menos ancho de banda que Alta Calidad con calidad percibida cercana.
+  sportspro:  { key: 'sportspro',  label: 'Deportes Pro 2600', width: '720', videoBitrate: '2600k', maxrate: '2800k', bufsize: '5600k', audioBitrate: '160k', preset: 'fast', x264Params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=2:aq-strength=1.0' },
   sports1500: { key: 'sports1500', label: 'Deportes Ultra Estable 1500', width: '720', videoBitrate: '1500k', bufsize: '1500k', audioBitrate: '128k', preset: 'veryfast', x264Params: 'rc-lookahead=10:ref=2:bframes=0:scenecut=0' },
   balanced:   { key: 'balanced',   label: 'Balanceada', width: '540', videoBitrate: '1500k', bufsize: '3000k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
   optimized:  { key: 'optimized',  label: 'Optimizada', width: '480', videoBitrate: '1200k', bufsize: '2400k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
@@ -1032,7 +1036,7 @@ try {
   console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
 }
 const normalizeOutputProfile = (profile) => {
-  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality' || profile === 'sports1800' || profile === 'sports1500') return profile;
+  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality' || profile === 'sports1800' || profile === 'sports1500' || profile === 'sportspro') return profile;
   return 'normal';
 };
 const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
@@ -4563,7 +4567,7 @@ app.post('/api/emit', async (req, res) => {
     //     de la fuente: sin -r ni -vsync cfr, evita DUP/DROP cosméticos.
     //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
     //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
-    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal';
+    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'sportspro';
     const isNaturalCadence = isStandardProfile
       && !isPassthroughBlock
       && !isSrtIngest
@@ -4646,7 +4650,7 @@ app.post('/api/emit', async (req, res) => {
         '-profile:v', 'main',
         '-threads', '4',
         '-b:v', outputProfile.videoBitrate,
-        '-maxrate', outputProfile.videoBitrate,
+        '-maxrate', outputProfile.maxrate || outputProfile.videoBitrate,
         '-bufsize', outputProfile.bufsize,
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
         '-vf', (isCanal6UrlProcess && !isNaturalCadence) ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
