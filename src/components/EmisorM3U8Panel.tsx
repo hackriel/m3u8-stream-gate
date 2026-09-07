@@ -12,6 +12,7 @@ import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
 import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
 import { computeStreamHealthSmoothed, healthTooltip, getHealthHistory, type HealthLevel } from "@/lib/streamHealth";
 import { HealthBars } from "@/components/HealthBars";
+import { getVpsHost, apiUrl } from "@/lib/apiUrl";
 
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
