@@ -113,22 +113,18 @@ const FOXMAS_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9005?streamid=foxmas&la
 const FOX_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9006?streamid=fox&latency=2000000`;
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
-type OutputProfile = "passthrough" | "highquality" | "normal" | "sportspro" | "sharp1800" | "eco1100" | "sports1800" | "sports1500" | "balanced" | "optimized";
+type OutputProfile = "passthrough" | "highquality" | "hd720" | "normal" | "mid576" | "sd480";
 const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
 const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   passthrough: "Passthrough · tal cual lo manda OBS (sin re-encode)",
   highquality: "Alta Calidad · 720p CBR 4000k + AAC 192k (faster)",
+  hd720: "HD 720p · 3000k (pico 3600k) + AAC 128k",
   normal: "Normal · 720p CBR 2000k + AAC 128k",
-  sportspro: "Deportes Pro · 720p VBR 2600k (pico 2800k) + AAC 160k (fast)",
-  sharp1800: "Nítido 1800 · 576p VBR 1800k (pico 2400k) + AAC 128k (fast)",
-  eco1100: "SD Pro 1100 · 480p VBR 1100k (pico 1600k) + AAC 96k (fast)",
-  sports1800: "Deportes 1800 · 720p CBR 1800k + AAC 128k (faster)",
-  sports1500: "Deportes Ultra Estable 1500 · 720p CBR 1500k + AAC 128k",
-  balanced: "Balanceada · 540p CBR 1500k + AAC 128k (faster)",
-  optimized: "Optimizada · 480p CBR 1200k + AAC 128k (faster)",
+  mid576: "Intermedio 576p · 2350k (pico 2800k) + AAC 128k",
+  sd480: "SD 480p · 1500k (pico 2100k) + AAC 96k",
 };
 const VALID_OUTPUT_PROFILES = new Set<string>([
-  "passthrough", "highquality", "normal", "sportspro", "sharp1800", "eco1100", "sports1800", "sports1500", "balanced", "optimized",
+  "passthrough", "highquality", "hd720", "normal", "mid576", "sd480",
 ]);
 // IDs SRT ingest: arrancan por defecto en Passthrough (sin re-encode).
 const SRT_INGEST_INDEXES = new Set<number>([16, 18, 20, 21, 22, 23]);
