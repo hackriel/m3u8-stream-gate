@@ -1035,7 +1035,11 @@ const OUTPUT_PROFILES = {
   mid576:     { key: 'mid576',     label: 'Intermedio 576p (2350k)', width: '576', videoBitrate: '2350k', maxrate: '2800k', bufsize: '4700k', audioBitrate: '128k', preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 6 },
   // SD 480p — escalón 1750k/1500k SD de Netflix y mínimo 480p de YouTube.
   // Para eventos masivos o clientes con internet flojo.
-  sd480:      { key: 'sd480',      label: 'SD 480p (1500k)', width: '480', videoBitrate: '1500k', maxrate: '2100k', bufsize: '3000k', audioBitrate: '96k',  preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 4 },
+  // SD 480p — AUDITADO para deportes: VBV contenido (maxrate 1700k = +13%,
+  // no +40%), audio 48kHz nativo (sin resampleo 48k→44.1k, que provocaba
+  // microcorrecciones periódicas de A/V ≈ cada minuto) y cadencia CFR real
+  // al fps detectado de la fuente (sin conversión de framerate).
+  sd480:      { key: 'sd480',      label: 'SD 480p (1500k)', width: '480', videoBitrate: '1500k', maxrate: '1700k', bufsize: '3400k', audioBitrate: '96k',  audioRate: '48000', forceCfr: true, preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:scenecut=0:vbv-init=0.9', threads: 4 },
 };
 // Perfiles retirados → se remapean al equivalente más cercano de la escalera nueva.
 const LEGACY_PROFILE_ALIASES = {
@@ -4588,7 +4592,7 @@ app.post('/api/emit', async (req, res) => {
     //     de la fuente: sin -r ni -vsync cfr, evita DUP/DROP cosméticos.
     //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
     //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
-    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'hd720' || outputProfile.key === 'mid576' || outputProfile.key === 'sd480';
+    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'hd720' || outputProfile.key === 'mid576';
     const isNaturalCadence = isStandardProfile
       && !isPassthroughBlock
       && !isSrtIngest
@@ -4676,14 +4680,15 @@ app.post('/api/emit', async (req, res) => {
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
         '-vf', (isCanal6UrlProcess && !isNaturalCadence) ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
         ...(isNaturalCadence ? ['-vsync', 'passthrough'] : ['-r', outputFps]),
-        ...(!isNaturalCadence && (isCfrOutput || isCanal6UrlProcess) ? ['-vsync', 'cfr'] : []),
+        ...(!isNaturalCadence && (isCfrOutput || isCanal6UrlProcess || outputProfile.forceCfr) ? ['-vsync', 'cfr'] : []),
 
         '-g', gopSize,
         '-keyint_min', gopSize,
         '-sc_threshold', '0',
         '-c:a', 'aac',
         '-b:a', outputProfile.audioBitrate,
-        '-ar', '44100',
+        '-ar', outputProfile.audioRate || '44100',
+        ...(outputProfile.audioRate ? ['-ac', '2'] : []),
         '-max_muxing_queue_size', '1024',
         '-reset_timestamps', '1',
       ]),
@@ -4693,8 +4698,16 @@ app.post('/api/emit', async (req, res) => {
     // make_zero: si llega un PTS negativo, lo pone en 0 y sigue lineal (nunca retrocede).
     // -async 1: ajusta drift de audio sin pegar saltos audibles.
     if (isHlsTimestampFix) {
-      ffmpegArgs.push('-avoid_negative_ts', 'make_zero', '-async', '1');
-      sendLog(process_id, 'info', `🕒 HLS timestamp fix: +genpts+igndts+discardcorrupt / avoid_negative_ts=make_zero / async=1${isCanal6UrlProcess ? ' / fps=30+cfr' : ''}`);
+      if (outputProfile.forceCfr && !outputProfile.passthrough) {
+        // SD: en vez de `-async 1` (que corrige el drift a saltos, perceptible
+        // como micro-freeze periódico), usamos aresample con compensación
+        // continua y suave. El video queda CFR puro al fps de la fuente.
+        ffmpegArgs.push('-avoid_negative_ts', 'make_zero', '-af', 'aresample=async=1:min_hard_comp=0.100:first_pts=0');
+        sendLog(process_id, 'info', `🕒 Timestamp fix SD: avoid_negative_ts=make_zero / aresample async suave (sin -async 1) / CFR ${outputFps}fps`);
+      } else {
+        ffmpegArgs.push('-avoid_negative_ts', 'make_zero', '-async', '1');
+        sendLog(process_id, 'info', `🕒 HLS timestamp fix: +genpts+igndts+discardcorrupt / avoid_negative_ts=make_zero / async=1${isCanal6UrlProcess ? ' / fps=30+cfr' : ''}`);
+      }
     }
 
     // ── MODOS DE SALIDA (RANDOM Disney 7 ID 19) ─────────────────────────
@@ -5123,7 +5136,8 @@ app.post('/api/emit', async (req, res) => {
             '-sc_threshold', '0',
             '-c:a', 'aac',
             '-b:a', '128k',
-            '-ar', '44100',
+            '-ar', outputProfile.audioRate || '44100',
+        ...(outputProfile.audioRate ? ['-ac', '2'] : []),
             '-max_muxing_queue_size', '1024',
             '-reset_timestamps', '1',
             '-f', 'hls',
@@ -5370,6 +5384,15 @@ app.post('/api/emit', async (req, res) => {
 
 
     // Manejar errores con análisis mejorado
+    // ── AUDITORÍA DE TIEMPOS (solo perfil SD / forceCfr) ──────────────
+    // Resumen cada 60s: frames, dup/drop acumulados, bitrate, speed y
+    // cuántos avisos de timestamp (DTS no monotónico, "past duration",
+    // colas de mux) hubo en la ventana. Permite correlacionar un
+    // micro-freeze con una anomalía concreta durante una prueba de 10-15min.
+    const sdAudit = outputProfile.forceCfr && !outputProfile.passthrough
+      ? { last: Date.now(), warns: 0, dup: 0, drop: 0, lastFrame: 0, samples: [] }
+      : null;
+
     ffmpegProcess.stderr.on('data', (data) => {
       const output = data.toString();
       
@@ -5379,6 +5402,43 @@ app.post('/api/emit', async (req, res) => {
         stderrBuffer.push(line.trim());
         if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
         updateLiveStats(process_id, line);
+
+        if (sdAudit) {
+          if (/Non-monotonou?s (DTS|PTS)|past duration|Queue input is backward|timestamp discontinuity|Application provided invalid/i.test(line)) {
+            sdAudit.warns++;
+          }
+          const mFrame = line.match(/frame=\s*(\d+)/);
+          if (mFrame) {
+            const f = parseInt(mFrame[1], 10);
+            const mDup = line.match(/dup=\s*(\d+)/);
+            const mDrop = line.match(/drop=\s*(\d+)/);
+            const mSpeed = line.match(/speed=\s*([\d.]+)x/);
+            const mBr = line.match(/bitrate=\s*([\d.]+)kbits/);
+            const dup = mDup ? parseInt(mDup[1], 10) : sdAudit.dup;
+            const drop = mDrop ? parseInt(mDrop[1], 10) : sdAudit.drop;
+            sdAudit.samples.push({ speed: mSpeed ? parseFloat(mSpeed[1]) : null, br: mBr ? parseFloat(mBr[1]) : null });
+            const now = Date.now();
+            if (now - sdAudit.last >= 60000) {
+              const secs = (now - sdAudit.last) / 1000;
+              const fpsReal = (f - sdAudit.lastFrame) / secs;
+              const sp = sdAudit.samples.map(x => x.speed).filter(v => v != null);
+              const br = sdAudit.samples.map(x => x.br).filter(v => v != null);
+              const avg = a => a.length ? (a.reduce((x, y) => x + y, 0) / a.length) : 0;
+              sendLog(process_id, (sdAudit.warns > 0 || (drop - sdAudit.drop) > 0) ? 'warn' : 'info',
+                `🧪 Auditoría SD (60s): fps real ${fpsReal.toFixed(2)} · dup +${dup - sdAudit.dup} · drop +${drop - sdAudit.drop} · speed medio ${avg(sp).toFixed(3)}x (min ${sp.length ? Math.min(...sp).toFixed(2) : '-'}x) · bitrate medio ${Math.round(avg(br))}k (pico ${br.length ? Math.round(Math.max(...br)) : 0}k) · avisos de timestamp ${sdAudit.warns}`);
+              sdAudit.last = now;
+              sdAudit.warns = 0;
+              sdAudit.dup = dup;
+              sdAudit.drop = drop;
+              sdAudit.lastFrame = f;
+              sdAudit.samples = [];
+            } else if (!sdAudit.lastFrame) {
+              sdAudit.lastFrame = f;
+              sdAudit.dup = dup;
+              sdAudit.drop = drop;
+            }
+          }
+        }
       }
 
       // ── Canal 6: detector de 404 storm de playlist ──
