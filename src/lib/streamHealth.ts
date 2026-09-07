@@ -247,3 +247,14 @@ export function healthTooltip(result: HealthResult, passthrough = false): string
   }
   return `${result.label}: ${result.reasons.join(" · ")}. ${criteria}`;
 }
+
+/**
+ * Historial reciente del canal en barras (más antigua → más nueva).
+ * Cada elemento resume BUCKET_MS (30s) con el PEOR nivel visto en ese tramo.
+ */
+export function getHealthHistory(key: string): HealthLevel[] {
+  const st = states.get(key);
+  if (!st) return [];
+  const now = Date.now();
+  return st.history.filter((b) => now - b.ts <= HISTORY_BUCKETS * BUCKET_MS).map((b) => b.level);
+}
