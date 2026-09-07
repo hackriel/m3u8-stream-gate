@@ -7666,7 +7666,7 @@ const hhSeverity = (l) => (l === 'critical' ? 2 : l === 'warning' ? 1 : 0);
 const hhMedian = (arr) => {
   if (!arr.length) return null;
   const s = [...arr].sort((a, b) => a - b);
-  const mid = s >> 0 && s.length >> 1;
+  
   const i = s.length >> 1;
   return s.length % 2 ? s[i] : (s[i - 1] + s[i]) / 2;
 };
