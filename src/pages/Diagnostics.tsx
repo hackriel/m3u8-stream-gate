@@ -152,8 +152,8 @@ const Diagnostics = () => {
     const tick = async () => {
       try {
         const [statusResp, metricsResp] = await Promise.all([
-          fetch("/api/status").then((r) => r.json()),
-          fetch("/api/metrics").then((r) => r.json()),
+          fetch(apiUrl("/api/status")).then((r) => r.json()),
+          fetch(apiUrl("/api/metrics")).then((r) => r.json()),
         ]);
         if (cancelled) return;
         const procs: any[] = Array.isArray(statusResp?.processes)

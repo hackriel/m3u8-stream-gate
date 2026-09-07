@@ -39,7 +39,7 @@ export function useServerMetrics() {
   useEffect(() => {
     const fetchMetrics = async () => {
       try {
-        const resp = await fetch('/api/metrics');
+        const resp = await fetch(apiUrl('/api/metrics'));
         if (!resp.ok) return;
         const data = await resp.json();
 

@@ -103,7 +103,7 @@ export const ViewerDetailsDialog: React.FC<Props> = ({ open, onOpenChange, pid, 
   const banIp = useCallback(async (ip: string, ua?: string) => {
     setBusyIp(ip);
     try {
-      const resp = await fetch("/api/viewers/ban", {
+      const resp = await fetch(apiUrl("/api/viewers/ban"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pid: String(pid), ip, ua }),
@@ -123,7 +123,7 @@ export const ViewerDetailsDialog: React.FC<Props> = ({ open, onOpenChange, pid, 
   const unbanIp = useCallback(async (ip: string) => {
     setBusyIp(ip);
     try {
-      const resp = await fetch("/api/viewers/unban", {
+      const resp = await fetch(apiUrl("/api/viewers/unban"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pid: String(pid), ip }),
