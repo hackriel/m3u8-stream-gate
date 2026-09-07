@@ -1044,7 +1044,7 @@ try {
   console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
 }
 const normalizeOutputProfile = (profile) => {
-  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality' || profile === 'sports1800' || profile === 'sports1500' || profile === 'sportspro' || profile === 'sharp1800') return profile;
+  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality' || profile === 'sports1800' || profile === 'sports1500' || profile === 'sportspro' || profile === 'sharp1800' || profile === 'eco1100') return profile;
   return 'normal';
 };
 const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
@@ -4575,7 +4575,7 @@ app.post('/api/emit', async (req, res) => {
     //     de la fuente: sin -r ni -vsync cfr, evita DUP/DROP cosméticos.
     //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
     //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
-    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'sportspro' || outputProfile.key === 'sharp1800';
+    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'sportspro' || outputProfile.key === 'sharp1800' || outputProfile.key === 'eco1100';
     const isNaturalCadence = isStandardProfile
       && !isPassthroughBlock
       && !isSrtIngest
