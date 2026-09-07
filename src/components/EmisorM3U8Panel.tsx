@@ -124,6 +124,14 @@ const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   mid576: "Intermedio 576p · 1800k (pico 2000k) + AAC 128k",
   sd480: "SD 480p · 1500k (pico 2100k) + AAC 96k",
 };
+const OUTPUT_PROFILE_SHORT_LABELS: Record<OutputProfile, string> = {
+  passthrough: "COPY",
+  highquality: "ALTA CALIDAD",
+  hd720: "HD 720",
+  normal: "NORMAL",
+  mid576: "INTERMEDIO",
+  sd480: "SD 480",
+};
 const VALID_OUTPUT_PROFILES = new Set<string>([
   "passthrough", "highquality", "hd720", "normal", "mid576", "sd480",
 ]);
