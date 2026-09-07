@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye } from "lucide-react";
 import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
 import { supabase } from "@/integrations/supabase/client";
-import { computeStreamHealth } from "@/lib/streamHealth";
+import { computeStreamHealthSmoothed } from "@/lib/streamHealth";
 
 
 /** Canales ocultos en el dashboard (no tiene sentido mostrarlos aquí tampoco) */
@@ -99,13 +99,14 @@ function autoSlots(w: number, h: number) {
 
 /** Etiqueta de estabilidad — mismo criterio que las tarjetas del Home */
 function computeHealth(c: {
+  key: string;
   status: string;
   fps: number | null;
   speed: number | null;
   q: number | null;
   recoveryCount: number;
 }): Card["health"] {
-  return computeStreamHealth({ ...c }).level;
+  return computeStreamHealthSmoothed(c.key, { ...c }).level;
 }
 
 
