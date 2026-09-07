@@ -10,6 +10,8 @@ import type { Tables } from "@/integrations/supabase/types";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
 import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
+import { computeStreamHealth, healthTooltip } from "@/lib/streamHealth";
+
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
 // - No se puede cambiar el header real "User-Agent" desde JS por seguridad.
