@@ -124,6 +124,14 @@ const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   mid576: "Intermedio 576p · 1800k (pico 2000k) + AAC 128k",
   sd480: "SD 480p · 1500k (pico 2100k) + AAC 96k",
 };
+const OUTPUT_PROFILE_SHORT_LABELS: Record<OutputProfile, string> = {
+  passthrough: "COPY",
+  highquality: "ALTA CALIDAD",
+  hd720: "HD 720",
+  normal: "NORMAL",
+  mid576: "INTERMEDIO",
+  sd480: "SD 480",
+};
 const VALID_OUTPUT_PROFILES = new Set<string>([
   "passthrough", "highquality", "hd720", "normal", "mid576", "sd480",
 ]);
@@ -3462,7 +3470,8 @@ export default function EmisorM3U8Panel() {
                         ? Math.max(0, Math.floor((clockNow - p.startTime) / 1000))
                         : p.elapsed;
                       const isSrt = SRT_INGEST_INDEXES.has(i);
-                      const isPassthroughProfile = getOutputProfile(i) === 'passthrough';
+                      const profile = getOutputProfile(i);
+                      const isPassthroughProfile = profile === 'passthrough';
                       // En passthrough (-c copy) FFmpeg no decodifica frames, así que
                       // fps/bitrate/q/speed salen como 0/N/A. Los marcamos como N/D
                       // para no confundir (no es un bug — es esperado en copy mode).
@@ -3514,6 +3523,12 @@ export default function EmisorM3U8Panel() {
                               </h3>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <span
+                                title={OUTPUT_PROFILE_LABELS[profile]}
+                                className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border bg-muted/30 text-muted-foreground border-border/50"
+                              >
+                                {OUTPUT_PROFILE_SHORT_LABELS[profile]}
+                              </span>
                               <button
                                 type="button"
                                 onClick={() => setViewerDialog({ pid: i, name: color.name })}
