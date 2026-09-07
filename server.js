@@ -1012,28 +1012,40 @@ const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 //   - preset:      compromiso CPU vs calidad visual (faster ≈ +15% calidad vs veryfast).
 //   - x264Params:  ajustes finos de compresión (rc-lookahead/ref/bframes) — solo donde aporta.
 //   - audioBitrate: 128k es el "sweet spot"; bajar a 96k apenas ahorra ancho de banda total.
+// ───────────────────────────────────────────────────────────────────────
+// PERFILES DE SALIDA (escalera tipo OTT: YouTube live / Netflix / Prime)
+// Se eliminaron los perfiles experimentales (sportspro, sharp1800, eco1100,
+// sports1800, sports1500, balanced, optimized): daban congelones por presets
+// lentos (fast/medium) o VBV demasiado corto. La escalera nueva usa preset
+// `faster` (mismo que Normal, que nunca se frisa) + VBV amplio (2x bitrate)
+// y bitrates reales de las escaleras públicas de YouTube/Netflix a 30fps:
+//   480p ≈ 1500k · 576p ≈ 2350k · 720p ≈ 3000k
+// Threads: 6 por canal transcodificado (8 canales máx → ~48 hilos, holgado
+// en el VPS de 36+ vCPU porque x264 no satura todos los hilos al 100%).
+// ───────────────────────────────────────────────────────────────────────
 const OUTPUT_PROFILES = {
   passthrough:{ key: 'passthrough',label: 'Passthrough (sin re-encode)', width: '', videoBitrate: '', bufsize: '', audioBitrate: '', preset: '', x264Params: '', passthrough: true },
-  highquality:{ key: 'highquality',label: 'Alta Calidad', width: '720', videoBitrate: '4000k', bufsize: '8000k', audioBitrate: '192k', preset: 'faster',   x264Params: 'rc-lookahead=30:ref=3:bframes=2' },
+  highquality:{ key: 'highquality',label: 'Alta Calidad', width: '720', videoBitrate: '4000k', bufsize: '8000k', audioBitrate: '192k', preset: 'faster',   x264Params: 'rc-lookahead=30:ref=3:bframes=2', threads: 6 },
   normal:     { key: 'normal',     label: 'Normal',     width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'veryfast', x264Params: '' },
-  // Perfiles "Deportes": 720p con VBV corto (bufsize = 1x bitrate) → salida plana,
-  // sin bursts, GOP fijo de 2s. Pensados para movimiento rápido con menos ancho de banda.
-  // "Nítido 1800": baja la altura a 576p para que los 1800k rindan mucho más
-  // (menos píxeles = más bits por píxel). Se ve limpio y sin bloques en TV.
-  sharp1800:  { key: 'sharp1800',  label: 'Nítido 1800 (576p)', width: '576', videoBitrate: '1800k', maxrate: '2400k', bufsize: '4800k', audioBitrate: '128k', preset: 'fast', x264Params: 'rc-lookahead=30:ref=3:bframes=3:b-adapt=1:aq-mode=3:aq-strength=1.0:psy-rd=1.0,0.10:mbtree=1:deblock=-1,-1' },
-  // "SD Pro 1100" (escalera tipo Netflix/OTT): 480p con VBR amplio.
-  // A 1100k medio / 1600k de pico y 480 líneas hay ~0.10 bits/píxel, el mismo
-  // rango que usan los servicios OTT para su rendition SD "buena". Se ve nítido
-  // en TV (upscale limpio) y consume ~45% menos que Normal 2000k.
-  eco1100:    { key: 'eco1100',    label: 'SD Pro 1100 (480p)', width: '480', videoBitrate: '1100k', maxrate: '1600k', bufsize: '3200k', audioBitrate: '96k', preset: 'fast', x264Params: 'rc-lookahead=30:ref=3:bframes=3:b-adapt=1:aq-mode=3:aq-strength=1.1:psy-rd=1.0,0.10:mbtree=1:deblock=-1,-1' },
-  sports1800: { key: 'sports1800', label: 'Deportes 1800', width: '720', videoBitrate: '1800k', bufsize: '1800k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2:scenecut=0' },
-  // "Deportes Pro": VBV amplio (bufsize 2x, maxrate con 200k de holgura) →
-  // el encoder puede gastar picos en jugadas rápidas y ahorrar en planos fijos.
-  // ~35% menos ancho de banda que Alta Calidad con calidad percibida cercana.
-  sportspro:  { key: 'sportspro',  label: 'Deportes Pro 2600', width: '720', videoBitrate: '2600k', maxrate: '2800k', bufsize: '5600k', audioBitrate: '160k', preset: 'fast', x264Params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=2:aq-strength=1.0' },
-  sports1500: { key: 'sports1500', label: 'Deportes Ultra Estable 1500', width: '720', videoBitrate: '1500k', bufsize: '1500k', audioBitrate: '128k', preset: 'veryfast', x264Params: 'rc-lookahead=10:ref=2:bframes=0:scenecut=0' },
-  balanced:   { key: 'balanced',   label: 'Balanceada', width: '540', videoBitrate: '1500k', bufsize: '3000k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
-  optimized:  { key: 'optimized',  label: 'Optimizada', width: '480', videoBitrate: '1200k', bufsize: '2400k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2' },
+  // HD 720p — equivalente al 720p30 de YouTube live (3000k) y al escalón
+  // 720p de la escalera Netflix. VBV 2x para picos de movimiento.
+  hd720:      { key: 'hd720',      label: 'HD 720p (3000k)', width: '720', videoBitrate: '3000k', maxrate: '3600k', bufsize: '6000k', audioBitrate: '128k', preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 6 },
+  // Intermedio 576p — escalón 2350k de la escalera Netflix. Es el punto dulce
+  // calidad/ancho de banda: casi HD en TV, ~20% menos datos que HD 720p.
+  mid576:     { key: 'mid576',     label: 'Intermedio 576p (2350k)', width: '576', videoBitrate: '2350k', maxrate: '2800k', bufsize: '4700k', audioBitrate: '128k', preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 6 },
+  // SD 480p — escalón 1750k/1500k SD de Netflix y mínimo 480p de YouTube.
+  // Para eventos masivos o clientes con internet flojo.
+  sd480:      { key: 'sd480',      label: 'SD 480p (1500k)', width: '480', videoBitrate: '1500k', maxrate: '2100k', bufsize: '3000k', audioBitrate: '96k',  preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 4 },
+};
+// Perfiles retirados → se remapean al equivalente más cercano de la escalera nueva.
+const LEGACY_PROFILE_ALIASES = {
+  sportspro: 'hd720',
+  sharp1800: 'mid576',
+  balanced: 'mid576',
+  eco1100: 'sd480',
+  optimized: 'sd480',
+  sports1500: 'sd480',
+  sports1800: 'hd720',
 };
 let outputProfileState = {};
 try {
@@ -1044,7 +1056,8 @@ try {
   console.warn('[profiles] No se pudo leer output-profiles.json:', err.message);
 }
 const normalizeOutputProfile = (profile) => {
-  if (profile === 'optimized' || profile === 'balanced' || profile === 'normal' || profile === 'passthrough' || profile === 'highquality' || profile === 'sports1800' || profile === 'sports1500' || profile === 'sportspro' || profile === 'sharp1800' || profile === 'eco1100') return profile;
+  if (OUTPUT_PROFILES[profile]) return profile;
+  if (LEGACY_PROFILE_ALIASES[profile]) return LEGACY_PROFILE_ALIASES[profile];
   return 'normal';
 };
 const getOutputProfileConfig = (profile) => OUTPUT_PROFILES[normalizeOutputProfile(profile)];
@@ -4575,7 +4588,7 @@ app.post('/api/emit', async (req, res) => {
     //     de la fuente: sin -r ni -vsync cfr, evita DUP/DROP cosméticos.
     //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
     //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
-    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'sportspro' || outputProfile.key === 'sharp1800' || outputProfile.key === 'eco1100';
+    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'hd720' || outputProfile.key === 'mid576' || outputProfile.key === 'sd480';
     const isNaturalCadence = isStandardProfile
       && !isPassthroughBlock
       && !isSrtIngest
@@ -4656,7 +4669,7 @@ app.post('/api/emit', async (req, res) => {
         '-c:v', 'libx264',
         '-preset', outputProfile.preset || 'veryfast',
         '-profile:v', 'main',
-        '-threads', '4',
+        '-threads', String(outputProfile.threads || 4),
         '-b:v', outputProfile.videoBitrate,
         '-maxrate', outputProfile.maxrate || outputProfile.videoBitrate,
         '-bufsize', outputProfile.bufsize,
@@ -6555,8 +6568,8 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode ${outputProfile.label} CBR ${outputProfile.videoBitrate} ${outputProfile.width}p30`);
       videoParams = [
         '-c:v', 'libx264', '-preset', outputProfile.preset || 'veryfast', '-profile:v', 'main',
-        '-threads', '4',
-        '-b:v', outputProfile.videoBitrate, '-maxrate', outputProfile.videoBitrate, '-bufsize', outputProfile.bufsize,
+        '-threads', String(outputProfile.threads || 4),
+        '-b:v', outputProfile.videoBitrate, '-maxrate', outputProfile.maxrate || outputProfile.videoBitrate, '-bufsize', outputProfile.bufsize,
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
         '-vf', `scale=-2:${outputProfile.width}`,
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
