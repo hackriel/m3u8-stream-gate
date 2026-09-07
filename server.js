@@ -1020,7 +1020,12 @@ const OUTPUT_PROFILES = {
   // sin bursts, GOP fijo de 2s. Pensados para movimiento rápido con menos ancho de banda.
   // "Nítido 1800": baja la altura a 576p para que los 1800k rindan mucho más
   // (menos píxeles = más bits por píxel). Se ve limpio y sin bloques en TV.
-  sharp1800:  { key: 'sharp1800',  label: 'Nítido 1800 (576p)', width: '576', videoBitrate: '1800k', maxrate: '2400k', bufsize: '5400k', audioBitrate: '128k', preset: 'medium', x264Params: 'rc-lookahead=50:ref=5:bframes=3:b-adapt=2:aq-mode=3:aq-strength=1.1:psy-rd=1.0,0.15:mbtree=1:deblock=-1,-1' },
+  sharp1800:  { key: 'sharp1800',  label: 'Nítido 1800 (576p)', width: '576', videoBitrate: '1800k', maxrate: '2400k', bufsize: '4800k', audioBitrate: '128k', preset: 'fast', x264Params: 'rc-lookahead=30:ref=3:bframes=3:b-adapt=1:aq-mode=3:aq-strength=1.0:psy-rd=1.0,0.10:mbtree=1:deblock=-1,-1' },
+  // "SD Pro 1100" (escalera tipo Netflix/OTT): 480p con VBR amplio.
+  // A 1100k medio / 1600k de pico y 480 líneas hay ~0.10 bits/píxel, el mismo
+  // rango que usan los servicios OTT para su rendition SD "buena". Se ve nítido
+  // en TV (upscale limpio) y consume ~45% menos que Normal 2000k.
+  eco1100:    { key: 'eco1100',    label: 'SD Pro 1100 (480p)', width: '480', videoBitrate: '1100k', maxrate: '1600k', bufsize: '3200k', audioBitrate: '96k', preset: 'fast', x264Params: 'rc-lookahead=30:ref=3:bframes=3:b-adapt=1:aq-mode=3:aq-strength=1.1:psy-rd=1.0,0.10:mbtree=1:deblock=-1,-1' },
   sports1800: { key: 'sports1800', label: 'Deportes 1800', width: '720', videoBitrate: '1800k', bufsize: '1800k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2:scenecut=0' },
   // "Deportes Pro": VBV amplio (bufsize 2x, maxrate con 200k de holgura) →
   // el encoder puede gastar picos en jugadas rápidas y ahorrar en planos fijos.
