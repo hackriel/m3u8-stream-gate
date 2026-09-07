@@ -7644,6 +7644,146 @@ app.get('/api/cr-tunnel/health', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────
+// HISTORIAL DE SALUD (barras de comportamiento) — CALCULADO EN EL SERVIDOR
+// El dashboard antes calculaba las barras en el navegador: al cerrar la
+// pestaña o abrir desde otro dispositivo el historial se perdía. Ahora el
+// VPS evalúa cada 5s la salud de cada proceso (mismos umbrales que
+// src/lib/streamHealth.ts: mediana de 60s + histéresis) y guarda 30 buckets
+// de 30s (= últimos 15 min). Se persiste en disco para sobrevivir reinicios.
+// ─────────────────────────────────────────────────────────────────────
+const HH_BUCKET_MS = 30_000;
+const HH_MAX_BUCKETS = 30;
+const HH_WINDOW_MS = 60_000;
+const HH_WARMUP_MS = 25_000;
+const HH_ESCALATE = 3;
+const HH_DEESCALATE = 6;
+const HH_FILE = path.join(__dirname, 'health-history.json');
+const hhState = new Map(); // pid -> { samples, firstTs, level, pendingLevel, pendingCount, lastStatus, history }
+let hhDirty = false;
+
+const hhSeverity = (l) => (l === 'critical' ? 2 : l === 'warning' ? 1 : 0);
+const hhMedian = (arr) => {
+  if (!arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = s >> 0 && s.length >> 1;
+  const i = s.length >> 1;
+  return s.length % 2 ? s[i] : (s[i - 1] + s[i]) / 2;
+};
+
+function hhEvaluate({ status, fps, speed, q, warmup }) {
+  let critical = 0, warning = 0;
+  if (status !== 'running') warning++;
+  if (fps != null) { if (fps < 15) critical++; else if (fps < 22) warning++; }
+  if (speed != null) {
+    if (speed < 0.85 || speed > 1.25) critical++;
+    else if (speed < 0.92 || speed > 1.12) warning++;
+  }
+  if (q != null) { if (q >= 36) critical++; else if (q >= 31) warning++; }
+  let level = critical > 0 ? 'critical' : warning > 0 ? 'warning' : 'stable';
+  if (warmup && level === 'critical') level = 'warning';
+  return level;
+}
+
+function hhTick() {
+  const now = Date.now();
+  for (let i = 0; i <= 28; i++) {
+    const pid = String(i);
+    const status = emissionStatuses.get(pid) || 'idle';
+    const live = getLiveStats(pid);
+    if (status !== 'running' && !live) {
+      // Proceso apagado: no se generan barras nuevas (se conserva lo previo).
+      const st0 = hhState.get(pid);
+      if (st0) { st0.samples = []; st0.lastStatus = status; }
+      continue;
+    }
+    let st = hhState.get(pid);
+    if (!st) {
+      st = { samples: [], firstTs: now, level: 'stable', pendingLevel: null, pendingCount: 0, lastStatus: status, history: [] };
+      hhState.set(pid, st);
+    }
+    if (st.lastStatus !== status && status === 'running') {
+      st.samples = []; st.firstTs = now; st.pendingLevel = null; st.pendingCount = 0;
+    }
+    st.lastStatus = status;
+
+    const passthrough = (live && live.q == null && live.fps == null) || false;
+    st.samples.push({
+      ts: now,
+      fps: passthrough ? null : (live && live.fps) ?? null,
+      speed: passthrough ? null : (live && live.speed) ?? null,
+      q: passthrough ? null : (live && live.q) ?? null,
+    });
+    st.samples = st.samples.filter((s) => now - s.ts <= HH_WINDOW_MS);
+    const num = (pick) => hhMedian(st.samples.map(pick).filter((v) => v != null && v > 0));
+
+    const raw = hhEvaluate({
+      status,
+      fps: num((s) => s.fps),
+      speed: num((s) => s.speed),
+      q: num((s) => s.q),
+      warmup: now - st.firstTs < HH_WARMUP_MS,
+    });
+
+    if (raw === st.level) { st.pendingLevel = null; st.pendingCount = 0; }
+    else {
+      if (st.pendingLevel !== raw) { st.pendingLevel = raw; st.pendingCount = 0; }
+      st.pendingCount++;
+      const needed = hhSeverity(raw) > hhSeverity(st.level) ? HH_ESCALATE : HH_DEESCALATE;
+      if (st.pendingCount >= needed) { st.level = raw; st.pendingLevel = null; st.pendingCount = 0; }
+    }
+
+    const bucketTs = Math.floor(now / HH_BUCKET_MS) * HH_BUCKET_MS;
+    const last = st.history[st.history.length - 1];
+    if (!last || last.ts !== bucketTs) st.history.push({ ts: bucketTs, level: st.level });
+    else if (hhSeverity(st.level) > hhSeverity(last.level)) last.level = st.level;
+    if (st.history.length > HH_MAX_BUCKETS) st.history = st.history.slice(-HH_MAX_BUCKETS);
+    hhDirty = true;
+  }
+}
+
+function hhLoad() {
+  try {
+    if (!fs.existsSync(HH_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(HH_FILE, 'utf8'));
+    for (const [pid, history] of Object.entries(data || {})) {
+      if (!Array.isArray(history)) continue;
+      hhState.set(pid, {
+        samples: [], firstTs: Date.now(), level: 'stable', pendingLevel: null,
+        pendingCount: 0, lastStatus: 'idle', history: history.slice(-HH_MAX_BUCKETS),
+      });
+    }
+  } catch (e) { console.warn('[health-history] no se pudo cargar:', e.message); }
+}
+
+function hhSave() {
+  if (!hhDirty) return;
+  hhDirty = false;
+  const out = {};
+  for (const [pid, st] of hhState.entries()) if (st.history.length) out[pid] = st.history;
+  try { fs.writeFileSync(HH_FILE, JSON.stringify(out)); }
+  catch (e) { console.warn('[health-history] no se pudo guardar:', e.message); }
+}
+
+hhLoad();
+setInterval(hhTick, 5000);
+setInterval(hhSave, 30000);
+
+// GET /api/health-history → { "11": ["stable","warning",...], ... }
+// Solo buckets de los últimos 15 min; el frontend los pinta tal cual.
+app.get('/api/health-history', (req, res) => {
+  const now = Date.now();
+  const out = {};
+  for (const [pid, st] of hhState.entries()) {
+    const bars = st.history
+      .filter((b) => now - b.ts <= HH_MAX_BUCKETS * HH_BUCKET_MS)
+      .map((b) => b.level);
+    if (bars.length) out[pid] = bars;
+  }
+  res.json({ buckets_ms: HH_BUCKET_MS, max_buckets: HH_MAX_BUCKETS, by_pid: out });
+});
+
+
 app.get('/api/status', (req, res) => {
   const { process_id } = req.query;
 
