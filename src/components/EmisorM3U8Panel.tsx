@@ -120,7 +120,7 @@ const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   highquality: "Alta Calidad · 720p CBR 4000k + AAC 192k (faster)",
   normal: "Normal · 720p CBR 2000k + AAC 128k",
   sportspro: "Deportes Pro · 720p VBR 2600k (pico 2800k) + AAC 160k (fast)",
-  sharp1800: "Nítido 1800 · 576p VBR 1800k (pico 2000k) + AAC 128k (fast)",
+  sharp1800: "Nítido 1800 · 576p VBR 1800k (pico 2400k) + AAC 128k (medium)",
   sports1800: "Deportes 1800 · 720p CBR 1800k + AAC 128k (faster)",
   sports1500: "Deportes Ultra Estable 1500 · 720p CBR 1500k + AAC 128k",
   balanced: "Balanceada · 540p CBR 1500k + AAC 128k (faster)",
@@ -2883,7 +2883,7 @@ export default function EmisorM3U8Panel() {
                   : outputProfile === 'sportspro'
                   ? 'Deportes Pro (720p · 2600k con picos a 2800k · buffer amplio 2s · preset fast · B-frames 3 · AQ activo · AAC 160k · cadencia natural). Pensado para deportes: gasta más bits en las jugadas rápidas y ahorra en planos fijos. Calidad muy cercana a Alta Calidad usando ~35% menos ancho de banda y bastante menos CPU.'
                   : outputProfile === 'sharp1800'
-                  ? 'Nítido 1800 (576p · 1800k con picos a 2000k · buffer 2s · preset fast · B-frames 3 · AQ activo · cadencia natural). Mismo ancho de banda que Deportes 1800 pero se ve mucho más limpio: al bajar de 720p a 576p cada píxel recibe casi el doble de bits, así que desaparecen los bloques en movimiento. En TV se ve suave, no es HD real pero es muy aceptable.'
+                  ? 'Nítido 1800 (576p · 1800k con picos hasta 2400k · buffer 3s · preset medium · B-frames adaptativos · AQ 3 · cadencia natural). Mismo consumo promedio que Deportes 1800 pero se ve mucho más limpio y sin congelones en jugadas rápidas: el pico más alto y el buffer más grande absorben las escenas difíciles. En TV se ve suave, no es HD real pero es muy aceptable.'
                   : outputProfile === 'sports1800'
                   ? 'Deportes 1800 (720p · CBR 1800k · buffer corto 1s · GOP fijo 2s · preset faster). Casi idéntico a Normal a la vista, pero ~10% menos ancho de banda y salida más plana: menos picos, menos cortes en redes flojas.'
                   : outputProfile === 'sports1500'
