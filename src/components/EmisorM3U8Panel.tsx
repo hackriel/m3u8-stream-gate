@@ -121,7 +121,7 @@ const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   highquality: "Alta Calidad · 720p CBR 4000k + AAC 192k (faster)",
   hd720: "HD 720p · 3000k (pico 3600k) + AAC 128k",
   normal: "Normal · 720p CBR 2000k + AAC 128k",
-  mid576: "Intermedio 576p · 2350k (pico 2800k) + AAC 128k",
+  mid576: "Intermedio 576p · 1800k (pico 2000k) + AAC 128k",
   sd480: "SD 480p · 1500k (pico 2100k) + AAC 96k",
 };
 const VALID_OUTPUT_PROFILES = new Set<string>([
@@ -2898,7 +2898,7 @@ export default function EmisorM3U8Panel() {
                   : outputProfile === 'hd720'
                   ? 'HD 720p (3000k promedio, picos a 3600k · buffer 2s · preset faster · 6 hilos · AAC 128k · cadencia natural). Es el mismo bitrate que recomienda YouTube para 720p30 y el escalón 720p de la escalera Netflix. Nitidez HD real con ~25% menos datos que Alta Calidad y sin riesgo de congelones (mismo preset rápido que Normal).'
                   : outputProfile === 'mid576'
-                  ? 'Intermedio 576p (2350k promedio, picos a 2800k · buffer 2s · preset faster · 6 hilos · AAC 128k · cadencia natural). Escalón 2350k de la escalera Netflix: en TV se ve casi como HD porque los píxeles están muy bien alimentados, y consume ~20% menos que HD 720p. El punto dulce para deportes.'
+                  ? 'Intermedio 576p (1800k promedio, pico 2000k · buffer 2s · preset faster · 5 hilos · AAC 128k 48 kHz · cadencia CFR real). Mismo tratamiento anti-congelón que el SD: audio sin resamplear, picos contenidos (+11%) y compresión más fina (ref=4, lookahead 30, aq 1.1) para exprimir los 1800k. Consume ~40% menos red que HD 720p y se ve muy cerca del intermedio anterior.'
                   : outputProfile === 'sd480'
                   ? 'SD 480p (1500k promedio, picos a 2100k · buffer 2s · preset faster · AAC 96k · cadencia natural). Calidad SD buena tipo OTT: limpia y estable en TV, ~25% menos datos que Normal. Para eventos masivos o clientes con internet flojo.'
                   : 'Perfil estándar de producción (720p · 2000k). Mejor calidad, mayor consumo por usuario.'}
