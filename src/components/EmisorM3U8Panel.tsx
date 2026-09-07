@@ -388,6 +388,24 @@ export default function EmisorM3U8Panel() {
     return () => { alive = false; clearInterval(t); };
   }, []);
 
+  // Barras de comportamiento: historial persistente que calcula el VPS.
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const resp = await fetch('/api/health-history');
+        if (!resp.ok) return;
+        const ct = resp.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) return;
+        const data = await resp.json();
+        if (alive && data?.by_pid) setServerHealthHistory(data.by_pid as Record<string, HealthLevel[]>);
+      } catch { /* /api no disponible fuera del VPS */ }
+    };
+    load();
+    const t = setInterval(load, 15000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
 
 
   const reconcileWithServerStatus = useCallback(async () => {
