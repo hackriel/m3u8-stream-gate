@@ -66,6 +66,13 @@ interface Sample {
   q: number | null;
 }
 
+interface HistoryBucket {
+  /** Marca de inicio del bucket (múltiplo de BUCKET_MS). */
+  ts: number;
+  /** Peor nivel observado dentro del bucket. */
+  level: HealthLevel;
+}
+
 interface ChannelState {
   samples: Sample[];
   firstTs: number;
@@ -75,7 +82,13 @@ interface ChannelState {
   recoveryMarks: number[];
   lastRecoveryCount: number;
   lastStatus: string;
+  history: HistoryBucket[];
 }
+
+/** Cada barra del historial resume 30 segundos. */
+export const BUCKET_MS = 30_000;
+/** 30 barras = últimos 15 minutos de comportamiento. */
+export const HISTORY_BUCKETS = 30;
 
 const states = new Map<string, ChannelState>();
 
@@ -115,6 +128,7 @@ export function computeStreamHealthSmoothed(key: string, input: HealthInput): He
       recoveryMarks: [],
       lastRecoveryCount: input.recoveryCount,
       lastStatus: input.status,
+      history: [],
     };
     states.set(key, st);
   }
@@ -173,6 +187,16 @@ export function computeStreamHealthSmoothed(key: string, input: HealthInput): He
     }
   }
 
+  // Historial en barras: cada bucket guarda el PEOR nivel de sus 30s.
+  const bucketTs = Math.floor(now / BUCKET_MS) * BUCKET_MS;
+  const last = st.history[st.history.length - 1];
+  if (!last || last.ts !== bucketTs) {
+    st.history.push({ ts: bucketTs, level: st.level });
+  } else if (severity(st.level) > severity(last.level)) {
+    last.level = st.level;
+  }
+  if (st.history.length > HISTORY_BUCKETS) st.history = st.history.slice(-HISTORY_BUCKETS);
+
   return { level: st.level, label: LABELS[st.level], reasons: raw.reasons };
 }
 
@@ -222,4 +246,15 @@ export function healthTooltip(result: HealthResult, passthrough = false): string
       : `Sano — FPS, velocidad y compresión dentro de rango. ${criteria}`;
   }
   return `${result.label}: ${result.reasons.join(" · ")}. ${criteria}`;
+}
+
+/**
+ * Historial reciente del canal en barras (más antigua → más nueva).
+ * Cada elemento resume BUCKET_MS (30s) con el PEOR nivel visto en ese tramo.
+ */
+export function getHealthHistory(key: string): HealthLevel[] {
+  const st = states.get(key);
+  if (!st) return [];
+  const now = Date.now();
+  return st.history.filter((b) => now - b.ts <= HISTORY_BUCKETS * BUCKET_MS).map((b) => b.level);
 }

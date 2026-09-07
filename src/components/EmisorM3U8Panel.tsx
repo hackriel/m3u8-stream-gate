@@ -10,7 +10,8 @@ import type { Tables } from "@/integrations/supabase/types";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
 import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
-import { computeStreamHealthSmoothed, healthTooltip } from "@/lib/streamHealth";
+import { computeStreamHealthSmoothed, healthTooltip, getHealthHistory } from "@/lib/streamHealth";
+import { HealthBars } from "@/components/HealthBars";
 
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
@@ -3542,11 +3543,14 @@ export default function EmisorM3U8Panel() {
                             </div>
                           </div>
 
-                          <div className="mb-3">
-                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Uptime</div>
-                            <div className="font-mono text-2xl font-bold text-primary tabular-nums">
-                              {formatSeconds(elapsed)}
+                          <div className="mb-3 flex items-end gap-3">
+                            <div className="w-1/2 min-w-0">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Uptime</div>
+                              <div className="font-mono text-2xl font-bold text-primary tabular-nums">
+                                {formatSeconds(elapsed)}
+                              </div>
                             </div>
+                            <HealthBars history={getHealthHistory(String(i))} className="w-1/2 min-w-0" />
                           </div>
 
                           <div className="grid grid-cols-3 gap-2 text-xs">
