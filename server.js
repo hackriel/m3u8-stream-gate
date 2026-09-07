@@ -4596,7 +4596,8 @@ app.post('/api/emit', async (req, res) => {
     //     de la fuente: sin -r ni -vsync cfr, evita DUP/DROP cosméticos.
     //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
     //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
-    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'hd720' || outputProfile.key === 'mid576';
+    const isStandardProfile = !outputProfile.forceCfr
+      && (outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'hd720' || outputProfile.key === 'mid576');
     const isNaturalCadence = isStandardProfile
       && !isPassthroughBlock
       && !isSrtIngest
