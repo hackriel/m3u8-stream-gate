@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye } from "lucide-react";
 import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
 import { supabase } from "@/integrations/supabase/client";
+import { computeStreamHealth } from "@/lib/streamHealth";
+
 
 /** Canales ocultos en el dashboard (no tiene sentido mostrarlos aquí tampoco) */
 const HIDDEN = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 19]);
