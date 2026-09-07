@@ -10,7 +10,7 @@ import type { Tables } from "@/integrations/supabase/types";
 import { useServerMetrics } from "@/hooks/useServerMetrics";
 import { LogSnapshotsViewer } from "@/components/LogSnapshotsViewer";
 import { ViewerDetailsDialog } from "@/components/ViewerDetailsDialog";
-import { computeStreamHealth, healthTooltip } from "@/lib/streamHealth";
+import { computeStreamHealthSmoothed, healthTooltip } from "@/lib/streamHealth";
 
 
 // ⚠️ Importante sobre User-Agent y RTMP desde el navegador:
@@ -3504,7 +3504,7 @@ export default function EmisorM3U8Panel() {
                               </button>
 
                               {(() => {
-                                const hr = computeStreamHealth({
+                                const hr = computeStreamHealthSmoothed(String(i), {
                                   status: p.emitStatus,
                                   fps: live?.fps ?? null,
                                   speed: live?.speed ?? null,
