@@ -69,7 +69,13 @@ type Card = {
   fps: number | null;
   drop: number | null;
   dup: number | null;
+  q: number | null;
+  speed: number | null;
+  bitrateKbps: number | null;
+  srtRttMs: number | null;
+  recoveryCount: number;
   viewers: number | null;
+  health: "stable" | "warning" | "critical";
 };
 
 const fmt = (total: number) => {
