@@ -3470,7 +3470,8 @@ export default function EmisorM3U8Panel() {
                         ? Math.max(0, Math.floor((clockNow - p.startTime) / 1000))
                         : p.elapsed;
                       const isSrt = SRT_INGEST_INDEXES.has(i);
-                      const isPassthroughProfile = getOutputProfile(i) === 'passthrough';
+                      const profile = getOutputProfile(i);
+                      const isPassthroughProfile = profile === 'passthrough';
                       // En passthrough (-c copy) FFmpeg no decodifica frames, así que
                       // fps/bitrate/q/speed salen como 0/N/A. Los marcamos como N/D
                       // para no confundir (no es un bug — es esperado en copy mode).
