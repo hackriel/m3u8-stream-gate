@@ -1032,7 +1032,11 @@ const OUTPUT_PROFILES = {
   hd720:      { key: 'hd720',      label: 'HD 720p (3000k)', width: '720', videoBitrate: '3000k', maxrate: '3600k', bufsize: '6000k', audioBitrate: '128k', preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 6 },
   // Intermedio 576p — escalón 2350k de la escalera Netflix. Es el punto dulce
   // calidad/ancho de banda: casi HD en TV, ~20% menos datos que HD 720p.
-  mid576:     { key: 'mid576',     label: 'Intermedio 576p (2350k)', width: '576', videoBitrate: '2350k', maxrate: '2800k', bufsize: '4700k', audioBitrate: '128k', preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 6 },
+  // Intermedio 576p — AUDITADO igual que SD: 1800k promedio (escalón medio
+  // Netflix/YouTube 576p), VBV contenido (pico +11%, buffer 2s), audio 48kHz
+  // nativo sin resampleo y cadencia CFR real al fps detectado. Herramientas de
+  // compresión más finas (ref=4, lookahead 30, aq 1.1) para exprimir los 1800k.
+  mid576:     { key: 'mid576',     label: 'Intermedio 576p (1800k)', width: '576', videoBitrate: '1800k', maxrate: '2000k', bufsize: '3600k', audioBitrate: '128k', audioRate: '48000', forceCfr: true, preset: 'faster', x264Params: 'rc-lookahead=30:ref=4:bframes=3:aq-mode=3:aq-strength=1.1:scenecut=0:vbv-init=0.9', threads: 5 },
   // SD 480p — escalón 1750k/1500k SD de Netflix y mínimo 480p de YouTube.
   // Para eventos masivos o clientes con internet flojo.
   // SD 480p — AUDITADO para deportes: VBV contenido (maxrate 1700k = +13%,
