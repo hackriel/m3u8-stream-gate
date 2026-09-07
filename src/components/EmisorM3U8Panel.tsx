@@ -2864,34 +2864,22 @@ export default function EmisorM3U8Panel() {
                   <option value="passthrough">{OUTPUT_PROFILE_LABELS.passthrough}</option>
                 )}
                 <option value="highquality">{OUTPUT_PROFILE_LABELS.highquality}</option>
+                <option value="hd720">{OUTPUT_PROFILE_LABELS.hd720}</option>
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
-                <option value="sportspro">{OUTPUT_PROFILE_LABELS.sportspro}</option>
-                <option value="sharp1800">{OUTPUT_PROFILE_LABELS.sharp1800}</option>
-                <option value="eco1100">{OUTPUT_PROFILE_LABELS.eco1100}</option>
-                <option value="sports1800">{OUTPUT_PROFILE_LABELS.sports1800}</option>
-                <option value="sports1500">{OUTPUT_PROFILE_LABELS.sports1500}</option>
-                <option value="balanced">{OUTPUT_PROFILE_LABELS.balanced}</option>
-                <option value="optimized">{OUTPUT_PROFILE_LABELS.optimized}</option>
+                <option value="mid576">{OUTPUT_PROFILE_LABELS.mid576}</option>
+                <option value="sd480">{OUTPUT_PROFILE_LABELS.sd480}</option>
               </select>
               <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                 {outputProfile === 'passthrough'
                   ? 'La señal sale del VPS EXACTAMENTE como la manda OBS (resolución/bitrate/codec). Cero re-encode, cero pérdida de calidad, CPU ~3%. Recomendado para SRT: configurá OBS en 720p · 2000-3000 kbps CBR · H264 main · keyframe 2s · AAC 128k 48 kHz.'
                   : outputProfile === 'highquality'
                   ? 'Máxima nitidez (720p · CBR 4000k · AAC 192k · preset faster · GOP 2s · main profile). Ideal para deportes y fuentes que llegan a 3-4 Mbps (SRT/OBS, FOX+, FOX, Teletica, Canal 6, Disney 8). Consume ~2x CPU y ~2x ancho de banda que Normal; si la fuente llega por debajo de 2 Mbps no vas a ganar detalle.'
-                  : outputProfile === 'sportspro'
-                  ? 'Deportes Pro (720p · 2600k con picos a 2800k · buffer amplio 2s · preset fast · B-frames 3 · AQ activo · AAC 160k · cadencia natural). Pensado para deportes: gasta más bits en las jugadas rápidas y ahorra en planos fijos. Calidad muy cercana a Alta Calidad usando ~35% menos ancho de banda y bastante menos CPU.'
-                  : outputProfile === 'sharp1800'
-                  ? 'Nítido 1800 (576p · 1800k con picos hasta 2400k · buffer 2.7s · preset fast · B-frames 3 · AQ 3 · cadencia natural). Ahora usa preset fast: menos carga de CPU y menos riesgo de congelones cuando el servidor está ocupado, con prácticamente la misma nitidez.'
-                  : outputProfile === 'eco1100'
-                  ? 'SD Pro 1100 (480p · 1100k con picos hasta 1600k · buffer 2.9s · preset fast · B-frames 3 · AQ 3 · AAC 96k · cadencia natural). Es la receta que usan los servicios de streaming para su calidad SD buena: pocos píxeles bien alimentados. En TV se ve limpio y estable, consume ~45% menos que Normal y es el perfil ideal para eventos masivos o clientes con internet flojo.'
-                  : outputProfile === 'sports1800'
-                  ? 'Deportes 1800 (720p · CBR 1800k · buffer corto 1s · GOP fijo 2s · preset faster). Casi idéntico a Normal a la vista, pero ~10% menos ancho de banda y salida más plana: menos picos, menos cortes en redes flojas.'
-                  : outputProfile === 'sports1500'
-                  ? 'Deportes Ultra Estable 1500 (720p · CBR 1500k · sin B-frames · buffer 1s · preset veryfast). Mantiene 720p con ~25% menos ancho de banda y el menor consumo de CPU. La mejor opción para eventos largos o clientes con internet inestable.'
-                  : outputProfile === 'optimized'
-                  ? 'Máximo ahorro de ancho de banda (480p · 1200k). Ideal para eventos masivos donde el LB suele caer. Calidad buena en celular/tablet.'
-                  : outputProfile === 'balanced'
-                  ? 'Sweet spot calidad/ancho de banda (540p · 1500k · preset faster). Recomendado para eventos grandes sin sacrificar nitidez visible.'
+                  : outputProfile === 'hd720'
+                  ? 'HD 720p (3000k promedio, picos a 3600k · buffer 2s · preset faster · 6 hilos · AAC 128k · cadencia natural). Es el mismo bitrate que recomienda YouTube para 720p30 y el escalón 720p de la escalera Netflix. Nitidez HD real con ~25% menos datos que Alta Calidad y sin riesgo de congelones (mismo preset rápido que Normal).'
+                  : outputProfile === 'mid576'
+                  ? 'Intermedio 576p (2350k promedio, picos a 2800k · buffer 2s · preset faster · 6 hilos · AAC 128k · cadencia natural). Escalón 2350k de la escalera Netflix: en TV se ve casi como HD porque los píxeles están muy bien alimentados, y consume ~20% menos que HD 720p. El punto dulce para deportes.'
+                  : outputProfile === 'sd480'
+                  ? 'SD 480p (1500k promedio, picos a 2100k · buffer 2s · preset faster · AAC 96k · cadencia natural). Calidad SD buena tipo OTT: limpia y estable en TV, ~25% menos datos que Normal. Para eventos masivos o clientes con internet flojo.'
                   : 'Perfil estándar de producción (720p · 2000k). Mejor calidad, mayor consumo por usuario.'}
               </p>
             </div>
