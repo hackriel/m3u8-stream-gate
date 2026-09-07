@@ -4588,7 +4588,7 @@ app.post('/api/emit', async (req, res) => {
     //     de la fuente: sin -r ni -vsync cfr, evita DUP/DROP cosméticos.
     //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
     //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
-    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'sportspro' || outputProfile.key === 'sharp1800' || outputProfile.key === 'eco1100';
+    const isStandardProfile = outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'hd720' || outputProfile.key === 'mid576' || outputProfile.key === 'sd480';
     const isNaturalCadence = isStandardProfile
       && !isPassthroughBlock
       && !isSrtIngest
@@ -4669,7 +4669,7 @@ app.post('/api/emit', async (req, res) => {
         '-c:v', 'libx264',
         '-preset', outputProfile.preset || 'veryfast',
         '-profile:v', 'main',
-        '-threads', '4',
+        '-threads', String(outputProfile.threads || 4),
         '-b:v', outputProfile.videoBitrate,
         '-maxrate', outputProfile.maxrate || outputProfile.videoBitrate,
         '-bufsize', outputProfile.bufsize,
@@ -6568,8 +6568,8 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode ${outputProfile.label} CBR ${outputProfile.videoBitrate} ${outputProfile.width}p30`);
       videoParams = [
         '-c:v', 'libx264', '-preset', outputProfile.preset || 'veryfast', '-profile:v', 'main',
-        '-threads', '4',
-        '-b:v', outputProfile.videoBitrate, '-maxrate', outputProfile.videoBitrate, '-bufsize', outputProfile.bufsize,
+        '-threads', String(outputProfile.threads || 4),
+        '-b:v', outputProfile.videoBitrate, '-maxrate', outputProfile.maxrate || outputProfile.videoBitrate, '-bufsize', outputProfile.bufsize,
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
         '-vf', `scale=-2:${outputProfile.width}`,
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
