@@ -187,6 +187,16 @@ export function computeStreamHealthSmoothed(key: string, input: HealthInput): He
     }
   }
 
+  // Historial en barras: cada bucket guarda el PEOR nivel de sus 30s.
+  const bucketTs = Math.floor(now / BUCKET_MS) * BUCKET_MS;
+  const last = st.history[st.history.length - 1];
+  if (!last || last.ts !== bucketTs) {
+    st.history.push({ ts: bucketTs, level: st.level });
+  } else if (severity(st.level) > severity(last.level)) {
+    last.level = st.level;
+  }
+  if (st.history.length > HISTORY_BUCKETS) st.history = st.history.slice(-HISTORY_BUCKETS);
+
   return { level: st.level, label: LABELS[st.level], reasons: raw.reasons };
 }
 
