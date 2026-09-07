@@ -94,17 +94,6 @@ async function scrapeChannelWithFallback(
   if (error) return { success: false, error: error.message };
   return data as { success: boolean; url?: string; error?: string };
 }
-// Resolver host dinámicamente: usa el hostname/IP desde el que se sirve el panel.
-// Fallback a IP anterior sólo si se abre en localhost/preview de Lovable.
-const FALLBACK_VPS_HOST = "167.17.69.116";
-function getVpsHost(): string {
-  if (typeof window === "undefined") return FALLBACK_VPS_HOST;
-  const h = window.location.hostname;
-  if (!h || h === "localhost" || h === "127.0.0.1" || h.endsWith(".lovable.app") || h.endsWith(".lovableproject.com")) {
-    return FALLBACK_VPS_HOST;
-  }
-  return h;
-}
 const PUBLIC_HLS_BASE_URL = `http://${getVpsHost()}:3001`;
 const TIGO_OBS_INGEST_URL = `srt://${getVpsHost()}:9000?streamid=tigo&latency=2000000`;
 const DISNEY7_OBS_INGEST_URL = `srt://${getVpsHost()}:9001?streamid=disney7&latency=2000000`;
