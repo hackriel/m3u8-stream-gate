@@ -45,12 +45,17 @@ type Row = {
   elapsed: number | null;
   is_emitting: boolean | null;
   source_mode: string | null;
+  recovery_count: number | null;
 };
 
 type LiveStats = {
   fps?: number | null;
   drop?: number | null;
   dup?: number | null;
+  q?: number | null;
+  speed?: number | null;
+  bitrateKbps?: number | null;
+  srtRttMs?: number | null;
 };
 
 type Card = {
@@ -64,7 +69,13 @@ type Card = {
   fps: number | null;
   drop: number | null;
   dup: number | null;
+  q: number | null;
+  speed: number | null;
+  bitrateKbps: number | null;
+  srtRttMs: number | null;
+  recoveryCount: number;
   viewers: number | null;
+  health: "stable" | "warning" | "critical";
 };
 
 const fmt = (total: number) => {
@@ -82,6 +93,26 @@ function autoSlots(w: number, h: number) {
   if (ratio >= 1.5 && w >= 1100) return 4; // televisor / monitor ancho
   if (ratio >= 1.5) return 2;            // pantalla ancha pequeña
   return 1;                              // cuadrado tipo tablet / marco digital
+}
+
+/** Calcula etiqueta de estabilidad basada en telemetría en vivo */
+function computeHealth(c: {
+  status: string;
+  fps: number | null;
+  speed: number | null;
+  q: number | null;
+  recoveryCount: number;
+}): Card["health"] {
+  if (c.status !== "running") return "warning";
+  if (c.fps != null && c.fps < 20) return "critical";
+  if (c.speed != null && (c.speed < 0.9 || c.speed > 1.15)) return "critical";
+  if (c.q != null && c.q >= 32) return "critical";
+  if (c.recoveryCount > 5) return "critical";
+  if (c.fps != null && c.fps < 25) return "warning";
+  if (c.speed != null && (c.speed < 0.95 || c.speed > 1.05)) return "warning";
+  if (c.q != null && c.q >= 28) return "warning";
+  if (c.recoveryCount > 0) return "warning";
+  return "stable";
 }
 
 export default function Uptime() {
@@ -108,7 +139,7 @@ export default function Uptime() {
     const load = async () => {
       const { data } = await supabase
         .from("emission_processes")
-        .select("id, emit_status, start_time, elapsed, is_emitting, source_mode");
+        .select("id, emit_status, start_time, elapsed, is_emitting, source_mode, recovery_count");
       if (alive && data) setRows(data as Row[]);
     };
     load();
@@ -178,6 +209,10 @@ export default function Uptime() {
           : r.elapsed || 0;
         const kind = sourceKind(r.id, r.source_mode);
         const st = stats[String(r.id)];
+        const q = st?.q ?? null;
+        const speed = st?.speed ?? null;
+        const recoveryCount = r.recovery_count ?? 0;
+        const health = computeHealth({ status: r.emit_status || "idle", fps: st?.fps ?? null, speed, q, recoveryCount });
         return {
           id: r.id,
           name: NAMES[r.id],
@@ -189,7 +224,13 @@ export default function Uptime() {
           fps: st?.fps ?? null,
           drop: st?.drop ?? null,
           dup: st?.dup ?? null,
+          q,
+          speed,
+          bitrateKbps: st?.bitrateKbps ?? null,
+          srtRttMs: st?.srtRttMs ?? null,
+          recoveryCount,
           viewers: viewers[String(r.id)] ?? null,
+          health,
         };
       })
       .filter((c) => c.live)
@@ -269,6 +310,25 @@ export default function Uptime() {
                   <Eye style={{ width: big ? "2.6vmin" : "2vmin", height: big ? "2.6vmin" : "2vmin" }} />
                   <span>{c.viewers == null ? "—" : c.viewers}</span>
                 </button>
+                <div
+                  className="absolute top-[1.2vmin] left-[1.4vmin] z-10 rounded-full px-[1.2vmin] py-[0.3vmin] font-bold uppercase tracking-wider"
+                  style={{
+                    fontSize: big ? "2vmin" : "1.5vmin",
+                    background:
+                      c.health === "stable" ? "rgba(34,197,94,0.15)" :
+                      c.health === "warning" ? "rgba(245,158,11,0.15)" : "rgba(239,68,68,0.15)",
+                    color:
+                      c.health === "stable" ? "#22c55e" :
+                      c.health === "warning" ? "#f59e0b" : "#ef4444",
+                    border: `1px solid ${
+                      c.health === "stable" ? "rgba(34,197,94,0.35)" :
+                      c.health === "warning" ? "rgba(245,158,11,0.35)" : "rgba(239,68,68,0.35)"
+                    }`,
+                  }}
+                  title={c.health === "stable" ? "FPS, velocidad y Q dentro de rangos saludables" : c.health === "warning" ? "Revisar: FPS bajo, velocidad fuera de rango, Q alto o recuperaciones recientes" : "Problemas: caída de frames, velocidad crítica, Q muy alto o muchas recuperaciones"}
+                >
+                  {c.health === "stable" ? "SANO" : c.health === "warning" ? "ATENCIÓN" : "INESTABLE"}
+                </div>
                 <div className="relative flex items-center gap-[1.2vmin] mb-[1vmin]">
                   <span
                     className="rounded-full animate-pulse"
