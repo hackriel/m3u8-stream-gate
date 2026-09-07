@@ -96,7 +96,7 @@ function autoSlots(w: number, h: number) {
 }
 
 /** Calcula etiqueta de estabilidad basada en telemetría en vivo */
-function computeHealth(c:: {
+function computeHealth(c: {
   status: string;
   fps: number | null;
   speed: number | null;
