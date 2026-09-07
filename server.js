@@ -1020,7 +1020,7 @@ const OUTPUT_PROFILES = {
   // sin bursts, GOP fijo de 2s. Pensados para movimiento rápido con menos ancho de banda.
   // "Nítido 1800": baja la altura a 576p para que los 1800k rindan mucho más
   // (menos píxeles = más bits por píxel). Se ve limpio y sin bloques en TV.
-  sharp1800:  { key: 'sharp1800',  label: 'Nítido 1800 (576p)', width: '576', videoBitrate: '1800k', maxrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'fast', x264Params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=2:aq-strength=1.0' },
+  sharp1800:  { key: 'sharp1800',  label: 'Nítido 1800 (576p)', width: '576', videoBitrate: '1800k', maxrate: '2400k', bufsize: '5400k', audioBitrate: '128k', preset: 'medium', x264Params: 'rc-lookahead=50:ref=5:bframes=3:b-adapt=2:aq-mode=3:aq-strength=1.1:psy-rd=1.0,0.15:mbtree=1:deblock=-1,-1' },
   sports1800: { key: 'sports1800', label: 'Deportes 1800', width: '720', videoBitrate: '1800k', bufsize: '1800k', audioBitrate: '128k', preset: 'faster',   x264Params: 'rc-lookahead=20:ref=3:bframes=2:scenecut=0' },
   // "Deportes Pro": VBV amplio (bufsize 2x, maxrate con 200k de holgura) →
   // el encoder puede gastar picos en jugadas rápidas y ahorrar en planos fijos.
