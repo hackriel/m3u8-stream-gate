@@ -209,6 +209,10 @@ export default function Uptime() {
           : r.elapsed || 0;
         const kind = sourceKind(r.id, r.source_mode);
         const st = stats[String(r.id)];
+        const q = st?.q ?? null;
+        const speed = st?.speed ?? null;
+        const recoveryCount = r.recovery_count ?? 0;
+        const health = computeHealth({ status: r.emit_status || "idle", fps: st?.fps ?? null, speed, q, recoveryCount });
         return {
           id: r.id,
           name: NAMES[r.id],
@@ -220,7 +224,13 @@ export default function Uptime() {
           fps: st?.fps ?? null,
           drop: st?.drop ?? null,
           dup: st?.dup ?? null,
+          q,
+          speed,
+          bitrateKbps: st?.bitrateKbps ?? null,
+          srtRttMs: st?.srtRttMs ?? null,
+          recoveryCount,
           viewers: viewers[String(r.id)] ?? null,
+          health,
         };
       })
       .filter((c) => c.live)
