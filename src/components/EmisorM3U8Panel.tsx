@@ -3550,7 +3550,7 @@ export default function EmisorM3U8Panel() {
                                 {formatSeconds(elapsed)}
                               </div>
                             </div>
-                            <HealthBars history={getHealthHistory(String(i))} className="w-1/2 min-w-0" />
+                            <HealthBars history={serverHealthHistory[String(i)] ?? getHealthHistory(String(i))} className="w-1/2 min-w-0" />
                           </div>
 
                           <div className="grid grid-cols-3 gap-2 text-xs">
