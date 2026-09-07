@@ -207,7 +207,7 @@ export default function Uptime() {
         const q = st?.q ?? null;
         const speed = st?.speed ?? null;
         const recoveryCount = r.recovery_count ?? 0;
-        const health = computeHealth({ status: r.emit_status || "idle", fps: st?.fps ?? null, speed, q, recoveryCount });
+        const health = computeHealth({ key: String(r.id), status: r.emit_status || "idle", fps: st?.fps ?? null, speed, q, recoveryCount });
         return {
           id: r.id,
           name: NAMES[r.id],
