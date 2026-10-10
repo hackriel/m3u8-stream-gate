@@ -14,7 +14,7 @@ const NAMES: Record<number, string> = {
   13: "TELETICA URL", 14: "TDMAS 1 URL", 15: "CANAL 6 URL", 16: "DISNEY 7 SRT",
   17: "FUTV ALTERNO", 18: "FUTV SRT", 20: "Canal 6 SRT", 21: "Teletica SRT",
   22: "FOX+ SRT", 23: "FOX SRT", 24: "FOX+ URL", 25: "FOX URL",
-  26: "FOX+ ALTERNO", 27: "Canal 8 URL", 28: "Canal 2 URL",
+  26: "FOX+ ALTERNO", 27: "Canal 8 URL", 28: "Canal 2 URL", 29: "Canal 13",
 };
 
 /** Color por TIPO de fuente (nada de rojos: el rojo se reserva para fallos) */

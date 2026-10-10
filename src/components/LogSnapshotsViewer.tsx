@@ -1,3 +1,4 @@
+import { apiUrl } from "@/lib/apiUrl";
 import { useEffect, useState } from "react";
 import { Archive, Copy, Loader2, FileWarning } from "lucide-react";
 import {
@@ -42,7 +43,7 @@ export const LogSnapshotsViewer = ({ processId, refreshKey = 0 }: LogSnapshotsVi
     const load = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/log-snapshots/${processId}`);
+        const res = await fetch(apiUrl(`/api/log-snapshots/${processId}`));
         if (!res.ok) throw new Error(String(res.status));
         const data = await res.json();
         if (!cancelled) setSnapshots(data.snapshots || []);

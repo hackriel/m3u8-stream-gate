@@ -80,8 +80,8 @@ export const ViewerDetailsDialog: React.FC<Props> = ({ open, onOpenChange, pid, 
     setError(null);
     try {
       const [respV, respB] = await Promise.all([
-        fetch(`/api/viewers/details?pid=${encodeURIComponent(String(pid))}`),
-        fetch(`/api/viewers/bans?pid=${encodeURIComponent(String(pid))}`),
+        fetch(apiUrl(`/api/viewers/details?pid=${encodeURIComponent(String(pid))}`)),
+        fetch(apiUrl(`/api/viewers/bans?pid=${encodeURIComponent(String(pid))}`)),
       ]);
       const ct = respV.headers.get("content-type") || "";
       if (!ct.includes("application/json")) throw new Error("El detalle de visores solo está disponible en el servidor VPS");

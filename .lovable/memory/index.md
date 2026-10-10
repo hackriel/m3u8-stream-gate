@@ -10,3 +10,4 @@
 - [Intermedio 576p auditado](mem://features/perfil-mid576-auditado) — mid576 a 1800k con VBV contenido, audio 48kHz nativo y CFR
 - [TDMax Fast-404](mem://features/tdmax-fast-404-reactivo) — detección reactiva en stderr de FFmpeg (11/13/14/24/25); PROHIBIDO sondear la URL periódicamente
 - [Cadencia Natural vs CFR](mem://features/cadencia-natural-vs-cfr) — Alta Calidad/Normal siguen el fps de la fuente; Deportes 1800/1500 y SRT a 30fps forzado
+- [Canal 13 SINART](mem://features/canal13-sinart-telecable) — pid 29 Telecable dropdown, slug canal13sinart; salida RTMP siempre con -re
