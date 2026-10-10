@@ -22,7 +22,7 @@ const dot = (s: Health) =>
   s === "green" ? "🟢" : s === "yellow" ? "🟡" : s === "red" ? "🔴" : "⚪";
 
 const api = async (path: string, body?: unknown) => {
-  const resp = await fetch(`/api/diag${path}`, {
+  const resp = await fetch(apiUrl(`/api/diag${path}`), {
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
