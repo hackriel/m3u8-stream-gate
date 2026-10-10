@@ -679,7 +679,7 @@ const CHANNEL_MAP = {
 };
 
 // Procesos que emiten a HLS local en vez de RTMP
-const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28']);
+const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29']);
 // Mapa de slug HLS por proceso (para la ruta /live/<slug>/playlist.m3u8)
 // FUTV (11), FUTV ALTERNO (17) y FUTV SRT (18) comparten slug 'futv' a propósito:
 // los 3 emiten al MISMO destino HLS local (/live/futv/playlist.m3u8) por métodos distintos
@@ -692,7 +692,7 @@ const HLS_OUTPUT_PROCESSES = new Set(['0', '11', '12', '13', '14', '15', '16', '
 // Disney 7 (ID 0) — M3U file passthrough con perfil VLC-like — también emite al slug 'Disney7'.
 // FOX+ URL (24), FOX+ SRT (22) y FOX+ ALTERNO (26) comparten slug 'foxmas' → mutex automático por slug HLS.
 // FOX URL (25) y FOX SRT (23) comparten slug 'fox' → mutex automático por slug HLS.
-const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox', '24': 'foxmas', '25': 'fox', '26': 'foxmas', '27': 'Canal8', '28': 'Canal2' };
+const HLS_SLUG_MAP = { '0': 'Disney7', '11': 'futv', '12': 'Tigo', '13': 'Teletica', '14': 'Tdmas1', '15': 'Canal6', '16': 'Disney7', '17': 'futv', '18': 'futv', '19': 'Disney7', '20': 'Canal6', '21': 'Teletica', '22': 'foxmas', '23': 'fox', '24': 'foxmas', '25': 'fox', '26': 'foxmas', '27': 'Canal8', '28': 'Canal2', '29': 'canal13sinart' };
 
 // ───────────────────────────────────────────────────────────────────────
 // TELETICA URL (ID 13) — selector de fuente: 'official' | 'scraping'
@@ -792,7 +792,7 @@ const TELECABLE_MIN_RELOGIN_INTERVAL_MS = 20_000;    // anti-abuse rate-limit
 // canales TELECABLE-ONLY (sin modo histórico).
 // pid '10' (Disney 8) también acepta content-id DINÁMICO (dropdown), pero su
 // salida es el RTMP destino manual pegado por el usuario (no HLS local).
-const TELECABLE_PROCESSES = new Set(['0','10','11','13','14','15','24','25','27','28']);
+const TELECABLE_PROCESSES = new Set(['0','10','11','13','14','15','24','25','27','28','29']);
 // Matchers: probamos primero content-id exacto; si no aparece en la playlist,
 // caemos a patrones por nombre. Tolerante a renombres del CDN Telecable.
 // IDs fijos confirmados por el usuario contra /api/telecable/channels.
@@ -807,6 +807,8 @@ const TELECABLE_CHANNEL_MATCHERS = {
   '25': { contentIds: ['FOX'],         namePatterns: [/^fox$/i] },
   '27': { contentIds: ['MULTIMEDIOS'], namePatterns: [/multimedios/i] },
   '28': { contentIds: ['CDR'],         namePatterns: [/^cdr$/i] },
+  // pid '29' Canal 13 (SINART): default SINART13, pero el dropdown puede elegir otro.
+  '29': { contentIds: ['SINART13'],    namePatterns: [/sinart/i, /canal\s*13/i] },
 };
 // Compat: TELECABLE_CONTENT_MAP se sigue exponiendo (algunos lugares lo leen).
 const TELECABLE_CONTENT_MAP = Object.fromEntries(
@@ -3718,7 +3720,7 @@ app.post('/api/emit', async (req, res) => {
         const cached = telecableState.get(String(process_id));
         // Disney 7 (pid 0): el contentId puede cambiar entre arranques (dropdown).
         // Si llegó override y difiere del cacheado, forzamos re-resolve.
-        const overrideCid = (process_id === '0' || process_id === '10') && telecable_content_id
+        const overrideCid = (process_id === '0' || process_id === '10' || process_id === '29') && telecable_content_id
           ? String(telecable_content_id) : null;
         if (overrideCid && cached && cached.contentId !== overrideCid) {
           telecableState.delete(String(process_id));
@@ -4224,11 +4226,17 @@ app.post('/api/emit', async (req, res) => {
     // ID 19 (RANDOM Disney 7) hereda -re de Disney 7 para pacing HLS correcto.
     // Telecable NUNCA usa -re: el CDN ya pacing por segmentos y -re causa
     // que FFmpeg se quede esperando datos que el CDN no envía hasta EOF.
-    const usesReFlag = !isTelecableSource && (
+    // EXCEPCIÓN: salida RTMP (Disney 8 pid 10). Sin -re FFmpeg lee el backlog
+    // Telecable a ~3x y lo empuja al RTMP destino más rápido que tiempo real →
+    // el servidor RTMP corta al publisher a los ~30s ("Conversion failed").
+    // Validado 2026-10-10 contra rtmp://fluestabiliz.giize.com: sin -re muere
+    // a 34s (speed 3.3x); con -re 50s estables a 1.00x.
+    const isRtmpOutput = !isHlsOutput;
+    const usesReFlag = (isRtmpOutput && !isSrtIngest && !isTigoHdmiProcess) || (!isTelecableSource && (
       RE_FLAG_PROCESSES.has(String(process_id)) ||
       String(process_id) === '19' ||
       forceDisney7Profile
-    );
+    ));
     if (usesReFlag) {
       hardenedLiveInputArgs.push('-re');
       sendLog(process_id, 'info', `📡 Perfil CON -re: lectura a tasa nativa, analyzeduration=${analyzeDuration}, probesize=${probeSize}`);
@@ -4621,7 +4629,7 @@ app.post('/api/emit', async (req, res) => {
     }
 
     // Nombre del proceso para logs
-    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT', '21': 'TELETICA SRT', '22': 'FOX+ SRT', '23': 'FOX SRT', '24': 'FOX+ URL', '25': 'FOX URL', '26': 'FOX+ ALTERNO', '27': 'Canal 8 URL', '28': 'Canal 2 URL' };
+    const channelLabels = { '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica', '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8', '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL', '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT', '21': 'TELETICA SRT', '22': 'FOX+ SRT', '23': 'FOX SRT', '24': 'FOX+ URL', '25': 'FOX URL', '26': 'FOX+ ALTERNO', '27': 'Canal 8 URL', '28': 'Canal 2 URL', '29': 'Canal 13' };
     const procName = channelLabels[String(process_id)] || `Proceso ${process_id}`;
     sendLog(process_id, 'info', outputProfile.passthrough
       ? `🎬 ${procName}: Perfil PASSTHROUGH → -c copy (sin re-encode, calidad original del CDN)${isRecovery ? ' [recovery]' : ''}`
@@ -8348,7 +8356,7 @@ const CHANNEL_CONFIGS_SERVER = {
   '0': 'Disney 7', '1': 'FUTV', '3': 'TDmas 1', '4': 'Teletica',
   '5': 'Canal 6', '6': 'Multimedios', '7': 'Subida', '10': 'Disney 8',
   '11': 'FUTV URL', '12': 'TIGO SRT', '13': 'TELETICA URL', '14': 'TDMAS 1 URL', '15': 'CANAL 6 URL',
-  '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT', '21': 'TELETICA SRT', '22': 'FOX+ SRT', '23': 'FOX SRT', '24': 'FOX+ URL', '25': 'FOX URL', '26': 'FOX+ ALTERNO', '27': 'Canal 8 URL', '28': 'Canal 2 URL',
+  '16': 'DISNEY 7 SRT', '17': 'FUTV ALTERNO', '18': 'FUTV SRT', '19': 'RANDOM Disney 7', '20': 'CANAL 6 SRT', '21': 'TELETICA SRT', '22': 'FOX+ SRT', '23': 'FOX SRT', '24': 'FOX+ URL', '25': 'FOX URL', '26': 'FOX+ ALTERNO', '27': 'Canal 8 URL', '28': 'Canal 2 URL', '29': 'Canal 13',
 };
 
 // Endpoint para toggle night_rest

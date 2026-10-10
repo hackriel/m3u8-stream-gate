@@ -23,7 +23,7 @@ import { getVpsHost, apiUrl } from "@/lib/apiUrl";
 //   fuente (m3u8) y la publique al RTMP destino. Esta UI llama endpoints
 //   /api/emit (POST) y /api/emit/stop (POST) que debes implementar.
 
-const NUM_PROCESSES = 29;
+const NUM_PROCESSES = 30;
 const FILE_UPLOAD_INDEX = 7; // "Subida" process
 const DISNEY8_INDEX = 10; // "Disney 8" process - same as Disney 7
 const FUTV_URL_INDEX = 11; // "FUTV URL" process - HLS output
@@ -44,6 +44,8 @@ const FOX_URL_INDEX = 25;    // FOX URL: scraping TDMax vía edge function (cana
 const FOXMAS_ALTERNO_INDEX = 26; // FOX+ ALTERNO: URL eventual pegada (mismo patrón que FUTV ALTERNO, slug 'foxmas')
 const CANAL8_URL_INDEX = 27; // Canal 8 URL: TELECABLE-only (contentId MULTIMEDIOS), slug HLS Canal8
 const CANAL2_URL_INDEX = 28; // Canal 2 URL: TELECABLE-only (contentId CDR), slug HLS Canal2
+const CANAL13_INDEX = 29; // Canal 13: TELECABLE-only con dropdown (default SINART13), slug HLS canal13sinart
+const CANAL13_DEFAULT_CONTENT_ID = 'SINART13';
 
 // Procesos que usan la cuenta TDMax 'pi' (info@media.cr) en vez de la principal.
 // Debe coincidir con PI_ACCOUNT_PROCESSES en server.js.
@@ -143,7 +145,7 @@ const HLS_PASSTHROUGH_DEFAULT_INDEXES = new Set<number>([27, 28]);
 const PASSTHROUGH_ALLOWED_INDEXES = new Set<number>([
   ...Array.from(SRT_INGEST_INDEXES),
   ...Array.from(HLS_PASSTHROUGH_DEFAULT_INDEXES),
-  0, 11, 13, 14, 15, 24, 25,
+  0, 11, 13, 14, 15, 24, 25, 29,
 ]);
 const getDefaultOutputProfile = (processIndex: number): OutputProfile =>
   (SRT_INGEST_INDEXES.has(processIndex) || HLS_PASSTHROUGH_DEFAULT_INDEXES.has(processIndex))
@@ -162,7 +164,7 @@ const HIDDEN_PROCESSES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 19]);
 // Procesos que emiten HLS local (sin RTMP)
 // ID 0 (Disney 7) ahora emite HLS al slug 'Disney7' (igual que RANDOM Disney 7).
 // Disney 8 (ID 10) NO está aquí: usa RTMP destino manual pegado por el usuario.
-const HLS_OUTPUT_PROCESSES = new Set([0, FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX, FOXMAS_SRT_INDEX, FOX_SRT_INDEX, FOXMAS_URL_INDEX, FOX_URL_INDEX, FOXMAS_ALTERNO_INDEX, CANAL8_URL_INDEX, CANAL2_URL_INDEX]);
+const HLS_OUTPUT_PROCESSES = new Set([0, FUTV_URL_INDEX, TIGO_URL_INDEX, TELETICA_URL_INDEX, TDMAS1_URL_INDEX, CANAL6_URL_INDEX, DISNEY7_URL_INDEX, FUTV_ALTERNO_INDEX, FUTV_SRT_INDEX, RANDOM_DISNEY7_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX, FOXMAS_SRT_INDEX, FOX_SRT_INDEX, FOXMAS_URL_INDEX, FOX_URL_INDEX, FOXMAS_ALTERNO_INDEX, CANAL8_URL_INDEX, CANAL2_URL_INDEX, CANAL13_INDEX]);
 // Procesos que reciben SRT desde OBS (entrada manual interna)
 const OBS_INGEST_PROCESSES = new Set<number>([TIGO_URL_INDEX, DISNEY7_URL_INDEX, FUTV_SRT_INDEX, CANAL6_SRT_INDEX, TELETICA_SRT_INDEX, FOXMAS_SRT_INDEX, FOX_SRT_INDEX]);
 // Procesos eventuales que aceptan URL pegada del usuario y necesitan scraping dinámico
@@ -318,6 +320,7 @@ const CHANNEL_CONFIGS: ChannelConfig[] = [
   { name: "FOX+ ALTERNO", scrapeFn: "scrape-channel", channelId: null, fetchLabel: "🔄 Extraer de URL" },
   { name: "Canal 8 URL", scrapeFn: null, channelId: null, fetchLabel: "📡 Telecable" },
   { name: "Canal 2 URL", scrapeFn: null, channelId: null, fetchLabel: "📡 Telecable" },
+  { name: "Canal 13", scrapeFn: null, channelId: null, fetchLabel: "📡 Telecable" },
 ];
 
 const defaultProcess = (): EmissionProcess => ({
@@ -759,21 +762,21 @@ export default function EmisorM3U8Panel() {
   //    'scraping'  = flujo histórico del canal (TDMax+Pi5 o lo que aplique).
   // pid 0 (Disney 7) usa selector dedicado "Oficial | Telecable" con dropdown.
   // pids 27/28 (Canal 8 / Canal 2 URL) son TELECABLE-only (sin toggle).
-  const TELECABLE_PIDS = useMemo(() => new Set<number>([0, 10, 11, 13, 14, 15, 24, 25, 27, 28]), []);
+  const TELECABLE_PIDS = useMemo(() => new Set<number>([0, 10, 11, 13, 14, 15, 24, 25, 27, 28, 29]), []);
   // pids cuyo único modo permitido es TELECABLE (sin selector visible).
   // 15 (Canal 6 URL) entra acá: el flujo histórico TDMax+Pi5 quedó descartado,
   // ahora se resuelve igual que Canal 8/Canal 2 (Telecable directo desde VPS).
-  const TELECABLE_ONLY_PIDS = useMemo(() => new Set<number>([15, 27, 28]), []);
+  const TELECABLE_ONLY_PIDS = useMemo(() => new Set<number>([15, 27, 28, 29]), []);
   type TelecableMode = 'scraping' | 'telecable' | 'telecable_vlc';
   type TelecableInfo = { expires_at: number | null; expires_in_s: number | null; last_login_failure_count: number } | null;
   const [telecableModes, setTelecableModes] = useState<Record<number, TelecableMode>>(() => {
     const init: Record<number, TelecableMode> = {};
-    for (const pid of [0, 10, 11, 13, 14, 15, 24, 25, 27, 28]) {
+    for (const pid of [0, 10, 11, 13, 14, 15, 24, 25, 27, 28, 29]) {
       try {
         const v = localStorage.getItem(`telecable_${pid}_source_mode`);
         // Canal 6 (15) / Canal 8 (27) / Canal 2 (28) son telecable-only:
         // permitir telecable o telecable_vlc, jamás scraping.
-        const forceTelecable = pid === 15 || pid === 27 || pid === 28;
+        const forceTelecable = pid === 15 || pid === 27 || pid === 28 || pid === 29;
         if (forceTelecable) {
           init[pid] = v === 'telecable_vlc' ? 'telecable_vlc' : 'telecable';
         } else if (v === 'telecable' || v === 'telecable_vlc' || v === 'scraping') {
@@ -787,7 +790,7 @@ export default function EmisorM3U8Panel() {
           // ese pid realmente está en modo Telecable.
           init[pid] = 'scraping';
         }
-      } catch { init[pid] = (pid === 15 || pid === 27 || pid === 28) ? 'telecable' : 'scraping'; }
+      } catch { init[pid] = (pid === 15 || pid === 27 || pid === 28 || pid === 29) ? 'telecable' : 'scraping'; }
     }
     return init;
   });
@@ -809,7 +812,7 @@ export default function EmisorM3U8Panel() {
   const handleTelecableModeChange = useCallback((pid: number, mode: TelecableMode) => {
     setTelecableModes(prev => ({ ...prev, [pid]: mode }));
     try { localStorage.setItem(`telecable_${pid}_source_mode`, mode); } catch {}
-    void fetch(`/api/telecable/${pid}/source-mode`, {
+    void fetch(apiUrl(`/api/telecable/${pid}/source-mode`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode }),
@@ -825,7 +828,7 @@ export default function EmisorM3U8Panel() {
     const tick = async () => {
       await Promise.all(Array.from(TELECABLE_PIDS).map(async (pid) => {
         try {
-          const r = await fetch(`/api/telecable/${pid}/source-mode`);
+          const r = await fetch(apiUrl(`/api/telecable/${pid}/source-mode`));
           if (!r.ok) return;
           const j = await r.json();
           if (j.mode === 'telecable' || j.mode === 'scraping' || j.mode === 'telecable_vlc') {
@@ -944,6 +947,14 @@ export default function EmisorM3U8Panel() {
     try { localStorage.setItem('disney7_0_telecable_content_id', disney7ContentId); } catch {}
   }, [disney7ContentId]);
 
+  // ── Canal 13 (pid 29): Telecable-only con dropdown (default SINART13).
+  const [canal13ContentId, setCanal13ContentId] = useState<string>(() => {
+    try { return localStorage.getItem('canal13_29_telecable_content_id') || CANAL13_DEFAULT_CONTENT_ID; } catch { return CANAL13_DEFAULT_CONTENT_ID; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('canal13_29_telecable_content_id', canal13ContentId); } catch {}
+  }, [canal13ContentId]);
+
   // ── Disney 8 (pid 10): sub-tabs "Oficial m3u pegado | Telecable dropdown".
   //    Réplica de Disney 7 pero la salida es el RTMP manual pegado por el usuario.
   type Disney8Mode = 'official' | 'telecable';
@@ -1002,7 +1013,7 @@ export default function EmisorM3U8Panel() {
     telecableChannelsAttemptedAtRef.current = Date.now();
     setTelecableChannelsError(null);
     try {
-      const r = await fetch(`/api/telecable/channels${force ? '?force=1' : ''}`);
+      const r = await fetch(apiUrl(`/api/telecable/channels${force ? '?force=1' : ''}`));
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       if (Array.isArray(j.channels)) {
@@ -1028,7 +1039,8 @@ export default function EmisorM3U8Panel() {
   useEffect(() => {
     const wantsChannels =
       (activeTab === '0' && (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc')) ||
-      (activeTab === '10' && disney8Mode === 'telecable');
+      (activeTab === '10' && disney8Mode === 'telecable') ||
+      activeTab === String(CANAL13_INDEX);
     // Reintento permitido: si el intento anterior FALLÓ y ya pasaron 30s, se
     // vuelve a intentar al entrar al tab (evita quedarse con dropdown vacío
     // para siempre tras un error puntual del VPS).
@@ -1548,7 +1560,7 @@ export default function EmisorM3U8Panel() {
 
   const checkProcessStatus = async (processIndex: number) => {
     try {
-      const resp = await fetch(`/api/status?process_id=${processIndex}`);
+      const resp = await fetch(apiUrl(`/api/status?process_id=${processIndex}`));
       const data = await resp.json();
       
       if (!data.process_running && processes[processIndex].isEmitiendo) {
@@ -1682,12 +1694,13 @@ export default function EmisorM3U8Panel() {
     const isDisney7Telecable = processIndex === 0 && (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc');
     // Disney 8 (pid 10) en modo Telecable: mismo flujo, pero salida RTMP manual.
     const isDisney8Telecable = processIndex === DISNEY8_INDEX && disney8Mode === 'telecable';
-    const isTelecableDropdown = isDisney7Telecable || isDisney8Telecable;
+    const isCanal13Telecable = processIndex === CANAL13_INDEX;
+    const isTelecableDropdown = isDisney7Telecable || isDisney8Telecable || isCanal13Telecable;
     const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex) && !isTelecableDropdown;
     const m3uPayload = isM3uFileProcess ? m3uPayloads[processIndex] : null;
 
     // Disney 7 Telecable: validar que el usuario eligió un canal del dropdown
-    if (isTelecableDropdown && !(isDisney8Telecable ? disney8ContentId : disney7ContentId)) {
+    if (isTelecableDropdown && !(isCanal13Telecable ? canal13ContentId : isDisney8Telecable ? disney8ContentId : disney7ContentId)) {
       updateProcess(processIndex, {
         emitStatus: "error",
         emitMsg: "Seleccioná un canal del dropdown Telecable primero",
@@ -1834,6 +1847,7 @@ export default function EmisorM3U8Panel() {
                 source_mode: telecableModes[processIndex] as 'telecable' | 'telecable_vlc',
                 ...(processIndex === 0 && disney7ContentId ? { telecable_content_id: disney7ContentId } : {}),
                 ...(processIndex === DISNEY8_INDEX && disney8ContentId ? { telecable_content_id: disney8ContentId } : {}),
+                ...(processIndex === CANAL13_INDEX && canal13ContentId ? { telecable_content_id: canal13ContentId } : {}),
               }
             : processIndex === 0 ? { source_mode: 'scraping' as const }
             : processIndex === DISNEY8_INDEX ? { source_mode: 'scraping' as const }
@@ -1946,6 +1960,7 @@ export default function EmisorM3U8Panel() {
   function isTelecableDropdownPid(processIndex: number) {
     if (processIndex === 0) return disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc';
     if (processIndex === DISNEY8_INDEX) return disney8Mode === 'telecable';
+    if (processIndex === CANAL13_INDEX) return true;
     return false;
   }
 
@@ -1960,6 +1975,7 @@ export default function EmisorM3U8Panel() {
     });
     if (alsoChannel) {
       if (processIndex === DISNEY8_INDEX) setDisney8ContentId('');
+      else if (processIndex === CANAL13_INDEX) setCanal13ContentId('');
       else setDisney7ContentId('');
     }
     supabase.from('emission_processes').update({ m3u8: '' }).eq('id', processIndex).then(() => {}, () => {});
@@ -2194,6 +2210,7 @@ export default function EmisorM3U8Panel() {
       { bg: "bg-rose-700", text: "text-rose-400", stroke: "#be123c", name: "FOX+ ALTERNO" },
       { bg: "bg-orange-400", text: "text-orange-300", stroke: "#fb923c", name: "Canal 8 URL" },
       { bg: "bg-sky-600", text: "text-sky-400", stroke: "#0284c7", name: "Canal 2 URL" },
+      { bg: "bg-teal-600", text: "text-teal-400", stroke: "#0d9488", name: "Canal 13" },
     ];
     return colors[processIndex];
   };
@@ -2211,9 +2228,10 @@ export default function EmisorM3U8Panel() {
     const isDisney8Tab = processIndex === DISNEY8_INDEX;
     const isDisney8TelecableActive = isDisney8Tab && disney8Mode === 'telecable';
     // Cualquier tab con dropdown de canales Telecable (Disney 7 / Disney 8).
-    const isTelecableDropdownActive = isDisney7TelecableActive || isDisney8TelecableActive;
-    const dropdownContentId = isDisney8Tab ? disney8ContentId : disney7ContentId;
-    const setDropdownContentId = isDisney8Tab ? setDisney8ContentId : setDisney7ContentId;
+    const isCanal13Tab = processIndex === CANAL13_INDEX;
+    const isTelecableDropdownActive = isDisney7TelecableActive || isDisney8TelecableActive || isCanal13Tab;
+    const dropdownContentId = isCanal13Tab ? canal13ContentId : isDisney8Tab ? disney8ContentId : disney7ContentId;
+    const setDropdownContentId = isCanal13Tab ? setCanal13ContentId : isDisney8Tab ? setDisney8ContentId : setDisney7ContentId;
     const isTelecableOnlyTab = TELECABLE_ONLY_PIDS.has(processIndex);
     // Pids cuya UI de input m3u8 NO se muestra (URL resuelta por backend).
     const hideM3u8Input = isTelecableDropdownActive || isTelecableOnlyTab;
@@ -2823,7 +2841,10 @@ export default function EmisorM3U8Panel() {
                             if (processIndex === DISNEY8_INDEX && disney8ContentId) {
                               refreshBody.content_id = disney8ContentId;
                             }
-                            const r = await fetch(`/api/telecable/${processIndex}/refresh`, {
+                            if (processIndex === CANAL13_INDEX && canal13ContentId) {
+                              refreshBody.content_id = canal13ContentId;
+                            }
+                            const r = await fetch(apiUrl(`/api/telecable/${processIndex}/refresh`), {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify(refreshBody),
@@ -2924,6 +2945,7 @@ export default function EmisorM3U8Panel() {
                 [FOXMAS_ALTERNO_INDEX]: 'foxmas',
                 [CANAL8_URL_INDEX]: 'Canal8',
                 [CANAL2_URL_INDEX]: 'Canal2',
+                [CANAL13_INDEX]: 'canal13sinart',
               };
               const hlsSlug = hlsSlugs[processIndex] || `stream_${processIndex}`;
               const hlsUrl = `${PUBLIC_HLS_BASE_URL}/live/${hlsSlug}/playlist.m3u8`;
