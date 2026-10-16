@@ -7801,9 +7801,17 @@ function hhEvaluate({ status, fps, speed, q, warmup }) {
   return level;
 }
 
+// Rango de pids monitoreados: se deriva de HLS_SLUG_MAP (+ margen) para que
+// cualquier canal NUEVO (ej. Canal 13 = pid 29) entre automáticamente en las
+// barras de salud y en la "vida del canal" sin tocar este número a mano.
+const MAX_TRACKED_PID = Math.max(
+  28,
+  ...Object.keys(HLS_SLUG_MAP || {}).map((k) => parseInt(k, 10)).filter((n) => Number.isFinite(n))
+) + 2;
+
 function hhTick() {
   const now = Date.now();
-  for (let i = 0; i <= 28; i++) {
+  for (let i = 0; i <= MAX_TRACKED_PID; i++) {
     const pid = String(i);
     const status = emissionStatuses.get(pid) || 'idle';
     const live = getLiveStats(pid);
