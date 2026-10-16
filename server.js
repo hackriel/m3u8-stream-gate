@@ -1209,15 +1209,19 @@ const PI_ACCOUNT_PROCESSES = new Set(['4', '11', '14', '15', '17', '24', '25', '
 const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
 const getTdmaxCreds = (account) => {
   if (account === 'pi') {
+    // Fallback de seguridad: si el VPS todavía no tiene TDMAX_*_PI en systemd,
+    // usamos TDMAX_EMAIL/PASSWORD para que la emisión NO se caiga tras un release.
+    const email = process.env.TDMAX_EMAIL_PI || process.env.TDMAX_EMAIL;
+    const password = process.env.TDMAX_PASSWORD_PI || process.env.TDMAX_PASSWORD;
     return {
-      email: process.env.TDMAX_EMAIL_PI,
-      password: process.env.TDMAX_PASSWORD_PI,
-      label: 'SECUNDARIA (info@media.cr)',
+      email,
+      password,
+      label: process.env.TDMAX_EMAIL_PI ? 'SECUNDARIA (info@media.cr)' : 'SECUNDARIA (fallback a TDMAX_EMAIL)',
     };
   }
   return {
-    email: process.env.TDMAX_EMAIL,
-    password: process.env.TDMAX_PASSWORD,
+    email: process.env.TDMAX_EMAIL || process.env.TDMAX_EMAIL_PI,
+    password: process.env.TDMAX_PASSWORD || process.env.TDMAX_PASSWORD_PI,
     label: 'DEFAULT',
   };
 };
