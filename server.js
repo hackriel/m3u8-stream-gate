@@ -1463,13 +1463,29 @@ const updateLiveStats = (process_id, line) => {
   liveStats.set(key, { ...prev, ...patch, updatedAt: Date.now() });
 };
 
-const clearLiveStats = (process_id) => liveStats.delete(String(process_id));
+const clearLiveStats = (process_id) => {
+  liveStats.delete(String(process_id));
+  measuredOutBitrate.delete(String(process_id));
+};
+
+// Bitrate REAL de salida medido sobre los segmentos HLS escritos en disco.
+// Con el muxer HLS, FFmpeg imprime "bitrate=N/A" (no conoce el tamaño final),
+// por eso la tarjeta mostraba "—". Lo calculamos nosotros midiendo cuántos
+// bytes nuevos se escriben en /live/<slug> por segundo.
+const measuredOutBitrate = new Map(); // pid -> { kbps, updatedAt }
 
 const getLiveStats = (process_id) => {
-  const s = liveStats.get(String(process_id));
+  const key = String(process_id);
+  const s = liveStats.get(key);
   if (!s) return null;
   // Considerar stale si no se actualiza en >30s (proceso terminado o congelado)
   if (Date.now() - (s.updatedAt || 0) > 30000) return null;
+  if (s.bitrateKbps == null) {
+    const m = measuredOutBitrate.get(key);
+    if (m && Date.now() - m.updatedAt < 30000 && m.kbps > 0) {
+      return { ...s, bitrateKbps: m.kbps, bitrateMeasured: true };
+    }
+  }
   return s;
 };
 
