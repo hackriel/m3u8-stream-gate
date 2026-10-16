@@ -3553,6 +3553,15 @@ export default function EmisorM3U8Panel() {
                                 {viewersMap[i.toString()] ?? '—'}
                               </button>
 
+                              <button
+                                type="button"
+                                onClick={() => setLifeDialog({ pid: i, name: color.name })}
+                                title="Vida del canal — conclusiones del servidor sobre las últimas 48 h"
+                                className="inline-flex items-center justify-center px-1.5 py-0.5 rounded border bg-violet-500/15 text-violet-300 border-violet-500/40 hover:bg-violet-500/30 transition-colors cursor-pointer"
+                              >
+                                <Bot className="h-3 w-3" />
+                              </button>
+
                               {(() => {
                                 const hr = computeStreamHealthSmoothed(String(i), {
                                   status: p.emitStatus,
