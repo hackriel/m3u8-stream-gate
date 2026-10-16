@@ -8192,6 +8192,48 @@ function clAnalyze(pid) {
     add('warn', 'Bitrate real por debajo del objetivo',
       `Está saliendo a ~${stats.bitrate_avg}k cuando el perfil pide ${target}k. Suele significar que la fuente ya viene comprimida: subir de perfil no mejoraría la imagen, conviene quedarse en uno más liviano.`);
 
+  // 8) Ventanas horarias con mala señal (franjas de 15 min agrupadas)
+  const clHour = (ts) => {
+    const d = new Date(ts - 6 * 3600 * 1000); // hora de Costa Rica (UTC-6)
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  };
+  const bad = [];
+  for (const b of buckets) {
+    const bSpeed = clAvg((b.speed || []).filter((v) => v != null));
+    const bFps = clAvg((b.fps || []).filter((v) => v != null));
+    const bQ = clAvg((b.q || []).filter((v) => v != null));
+    const reasons = [];
+    if (bSpeed != null && bSpeed < 0.95) reasons.push(`velocidad ${bSpeed.toFixed(2)}x`);
+    if (bFps != null && bFps < 24) reasons.push(`${bFps.toFixed(0)} fps`);
+    if (bQ != null && bQ >= 32) reasons.push(`compresión Q ${bQ.toFixed(0)}`);
+    if ((b.drop || 0) > 300) reasons.push(`${b.drop} frames descartados`);
+    if (reasons.length) bad.push({ ts: b.ts, reasons, speed: bSpeed, q: bQ, fps: bFps });
+  }
+  if (bad.length) {
+    // Agrupa franjas consecutivas en rangos horarios.
+    const ranges = [];
+    for (const b of bad) {
+      const last = ranges[ranges.length - 1];
+      if (last && b.ts - last.end <= CL_BUCKET_MS) { last.end = b.ts; last.reasons.push(...b.reasons); }
+      else ranges.push({ start: b.ts, end: b.ts, reasons: [...b.reasons] });
+    }
+    const worst = ranges.sort((a, b) => (b.end - b.start) - (a.end - a.start)).slice(0, 2);
+    for (const r of worst) {
+      const uniq = [...new Set(r.reasons.map((x) => x.replace(/[\d.]+/g, '').trim()))];
+      const from = clHour(r.start), to = clHour(r.end + CL_BUCKET_MS);
+      const slow = uniq.some((u) => u.includes('velocidad'));
+      const heavy = uniq.some((u) => u.includes('compresión'));
+      const tip = slow
+        ? 'En esa franja la fuente entregó lento: si se repite a la misma hora (suele ser hora pico del proveedor), conviene una URL de respaldo o un perfil más liviano como SD 480p en ese horario.'
+        : heavy
+          ? 'En esa franja la compresión se fue al límite, normalmente por contenido con mucho movimiento: un escalón más de bitrate (Intermedio 576p o HD 720p) lo cubriría.'
+          : 'En esa franja la cadencia se desordenó; si coincide con quejas, probá el perfil Normal (cadencia natural) en ese horario.';
+      add('warn', `Mala señal ${from}–${to}`,
+        `Entre las ${from} y las ${to} (hora de Costa Rica) el canal no llegó bien: ${[...new Set(r.reasons)].slice(0, 3).join(', ')}. ${tip}`);
+    }
+  }
+
+
   if (!findings.length) add('ok', 'Canal sano',
     `${stats.hours_on} h de emisión con velocidad ${spAvg ?? '—'}x, ${fAvg ?? '—'} fps y Q ${qAvg ?? '—'}. La configuración actual (${stats.profile_label}) le queda bien; no tocaría nada.`);
 
