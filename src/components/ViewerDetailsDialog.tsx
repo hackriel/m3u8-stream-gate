@@ -224,10 +224,6 @@ export const ViewerDetailsDialog: React.FC<Props> = ({ open, onOpenChange, pid, 
                     {v.info?.private && (
                       <span className="px-1.5 py-0.5 rounded border border-border">Red local</span>
                     )}
-                    <span className="px-1.5 py-0.5 rounded border border-border text-muted-foreground">{v.hits} requests</span>
-                    <span className="px-1.5 py-0.5 rounded border border-border text-muted-foreground">
-                      visto hace {Math.round(v.last_seen_ms / 1000)}s
-                    </span>
                   </div>
                   {v.user_agent && (
                     <div className="pt-1 font-mono text-[10px] text-muted-foreground break-all">{v.user_agent}</div>
