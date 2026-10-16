@@ -77,6 +77,15 @@ ENVIRONMENT=$(systemctl show "$SERVICE_NAME" -p Environment --value)
 [[ "$ENVIRONMENT" == *"TELECABLE_DEVICE_PASSWORD="* ]] || fail "Falta TELECABLE_DEVICE_PASSWORD en systemd. Repite con --configure-telecable"
 ok "Variables Telecable presentes"
 
+# TDMax: todos los canales usan la cuenta info@media.cr (la vieja venció).
+if [[ "$ENVIRONMENT" == *"TDMAX_EMAIL_PI=info@media.cr"* ]]; then
+  ok "Cuenta TDMax correcta (info@media.cr)"
+elif [[ "$ENVIRONMENT" == *"TDMAX_EMAIL="* || "$ENVIRONMENT" == *"TDMAX_EMAIL_PI="* ]]; then
+  warn "TDMax configurado con otra cuenta. Si es la vieja (arlopfa) los canales TDMax fallarán al vencer."
+else
+  warn "No hay credenciales TDMax en systemd: FUTV, TDMAS 1, Teletica, Canal 6, FOX y FOX+ no podrán extraer URL."
+fi
+
 systemctl restart "$SERVICE_NAME"
 
 echo "⏳ Esperando que el servicio responda..."

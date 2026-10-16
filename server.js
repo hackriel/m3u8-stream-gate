@@ -1209,15 +1209,19 @@ const PI_ACCOUNT_PROCESSES = new Set(['4', '11', '14', '15', '17', '24', '25', '
 const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
 const getTdmaxCreds = (account) => {
   if (account === 'pi') {
+    // Fallback de seguridad: si el VPS todavía no tiene TDMAX_*_PI en systemd,
+    // usamos TDMAX_EMAIL/PASSWORD para que la emisión NO se caiga tras un release.
+    const email = process.env.TDMAX_EMAIL_PI || process.env.TDMAX_EMAIL;
+    const password = process.env.TDMAX_PASSWORD_PI || process.env.TDMAX_PASSWORD;
     return {
-      email: process.env.TDMAX_EMAIL_PI,
-      password: process.env.TDMAX_PASSWORD_PI,
-      label: 'SECUNDARIA (info@media.cr)',
+      email,
+      password,
+      label: process.env.TDMAX_EMAIL_PI ? 'SECUNDARIA (info@media.cr)' : 'SECUNDARIA (fallback a TDMAX_EMAIL)',
     };
   }
   return {
-    email: process.env.TDMAX_EMAIL,
-    password: process.env.TDMAX_PASSWORD,
+    email: process.env.TDMAX_EMAIL || process.env.TDMAX_EMAIL_PI,
+    password: process.env.TDMAX_PASSWORD || process.env.TDMAX_PASSWORD_PI,
     label: 'DEFAULT',
   };
 };
@@ -1463,13 +1467,29 @@ const updateLiveStats = (process_id, line) => {
   liveStats.set(key, { ...prev, ...patch, updatedAt: Date.now() });
 };
 
-const clearLiveStats = (process_id) => liveStats.delete(String(process_id));
+const clearLiveStats = (process_id) => {
+  liveStats.delete(String(process_id));
+  measuredOutBitrate.delete(String(process_id));
+};
+
+// Bitrate REAL de salida medido sobre los segmentos HLS escritos en disco.
+// Con el muxer HLS, FFmpeg imprime "bitrate=N/A" (no conoce el tamaño final),
+// por eso la tarjeta mostraba "—". Lo calculamos nosotros midiendo cuántos
+// bytes nuevos se escriben en /live/<slug> por segundo.
+const measuredOutBitrate = new Map(); // pid -> { kbps, updatedAt }
 
 const getLiveStats = (process_id) => {
-  const s = liveStats.get(String(process_id));
+  const key = String(process_id);
+  const s = liveStats.get(key);
   if (!s) return null;
   // Considerar stale si no se actualiza en >30s (proceso terminado o congelado)
   if (Date.now() - (s.updatedAt || 0) > 30000) return null;
+  if (s.bitrateKbps == null) {
+    const m = measuredOutBitrate.get(key);
+    if (m && Date.now() - m.updatedAt < 30000 && m.kbps > 0) {
+      return { ...s, bitrateKbps: m.kbps, bitrateMeasured: true };
+    }
+  }
   return s;
 };
 
@@ -7801,9 +7821,17 @@ function hhEvaluate({ status, fps, speed, q, warmup }) {
   return level;
 }
 
+// Rango de pids monitoreados: se deriva de HLS_SLUG_MAP (+ margen) para que
+// cualquier canal NUEVO (ej. Canal 13 = pid 29) entre automáticamente en las
+// barras de salud y en la "vida del canal" sin tocar este número a mano.
+const MAX_TRACKED_PID = Math.max(
+  28,
+  ...Object.keys(HLS_SLUG_MAP || {}).map((k) => parseInt(k, 10)).filter((n) => Number.isFinite(n))
+) + 2;
+
 function hhTick() {
   const now = Date.now();
-  for (let i = 0; i <= 28; i++) {
+  for (let i = 0; i <= MAX_TRACKED_PID; i++) {
     const pid = String(i);
     const status = emissionStatuses.get(pid) || 'idle';
     const live = getLiveStats(pid);
@@ -7897,6 +7925,294 @@ app.get('/api/health-history', (req, res) => {
     if (bars.length) out[pid] = bars;
   }
   res.json({ buckets_ms: HH_BUCKET_MS, max_buckets: HH_MAX_BUCKETS, by_pid: out });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// BITRATE REAL DE SALIDA (medido en disco)
+// FFmpeg con muxer HLS reporta "bitrate=N/A". Medimos los bytes nuevos
+// escritos en /live/<slug> cada 5s y los convertimos a kbps.
+// ─────────────────────────────────────────────────────────────────────
+const obState = new Map(); // pid -> { files: Map(name->size), ts }
+
+function obTick() {
+  const now = Date.now();
+  for (let i = 0; i <= MAX_TRACKED_PID; i++) {
+    const pid = String(i);
+    const slug = (HLS_SLUG_MAP || {})[pid];
+    const status = emissionStatuses.get(pid) || 'idle';
+    if (!slug || status !== 'running') { obState.delete(pid); measuredOutBitrate.delete(pid); continue; }
+    const dir = path.join(HLS_OUTPUT_DIR, slug);
+    let files;
+    try {
+      files = new Map();
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.ts') && !f.endsWith('.m4s')) continue;
+        try { files.set(f, fs.statSync(path.join(dir, f)).size); } catch (_) {}
+      }
+    } catch (_) { continue; }
+    const prev = obState.get(pid);
+    if (prev && prev.ts) {
+      let bytes = 0;
+      for (const [name, size] of files.entries()) {
+        const old = prev.files.get(name);
+        if (old == null) bytes += size;
+        else if (size > old) bytes += size - old;
+      }
+      const secs = (now - prev.ts) / 1000;
+      if (secs >= 2 && bytes > 0) {
+        const kbps = Math.round((bytes * 8) / secs / 1000);
+        const last = measuredOutBitrate.get(pid);
+        // Suavizado simple para que el número no salte entre segmentos.
+        const smooth = last && now - last.updatedAt < 30000 ? Math.round(last.kbps * 0.6 + kbps * 0.4) : kbps;
+        measuredOutBitrate.set(pid, { kbps: smooth, updatedAt: now });
+      }
+    }
+    obState.set(pid, { files, ts: now });
+  }
+}
+setInterval(obTick, 5000);
+
+// ─────────────────────────────────────────────────────────────────────
+// VIDA DEL CANAL (🤖) — análisis propio por canal, últimas 48 h
+// Cada 60s se toma una muestra (fps, speed, Q, bitrate, drops/dup, perfil,
+// visores) y se agrega en bloques de 15 min. Con esa historia el servidor
+// saca CONCLUSIONES y RECOMENDACIONES por canal (solo informativas: nada
+// de esto cambia la emisión). Se purga todo lo que pase de 48 h.
+// ─────────────────────────────────────────────────────────────────────
+const CL_FILE = path.join(__dirname, 'channel-life.json');
+const CL_BUCKET_MS = 15 * 60 * 1000;
+const CL_RETENTION_MS = 48 * 60 * 60 * 1000;
+const clState = new Map(); // pid -> { buckets: [], lastCum: {drop,dup}, lastStatus, events: [] }
+let clDirty = false;
+
+const clAvg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+
+function clGet(pid) {
+  let st = clState.get(pid);
+  if (!st) { st = { buckets: [], events: [], lastCum: null, lastStatus: 'idle' }; clState.set(pid, st); }
+  return st;
+}
+
+function clTick() {
+  const now = Date.now();
+  for (let i = 0; i <= MAX_TRACKED_PID; i++) {
+    const pid = String(i);
+    const slug = (HLS_SLUG_MAP || {})[pid];
+    const status = emissionStatuses.get(pid) || 'idle';
+    const st = clGet(pid);
+
+    // Eventos: arranques, caídas y recuperaciones.
+    if (st.lastStatus !== status) {
+      if (status === 'running') st.events.push({ ts: now, type: 'start' });
+      else if (status === 'error') st.events.push({ ts: now, type: 'error' });
+      else if (status === 'idle' && st.lastStatus === 'running') st.events.push({ ts: now, type: 'stop' });
+      st.lastStatus = status;
+      clDirty = true;
+    }
+
+    if (status !== 'running') { st.lastCum = null; continue; }
+    const live = getLiveStats(pid);
+    if (!live) continue;
+
+    let profile = 'normal';
+    try { profile = getStoredOutputProfile(pid) || 'normal'; } catch (_) {}
+    const viewers = slug && hlsViewers.get(slug) ? hlsViewers.get(slug).size : 0;
+
+    let dDrop = 0, dDup = 0;
+    if (st.lastCum) {
+      if ((live.drop ?? 0) >= st.lastCum.drop) dDrop = (live.drop ?? 0) - st.lastCum.drop;
+      if ((live.dup ?? 0) >= st.lastCum.dup) dDup = (live.dup ?? 0) - st.lastCum.dup;
+    }
+    st.lastCum = { drop: live.drop ?? 0, dup: live.dup ?? 0 };
+
+    const bucketTs = Math.floor(now / CL_BUCKET_MS) * CL_BUCKET_MS;
+    let b = st.buckets[st.buckets.length - 1];
+    if (!b || b.ts !== bucketTs) {
+      b = { ts: bucketTs, n: 0, fps: [], speed: [], q: [], br: [], drop: 0, dup: 0, viewers: 0, profile };
+      st.buckets.push(b);
+    }
+    b.n++;
+    b.profile = profile;
+    if (live.fps != null) b.fps.push(live.fps);
+    if (live.speed != null) b.speed.push(live.speed);
+    if (live.q != null) b.q.push(live.q);
+    if (live.bitrateKbps != null) b.br.push(live.bitrateKbps);
+    b.drop += dDrop;
+    b.dup += dDup;
+    if (viewers > b.viewers) b.viewers = viewers;
+    clDirty = true;
+  }
+  clPrune(now);
+}
+
+function clPrune(now = Date.now()) {
+  for (const st of clState.values()) {
+    st.buckets = st.buckets.filter((b) => now - b.ts <= CL_RETENTION_MS);
+    st.events = st.events.filter((e) => now - e.ts <= CL_RETENTION_MS).slice(-200);
+  }
+}
+
+function clCompact(st) {
+  // Compacta arrays de muestras a promedios antes de guardar en disco.
+  return {
+    events: st.events,
+    buckets: st.buckets.map((b) => ({
+      ts: b.ts, n: b.n, profile: b.profile, drop: b.drop, dup: b.dup, viewers: b.viewers,
+      fpsAvg: clAvg(b.fps), speedAvg: clAvg(b.speed), speedMin: b.speed.length ? Math.min(...b.speed) : null,
+      qAvg: clAvg(b.q), qMax: b.q.length ? Math.max(...b.q) : null, brAvg: clAvg(b.br),
+    })),
+  };
+}
+
+function clSave() {
+  if (!clDirty) return;
+  clDirty = false;
+  const out = {};
+  for (const [pid, st] of clState.entries()) {
+    if (!st.buckets.length && !st.events.length) continue;
+    out[pid] = clCompact(st);
+  }
+  try { fs.writeFileSync(CL_FILE, JSON.stringify(out)); }
+  catch (e) { console.warn('[channel-life] no se pudo guardar:', e.message); }
+}
+
+function clLoad() {
+  try {
+    if (!fs.existsSync(CL_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(CL_FILE, 'utf8'));
+    const now = Date.now();
+    for (const [pid, v] of Object.entries(data || {})) {
+      clState.set(pid, {
+        lastCum: null, lastStatus: 'idle',
+        events: (v.events || []).filter((e) => now - e.ts <= CL_RETENTION_MS),
+        buckets: (v.buckets || [])
+          .filter((b) => now - b.ts <= CL_RETENTION_MS)
+          .map((b) => ({
+            ts: b.ts, n: b.n || 0, profile: b.profile, drop: b.drop || 0, dup: b.dup || 0, viewers: b.viewers || 0,
+            fps: b.fpsAvg != null ? [b.fpsAvg] : [], speed: b.speedAvg != null ? [b.speedAvg] : [],
+            q: b.qAvg != null ? [b.qAvg] : [], br: b.brAvg != null ? [b.brAvg] : [],
+          })),
+      });
+    }
+  } catch (e) { console.warn('[channel-life] no se pudo cargar:', e.message); }
+}
+
+// Reglas de análisis. Cada regla produce UNA conclusión única (sin repetir).
+function clAnalyze(pid) {
+  const st = clState.get(String(pid));
+  const now = Date.now();
+  const buckets = (st?.buckets || []).filter((b) => now - b.ts <= CL_RETENTION_MS);
+  const events = (st?.events || []).filter((e) => now - e.ts <= CL_RETENTION_MS);
+  const samples = buckets.reduce((s, b) => s + (b.n || 0), 0);
+  const profile = buckets.length ? buckets[buckets.length - 1].profile : null;
+  const profileCfg = OUTPUT_PROFILES[profile] || null;
+
+  const flat = (pick) => buckets.flatMap((b) => (Array.isArray(b[pick]) ? b[pick] : [])).filter((v) => v != null);
+  const fps = flat('fps'), speed = flat('speed'), q = flat('q'), br = flat('br');
+  const totalDrop = buckets.reduce((s, b) => s + (b.drop || 0), 0);
+  const totalDup = buckets.reduce((s, b) => s + (b.dup || 0), 0);
+  const viewersPeak = buckets.reduce((s, b) => Math.max(s, b.viewers || 0), 0);
+  const restarts = events.filter((e) => e.type === 'start').length;
+  const errors = events.filter((e) => e.type === 'error').length;
+  const minutesOn = samples; // 1 muestra ≈ 1 min emitiendo
+
+  const stats = {
+    minutes_on: minutesOn,
+    hours_on: +(minutesOn / 60).toFixed(1),
+    fps_avg: fps.length ? +clAvg(fps).toFixed(1) : null,
+    speed_avg: speed.length ? +clAvg(speed).toFixed(3) : null,
+    speed_min: speed.length ? +Math.min(...speed).toFixed(2) : null,
+    q_avg: q.length ? +clAvg(q).toFixed(1) : null,
+    q_max: q.length ? +Math.max(...q).toFixed(1) : null,
+    bitrate_avg: br.length ? Math.round(clAvg(br)) : null,
+    drops: totalDrop,
+    dups: totalDup,
+    viewers_peak: viewersPeak,
+    restarts,
+    errors,
+    profile,
+    profile_label: profileCfg?.label || profile || '—',
+  };
+
+  const findings = [];
+  const add = (level, title, detail) => {
+    if (findings.some((f) => f.title === title)) return;
+    findings.push({ level, title, detail });
+  };
+
+  if (minutesOn < 20) {
+    return {
+      pid: String(pid), window_hours: 48, stats,
+      findings: [{ level: 'info', title: 'Todavía aprendiendo', detail: `Llevo ${minutesOn} min de datos en este canal. Con ~20 min emitiendo ya puedo darte conclusiones útiles.` }],
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  const qAvg = stats.q_avg, spAvg = stats.speed_avg, fAvg = stats.fps_avg;
+  const target = profileCfg?.videoBitrate ? parseInt(profileCfg.videoBitrate, 10) : null;
+
+  // 1) Presión de compresión
+  if (qAvg != null) {
+    if (qAvg >= 32) add('alert', 'Compresión al límite',
+      `La compresión promedio (Q ${qAvg}) está muy alta para el perfil ${stats.profile_label}. El bitrate asignado no alcanza para el movimiento de este canal: subí un escalón (por ejemplo a HD 720p 3000k) o bajá la resolución a Intermedio 576p, que rinde mejor cada kbps.`);
+    else if (qAvg >= 29) add('warn', 'Compresión ajustada',
+      `Q promedio ${qAvg}: se ve bien pero sin margen. En partidos o escenas con mucho movimiento puede notarse bloqueo. Intermedio 576p o HD 720p le darían aire.`);
+    else if (qAvg <= 22 && profile && ['hd720', 'highquality'].includes(profile))
+      add('info', 'Sobra bitrate', `Q promedio ${qAvg} con ${stats.profile_label}: este canal no necesita tanto. Bajando a Intermedio 576p ahorrás ~35% de red sin que se note en TV.`);
+  }
+
+  // 2) Velocidad de proceso (fuente / CPU)
+  if (spAvg != null) {
+    if (spAvg < 0.95) add('alert', 'La señal llega lenta',
+      `Velocidad promedio ${spAvg}x (mínimo ${stats.speed_min}x). Cuando baja de 1.00x el canal se atrasa y los clientes ven congelones. Suele ser la fuente que entrega lento o CPU justa: probá un perfil más liviano (SD 480p) o revisá el origen.`);
+    else if (spAvg > 1.08) add('warn', 'Lectura acelerada',
+      `Velocidad promedio ${spAvg}x: se está leyendo más rápido que el tiempo real, algo típico al reconectar. Si se mantiene, puede provocar saltos de audio/video.`);
+  }
+
+  // 3) FPS
+  if (fAvg != null && fAvg < 24) add('alert', 'FPS por debajo de lo normal',
+    `Promedio ${fAvg} fps en 48 h. Por debajo de 24 fps el movimiento se ve entrecortado en TV; revisá fuente y carga del servidor.`);
+
+  // 4) Estabilidad / reinicios
+  if (restarts >= 6) add('alert', 'Fuente inestable',
+    `${restarts} arranques y ${errors} caídas en 48 h. Este canal se está recuperando demasiado seguido: conviene tener una URL de respaldo o cambiar de fuente.`);
+  else if (restarts >= 3) add('warn', 'Algunas reconexiones',
+    `${restarts} arranques en 48 h. No es grave, pero cada reconexión le cuesta unos segundos de negro a quien está viendo.`);
+
+  // 5) Drops
+  if (totalDrop > 500) add('warn', 'Frames descartados',
+    `${totalDrop} frames descartados en la ventana. Normalmente es ajuste de cadencia, pero si coincide con quejas de congelón vale probar un perfil con cadencia natural (Normal) o menor resolución.`);
+
+  // 6) Perfil vs audiencia
+  if (viewersPeak >= 50 && target && target >= 3000) add('info', 'Mucha audiencia con perfil pesado',
+    `Pico de ${viewersPeak} visores con ${stats.profile_label} (~${target}k por persona). Bajar a Intermedio 576p recortaría cerca del 40% del ancho de banda total sin un cambio fuerte en pantalla.`);
+
+  // 7) Bitrate real vs objetivo
+  if (stats.bitrate_avg != null && target && stats.bitrate_avg < target * 0.7)
+    add('warn', 'Bitrate real por debajo del objetivo',
+      `Está saliendo a ~${stats.bitrate_avg}k cuando el perfil pide ${target}k. Suele significar que la fuente ya viene comprimida: subir de perfil no mejoraría la imagen, conviene quedarse en uno más liviano.`);
+
+  if (!findings.length) add('ok', 'Canal sano',
+    `${stats.hours_on} h de emisión con velocidad ${spAvg ?? '—'}x, ${fAvg ?? '—'} fps y Q ${qAvg ?? '—'}. La configuración actual (${stats.profile_label}) le queda bien; no tocaría nada.`);
+
+  return { pid: String(pid), window_hours: 48, stats, findings, updated_at: new Date().toISOString() };
+}
+
+clLoad();
+setInterval(clTick, 60000);
+setInterval(clSave, 60000);
+setInterval(() => clPrune(), 10 * 60 * 1000);
+
+// GET /api/channel-life?pid=29 → análisis de un canal (o de todos sin pid)
+app.get('/api/channel-life', (req, res) => {
+  const pid = req.query.pid != null ? String(req.query.pid) : null;
+  if (pid) return res.json({ success: true, ...clAnalyze(pid) });
+  const out = {};
+  for (let i = 0; i <= MAX_TRACKED_PID; i++) {
+    const st = clState.get(String(i));
+    if (st && st.buckets.length) out[String(i)] = clAnalyze(String(i));
+  }
+  res.json({ success: true, window_hours: 48, by_pid: out });
 });
 
 
