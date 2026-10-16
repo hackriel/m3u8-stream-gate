@@ -2615,7 +2615,7 @@ const STREANN_BASE_URL = 'https://cf.streann.tech';
 // Device-id determinístico por process_id.
 // Mantiene SIEMPRE el mismo UUID por canal (no crece con re-logins / recoveries),
 // para que TDMax cuente cada canal como UN dispositivo estable y los 3 canales
-// de arlopfa (FUTV, TDmas 1, Teletica) no se invaliden mutuamente al re-loguear
+// TDMax (FUTV, TDmas 1, Teletica) no se invaliden mutuamente al re-loguear
 // (cross-invalidation cuando comparten un mismo device-id global).
 // Si no hay process_id (llamadas legacy), cae al UUID fijo anterior.
 const getDeviceIdForProcess = (pid) => {
