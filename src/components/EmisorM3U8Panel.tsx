@@ -371,6 +371,7 @@ export default function EmisorM3U8Panel() {
   // Historial de barras calculado en el VPS (persistente aunque cierres la pestaña)
   const [serverHealthHistory, setServerHealthHistory] = useState<Record<string, HealthLevel[]>>({});
   const [viewerDialog, setViewerDialog] = useState<{ pid: number; name: string } | null>(null);
+  const [lifeDialog, setLifeDialog] = useState<{ pid: number; name: string } | null>(null);
 
 
   useEffect(() => {
