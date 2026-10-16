@@ -1202,10 +1202,10 @@ const wrapFfmpegSpawn = (pid, ffmpegArgs) => {
   if (!LOCAL_PROXY_URL) return ['ffmpeg', ffmpegArgs];
   return ['ffmpeg', ['-http_proxy', LOCAL_PROXY_URL, ...ffmpegArgs]];
 };
-// IDs que deben usar la SEGUNDA cuenta TDMax (info@media.cr, la del Raspberry)
-// en vez de la cuenta principal (arlopfa). Evita exceder el cupo de devices
-// permitidos por TDMax en una sola cuenta.
-const PI_ACCOUNT_PROCESSES = new Set(['11', '14', '15', '17', '24', '25', '26']); // cuenta TDMax info@media.cr: FUTV URL, TDMAS 1 URL, CANAL 6 URL, FUTV ALTERNO, FOX+ URL, FOX URL, FOX+ ALTERNO
+// TODOS los canales TDMax usan la cuenta info@media.cr (la cuenta vieja arlopfa
+// quedó descartada por vencimiento). Se mantiene el mapeo por si en el futuro
+// se requiere repartir devices entre dos cuentas.
+const PI_ACCOUNT_PROCESSES = new Set(['4', '11', '14', '15', '17', '24', '25', '26']); // cuenta TDMax info@media.cr: TELETICA, FUTV URL, TDMAS 1 URL, CANAL 6 URL, FUTV ALTERNO, FOX+ URL, FOX URL, FOX+ ALTERNO
 const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
 const getTdmaxCreds = (account) => {
   if (account === 'pi') {
