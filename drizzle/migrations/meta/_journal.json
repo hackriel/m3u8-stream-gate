@@ -8,6 +8,13 @@
       "when": 1791661603632,
       "tag": "0000_add_canal13_process",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792367657352,
+      "tag": "0001_add_normalpro_output_profile",
+      "breakpoints": true
     }
   ]
 }
