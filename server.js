@@ -1046,6 +1046,14 @@ const OUTPUT_PROFILES = {
   passthrough:{ key: 'passthrough',label: 'Passthrough (sin re-encode)', width: '', videoBitrate: '', bufsize: '', audioBitrate: '', preset: '', x264Params: '', passthrough: true },
   highquality:{ key: 'highquality',label: 'Alta Calidad', width: '720', videoBitrate: '4000k', bufsize: '8000k', audioBitrate: '192k', preset: 'faster',   x264Params: 'rc-lookahead=30:ref=3:bframes=2', threads: 6 },
   normal:     { key: 'normal',     label: 'Normal',     width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'veryfast', x264Params: '' },
+  // Normal Mejorado Pro — MISMO 2000k CBR fijo (sin picos: maxrate = bitrate),
+  // pero exprime cada bit: preset fast (mejor estimación de movimiento que
+  // veryfast), lookahead 40 (~1.3s de anticipación para reservar bits antes
+  // de las panorámicas de fútbol), aq-mode 3 (más bits a zonas complejas),
+  // ref=4/bframes=3/me=umh/subme=8 (predicción de movimiento fina) y denoise
+  // ligero hqdn3d que quita el ruido de la re-compresión previa de la fuente
+  // y libera bits para la imagen real. GOP fijo 2s (scenecut=0) para XUI.
+  normalpro:  { key: 'normalpro',  label: 'Normal Mejorado Pro', width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', audioRate: '48000', preset: 'fast', x264Params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=3:aq-strength=1.1:me=umh:subme=8:scenecut=0', denoise: 'hqdn3d=1.5:1.5:6:6', threads: 6 },
   // HD 720p — equivalente al 720p30 de YouTube live (3000k) y al escalón
   // 720p de la escalera Netflix. VBV 2x para picos de movimiento.
   hd720:      { key: 'hd720',      label: 'HD 720p (3000k)', width: '720', videoBitrate: '3000k', maxrate: '3600k', bufsize: '6000k', audioBitrate: '128k', preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 6 },
@@ -1752,7 +1760,7 @@ const startSrtIngest = (process_id) => {
     '-maxrate', vBitrate,
     '-bufsize', vBufsize,
     ...(stageProfile.x264Params ? ['-x264-params', stageProfile.x264Params] : []),
-    '-vf', `scale=-2:${vHeight}`,
+    '-vf', `scale=-2:${vHeight}${stageProfile.denoise ? ',' + stageProfile.denoise : ''}`,
     '-r', srtFps,
     '-vsync', 'cfr',
     '-g', srtGop,
@@ -4754,7 +4762,7 @@ app.post('/api/emit', async (req, res) => {
         '-maxrate', outputProfile.maxrate || outputProfile.videoBitrate,
         '-bufsize', outputProfile.bufsize,
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
-        '-vf', (isCanal6UrlProcess && !isNaturalCadence) ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`,
+        '-vf', ((isCanal6UrlProcess && !isNaturalCadence) ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`) + (outputProfile.denoise ? ',' + outputProfile.denoise : ''),
         ...(isNaturalCadence ? ['-vsync', 'passthrough'] : ['-r', outputFps]),
         ...(!isNaturalCadence && (isCfrOutput || isCanal6UrlProcess || outputProfile.forceCfr) ? ['-vsync', 'cfr'] : []),
 
@@ -5335,7 +5343,7 @@ app.post('/api/emit', async (req, res) => {
             '-maxrate', vBitrate,
             '-bufsize', vBufsize,
             ...(stageProfile.x264Params ? ['-x264-params', stageProfile.x264Params] : []),
-            '-vf', `scale=-2:${vHeight}`,
+            '-vf', `scale=-2:${vHeight}${stageProfile.denoise ? ',' + stageProfile.denoise : ''}`,
             '-r', srtFps,
             '-vsync', 'cfr',
             '-g', srtGop,
@@ -6707,7 +6715,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-threads', String(outputProfile.threads || 4),
         '-b:v', outputProfile.videoBitrate, '-maxrate', outputProfile.maxrate || outputProfile.videoBitrate, '-bufsize', outputProfile.bufsize,
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
-        '-vf', `scale=-2:${outputProfile.width}`,
+        '-vf', `scale=-2:${outputProfile.width}${outputProfile.denoise ? ',' + outputProfile.denoise : ''}`,
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
       audioParams = ['-c:a', 'aac', '-b:a', outputProfile.audioBitrate, '-ar', '44100'];
