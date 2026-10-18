@@ -1,0 +1,1 @@
+ALTER TABLE public.emission_processes DROP CONSTRAINT IF EXISTS emission_processes_output_profile_check; ALTER TABLE public.emission_processes ADD CONSTRAINT emission_processes_output_profile_check CHECK (output_profile IN ('passthrough', 'highquality', 'hd720', 'normal', 'normalpro', 'mid576', 'sd480'));
