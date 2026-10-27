@@ -5,7 +5,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 
-export const LAB_LIMITS = { seconds: 30, bytes: 64 * 1024 * 1024, retentionMs: 48 * 3600000, threads: 2 };
+export const LAB_LIMITS = { seconds: 60, bytes: 64 * 1024 * 1024, retentionMs: 48 * 3600000, threads: 2 };
 export const LAB_CHANNELS = { futv: 'FUTV', fox: 'FOX' };
 export const LAB_PROFILES = {
   normal: { label: 'Normal', preset: 'veryfast', params: '', purpose: 'Referencia actual', experimental: false },
@@ -19,7 +19,7 @@ export function laboratoryArgs(input, output, profile) {
   const config = Object.hasOwn(LAB_PROFILES, profile) ? LAB_PROFILES[profile] : null;
   if (!config) throw new Error('Salida de laboratorio no permitida.');
   const bitrate = config.videoKbps || 2000;
-  return ['-hide_banner', '-nostdin', '-y', '-threads', '2', '-i', input, '-t', '30', '-map', '0:v:0', '-map', '0:a:0?',
+  return ['-hide_banner', '-nostdin', '-y', '-threads', '2', '-i', input, '-t', String(LAB_LIMITS.seconds), '-map', '0:v:0', '-map', '0:a:0?',
     '-vf', `scale=-2:${config.height || 720}${config.denoise ? `,${config.denoise}` : ''}`, '-c:v', 'libx264', '-preset', config.preset,
     '-threads', '2', '-b:v', `${bitrate}k`, '-minrate', `${bitrate}k`, '-maxrate', `${bitrate}k`, '-bufsize', `${bitrate * 2}k`,
     '-pix_fmt', 'yuv420p', '-force_key_frames', 'expr:gte(t,n_forced*2)',
