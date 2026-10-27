@@ -2907,8 +2907,6 @@ export default function EmisorM3U8Panel() {
                 <option value="hd720">{OUTPUT_PROFILE_LABELS.hd720}</option>
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
                 <option value="normalpro">{OUTPUT_PROFILE_LABELS.normalpro}</option>
-                <option value="mid576">{OUTPUT_PROFILE_LABELS.mid576}</option>
-                <option value="sd480">{OUTPUT_PROFILE_LABELS.sd480}</option>
               </select>
               <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                 {outputProfile === 'passthrough'
@@ -2919,10 +2917,6 @@ export default function EmisorM3U8Panel() {
                   ? 'HD 720p (3000k promedio, picos a 3600k · buffer 2s · preset faster · 6 hilos · AAC 128k · cadencia natural). Es el mismo bitrate que recomienda YouTube para 720p30 y el escalón 720p de la escalera Netflix. Nitidez HD real con ~25% menos datos que Alta Calidad y sin riesgo de congelones (mismo preset rápido que Normal).'
                   : outputProfile === 'normalpro'
                   ? 'Normal Mejorado Pro (720p · CBR 2000k fijo, sin picos · preset fast · AAC 128k 48 kHz · cadencia natural). Mismo consumo de red que Normal, pero mejor imagen por bit: lookahead 40 (anticipa el movimiento del fútbol), aq-mode 3 (más bits a zonas complejas), predicción fina (ref=4, bframes=3, me=umh, subme=8) y un filtro anti-ruido ligero que libera bits de la re-compresión previa de la fuente. GOP fijo 2s, ideal para XUI.'
-                  : outputProfile === 'mid576'
-                  ? 'Intermedio 576p (1800k promedio, pico 2000k · buffer 2s · preset faster · 5 hilos · AAC 128k 48 kHz · cadencia CFR real). Mismo tratamiento anti-congelón que el SD: audio sin resamplear, picos contenidos (+11%) y compresión más fina (ref=4, lookahead 30, aq 1.1) para exprimir los 1800k. Consume ~40% menos red que HD 720p y se ve muy cerca del intermedio anterior.'
-                  : outputProfile === 'sd480'
-                  ? 'SD 480p (1500k promedio, picos a 2100k · buffer 2s · preset faster · AAC 96k · cadencia natural). Calidad SD buena tipo OTT: limpia y estable en TV, ~25% menos datos que Normal. Para eventos masivos o clientes con internet flojo.'
                   : 'Perfil estándar de producción (720p · 2000k). Mejor calidad, mayor consumo por usuario.'}
               </p>
             </div>
