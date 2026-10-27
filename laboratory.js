@@ -13,6 +13,7 @@ export const LAB_PROFILES = {
   sportsdetail: { label: 'Deportes Detalle 2000', preset: 'faster', params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=6', purpose: 'Sin filtro de ruido; prueba de detalle y menor esfuerzo', experimental: true },
   sportsclean: { label: 'Deportes Limpio 2000', preset: 'fast', params: 'rc-lookahead=30:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=7', denoise: 'hqdn3d=0.7:0.7:0:0', purpose: 'Filtro espacial leve, sin suavizado temporal; prueba para fuentes con ruido', experimental: true },
   classic1000: { label: 'Clásico 480p · 1000', preset: 'fast', params: 'rc-lookahead=30:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=7', denoise: 'hqdn3d=1.0:1.0:0:0', videoKbps: 1000, height: 480, purpose: 'No HD; menor detalle y filtro espacial leve, sin reducir los colores. Prueba de bajo consumo', experimental: true },
+  classic1000plus: { label: 'Clásico 480p · 1000 Plus', preset: 'medium', params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=2:aq-strength=1.0:me=umh:subme=8', denoise: 'hqdn3d=1.0:1.0:0:0', videoKbps: 1000, height: 480, purpose: 'Mismo Clásico con compresión medium: más CPU para más detalle con la misma red', experimental: true },
 };
 export const laboratoryProfiles = () => Object.entries(LAB_PROFILES).map(([id, p]) => ({ id, label: p.label, purpose: p.purpose, experimental: p.experimental, videoKbps: p.videoKbps || 2000, audioKbps: 128, height: p.height || 720 }));
 export function laboratoryArgs(input, output, profile) {

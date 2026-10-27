@@ -75,7 +75,7 @@ test('Snapshot retains at most 120 seconds and never modifies live segments', as
     await assert.rejects(snapshotPlaylist(live, path.join(root, 'unsafe')));
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
-test('Real local capture, five encodes and persisted results complete without scraping', async () => {
+test('Real local capture, six encodes and persisted results complete without scraping', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lab-flow-'));
   const live = path.join(root, 'live', 'futv'); await fs.mkdir(live, { recursive: true });
   const generated = spawnSync('ffmpeg', ['-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=30','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-preset','ultrafast','-g','30','-c:a','aac','-f','hls','-hls_time','1','-hls_list_size','0',path.join(live,'playlist.m3u8')]);
@@ -92,8 +92,8 @@ test('Real local capture, five encodes and persisted results complete without sc
     let state;
     for(let i=0;i<150;i++) { state=await (await fetch(base,{headers})).json(); if(!state.active) break; await new Promise(r=>setTimeout(r,200)); }
     assert.equal(state.history[0]?.status,'completed',JSON.stringify(state.history[0]));
-    assert.deepEqual(state.history[0].results.map(r => r.profile), ['normal','normalpro','sportsdetail','sportsclean','classic1000']);
-    assert.equal(state.history[0].profiles.filter(p => p.experimental).length,3);
+    assert.deepEqual(state.history[0].results.map(r => r.profile), ['normal','normalpro','sportsdetail','sportsclean','classic1000','classic1000plus']);
+    assert.equal(state.history[0].profiles.filter(p => p.experimental).length,4);
     assert.ok(state.history[0].results.every(r=>r.videoKbps>0 && r.speed>0));
     assert.ok(state.history[0].results.every(r=>r.frames>0 && r.assessment));
     const downloadPath = `/${state.history[0].id}/classic1000/download`;
