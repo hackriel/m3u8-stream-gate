@@ -7,13 +7,21 @@ import { spawn } from 'node:child_process';
 
 export const LAB_LIMITS = { seconds: 30, bytes: 64 * 1024 * 1024, retentionMs: 48 * 3600000, threads: 2 };
 export const LAB_CHANNELS = { futv: 'FUTV', fox: 'FOX' };
+export const LAB_PROFILES = {
+  normal: { label: 'Normal', preset: 'veryfast', params: '', purpose: 'Referencia actual', experimental: false },
+  normalpro: { label: 'Normal Mejorado Pro', preset: 'fast', params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=3:aq-strength=1.1:me=umh:subme=8', denoise: 'hqdn3d=1.5:1.5:6:6', purpose: 'Referencia de compresión mejorada', experimental: false },
+  sportsdetail: { label: 'Deportes Detalle 2000', preset: 'faster', params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=6', purpose: 'Sin filtro de ruido; prueba de detalle y menor esfuerzo', experimental: true },
+  sportsclean: { label: 'Deportes Limpio 2000', preset: 'fast', params: 'rc-lookahead=30:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=7', denoise: 'hqdn3d=0.7:0.7:0:0', purpose: 'Filtro espacial leve, sin suavizado temporal; prueba para fuentes con ruido', experimental: true },
+};
+export const laboratoryProfiles = () => Object.entries(LAB_PROFILES).map(([id, p]) => ({ id, label: p.label, purpose: p.purpose, experimental: p.experimental, videoKbps: 2000, audioKbps: 128, height: 720 }));
 export function laboratoryArgs(input, output, profile) {
-  const pro = profile === 'normalpro';
+  const config = Object.hasOwn(LAB_PROFILES, profile) ? LAB_PROFILES[profile] : null;
+  if (!config) throw new Error('Salida de laboratorio no permitida.');
   return ['-hide_banner', '-nostdin', '-y', '-threads', '2', '-i', input, '-t', '30', '-map', '0:v:0', '-map', '0:a:0?',
-    '-vf', `scale=-2:720${pro ? ',hqdn3d=1.5:1.5:6:6' : ''}`, '-c:v', 'libx264', '-preset', pro ? 'fast' : 'veryfast',
+    '-vf', `scale=-2:720${config.denoise ? `,${config.denoise}` : ''}`, '-c:v', 'libx264', '-preset', config.preset,
     '-threads', '2', '-b:v', '2000k', '-minrate', '2000k', '-maxrate', '2000k', '-bufsize', '4000k',
     '-pix_fmt', 'yuv420p', '-force_key_frames', 'expr:gte(t,n_forced*2)',
-    '-x264-params', `nal-hrd=cbr:force-cfr=0:scenecut=0${pro ? ':rc-lookahead=40:ref=4:bframes=3:aq-mode=3:aq-strength=1.1:me=umh:subme=8' : ''}`,
+    '-x264-params', `nal-hrd=cbr:force-cfr=0:scenecut=0${config.params ? `:${config.params}` : ''}`,
     '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2', '-af', 'aresample=async=1:min_hard_comp=0.100:first_pts=0',
     '-fs', String(LAB_LIMITS.bytes), '-movflags', '+faststart', output];
 }
@@ -107,7 +115,7 @@ export function createLaboratory({ liveDir, dataDir, getSource, canRun = () => o
       const video = JSON.parse(probe.stdout).streams.find(s => s.codec_type === 'video');
       job.reference = video ? { width: video.width, height: video.height, codec: video.codec_name } : null;
       job.results = [];
-      for (const profile of ['normal', 'normalpro']) {
+      for (const profile of job.profiles.map(p => p.id)) {
         if (!canRun()) throw new Error('Prueba detenida: el servidor necesita margen para las emisiones.');
         job.stage = profile;
         const output = path.join(temp, `${profile}.mp4`);
@@ -121,10 +129,8 @@ export function createLaboratory({ liveDir, dataDir, getSource, canRun = () => o
         await fs.unlink(output);
       }
       job.status = 'completed';
-      const pro = job.results.find(r => r.profile === 'normalpro');
-      job.conclusion = pro?.speed >= 1.2
-        ? 'Normal Pro terminó con margen en esta muestra. Esto mide procesamiento, no demuestra mejor imagen ni ausencia de cortes en XUI. Antes de usarlo, compara visualmente el canal y observa la carga real.'
-        : 'Normal Pro tuvo poco margen de procesamiento en esta muestra. Conserva el perfil actual; esta prueba no justifica aumentar la exigencia en producción.';
+      const withMargin = job.results.filter(r => r.speed >= 1.2).map(r => LAB_PROFILES[r.profile].label);
+      job.conclusion = `${withMargin.length ? `Terminaron con margen de procesamiento en esta muestra: ${withMargin.join(', ')}.` : 'Ninguna salida alcanzó margen suficiente en esta muestra.'} La velocidad no elige un ganador de imagen ni demuestra ausencia de cortes en XUI. Las salidas deportivas son experimentales: conserva la emisión actual hasta validarlas visualmente y con la carga real.`;
     } catch (error) {
       job.status = job.cancelled ? 'cancelled' : 'failed';
       job.error = error.code ? 'No se pudo copiar la muestra. La señal pudo cambiar o detenerse; vuelve a intentarlo.' : error.message;
@@ -146,7 +152,7 @@ export function createLaboratory({ liveDir, dataDir, getSource, canRun = () => o
   router.get('/', async (_req, res) => {
     await ready; prune();
     const channels = Object.entries(LAB_CHANNELS).map(([id, name]) => ({ id, name, ...getSource(id) }));
-    res.json({ channels, active, history, limits: LAB_LIMITS });
+    res.json({ channels, active, history, limits: LAB_LIMITS, profiles: laboratoryProfiles() });
   });
   router.post('/start', async (req, res) => {
     await ready;
@@ -155,7 +161,7 @@ export function createLaboratory({ liveDir, dataDir, getSource, canRun = () => o
     if (active) return res.status(409).json({ error: 'Ya hay una prueba en curso.' });
     if (!getSource(channel).running) return res.status(409).json({ error: 'Este canal debe estar emitiendo antes de probarlo.' });
     if (!canRun()) return res.status(409).json({ error: 'El servidor tiene mucha carga. Prueba cuando baje la audiencia.' });
-    active = { id: crypto.randomUUID(), channel, source: getSource(channel), status: 'running', stage: 'capture', startedAt: new Date().toISOString() };
+    active = { id: crypto.randomUUID(), channel, source: getSource(channel), profiles: laboratoryProfiles(), status: 'running', stage: 'capture', startedAt: new Date().toISOString() };
     const job = active;
     res.status(202).json(job);
     void execute(job);

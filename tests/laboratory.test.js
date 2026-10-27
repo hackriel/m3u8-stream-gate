@@ -5,14 +5,25 @@ import path from 'node:path';
 import os from 'node:os';
 import express from 'express';
 import { spawnSync } from 'node:child_process';
-import { LAB_LIMITS, laboratoryArgs, snapshotPlaylist, createLaboratory } from '../laboratory.js';
+import { LAB_LIMITS, LAB_PROFILES, laboratoryArgs, snapshotPlaylist, createLaboratory } from '../laboratory.js';
 
-test('Both comparisons keep video at 2000k with a 2000k ceiling and 128k audio', () => {
-  for (const profile of ['normal', 'normalpro']) {
+test('All laboratory outputs keep video at 2000k with a 2000k ceiling and 128k audio', () => {
+  for (const profile of Object.keys(LAB_PROFILES)) {
     const args = laboratoryArgs('input', 'output', profile);
     for (const flag of ['-b:v', '-minrate', '-maxrate']) assert.equal(args[args.indexOf(flag) + 1], '2000k');
     assert.equal(args[args.indexOf('-b:a') + 1], '128k');
   }
+});
+test('Sports candidates remain experimental H264 720p with no FPS conversion or slow preset', () => {
+  for (const profile of ['sportsdetail', 'sportsclean']) {
+    assert.equal(LAB_PROFILES[profile].experimental, true);
+    const args = laboratoryArgs('input', 'output', profile);
+    assert.equal(args[args.indexOf('-c:v') + 1], 'libx264');
+    assert.ok(args[args.indexOf('-vf') + 1].startsWith('scale=-2:720'));
+    assert.ok(['fast', 'faster'].includes(args[args.indexOf('-preset') + 1]));
+    assert.equal(args.includes('-r'), false);
+  }
+  assert.throws(() => laboratoryArgs('input', 'output', 'sd480'));
 });
 test('History retention is 48 hours', () => assert.equal(LAB_LIMITS.retentionMs, 48 * 3600000));
 test('Snapshot retains at most 30 seconds and never modifies live segments', async () => {
@@ -28,7 +39,7 @@ test('Snapshot retains at most 30 seconds and never modifies live segments', asy
     await assert.rejects(snapshotPlaylist(live, path.join(root, 'unsafe')));
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
-test('Real local capture, two encodes and persisted results complete without scraping', async () => {
+test('Real local capture, four encodes and persisted results complete without scraping', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lab-flow-'));
   const live = path.join(root, 'live', 'futv'); await fs.mkdir(live, { recursive: true });
   const generated = spawnSync('ffmpeg', ['-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=30','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-preset','ultrafast','-g','30','-c:a','aac','-f','hls','-hls_time','1','-hls_list_size','0',path.join(live,'playlist.m3u8')]);
@@ -45,7 +56,8 @@ test('Real local capture, two encodes and persisted results complete without scr
     let state;
     for(let i=0;i<150;i++) { state=await (await fetch(base,{headers})).json(); if(!state.active) break; await new Promise(r=>setTimeout(r,200)); }
     assert.equal(state.history[0]?.status,'completed',JSON.stringify(state.history[0]));
-    assert.equal(state.history[0].results.length,2);
+    assert.deepEqual(state.history[0].results.map(r => r.profile), ['normal','normalpro','sportsdetail','sportsclean']);
+    assert.equal(state.history[0].profiles.filter(p => p.experimental).length,2);
     assert.ok(state.history[0].results.every(r=>r.videoKbps>0 && r.speed>0));
     assert.equal(JSON.parse(await fs.readFile(path.join(root,'data','laboratory-results.json'),'utf8'))[0].channel,'futv');
     assert.ok((await fs.readdir(live)).includes('playlist.m3u8'));
