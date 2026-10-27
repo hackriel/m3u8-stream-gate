@@ -39,14 +39,14 @@ test('Sports candidates remain experimental H264 720p with no FPS conversion or 
   assert.throws(() => laboratoryArgs('input', 'output', 'sd480'));
 });
 test('History retention is 48 hours', () => assert.equal(LAB_LIMITS.retentionMs, 48 * 3600000));
-test('Snapshot retains at most 30 seconds and never modifies live segments', async () => {
+test('Snapshot retains at most 60 seconds and never modifies live segments', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lab-test-'));
   try {
     const live = path.join(root, 'live'); await fs.mkdir(live);
     await fs.writeFile(path.join(live, 'playlist.m3u8'), '#EXTM3U\n' + [1,2,3,4].map(i => `#EXTINF:10,\ns${i}.ts\n`).join(''));
     for (const i of [1,2,3,4]) await fs.writeFile(path.join(live, `s${i}.ts`), `segment${i}`);
     const snapshot = await snapshotPlaylist(live, path.join(root, 'sample'));
-    assert.equal(snapshot.seconds, 30); assert.equal(snapshot.segments, 3);
+    assert.equal(snapshot.seconds, 40); assert.equal(snapshot.segments, 4);
     assert.equal(await fs.readFile(path.join(live, 's4.ts'), 'utf8'), 'segment4');
     await fs.writeFile(path.join(live, 'playlist.m3u8'), '#EXTM3U\n#EXTINF:10,\nhttps://example.com/token.ts\n');
     await assert.rejects(snapshotPlaylist(live, path.join(root, 'unsafe')));
