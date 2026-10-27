@@ -9,4 +9,4 @@
 - [x] Guardar resultados y límites de seguridad sin cambiar emisiones.
 - [x] Probar captura, comparación y estados de la pantalla con señal local de prueba.
 - [ ] Ejecutar con FUTV/FOX reales: requiere actualizar el VPS con el nuevo módulo.
-- [ ] Incluir dos salidas deportivas experimentales y comparar las cuatro sobre la misma muestra antes del despliegue.
+- [x] Incluir dos salidas deportivas experimentales y comparar las cuatro sobre la misma muestra local de prueba antes del despliegue.
