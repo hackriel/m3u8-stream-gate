@@ -107,7 +107,7 @@ const FOXMAS_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9005?streamid=foxmas&la
 const FOX_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9006?streamid=fox&latency=2000000`;
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
-type OutputProfile = "passthrough" | "highquality" | "hd720" | "normal" | "normalpro" | "mid576" | "sd480";
+type OutputProfile = "passthrough" | "highquality" | "hd720" | "normal" | "normalpro";
 const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
 const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   passthrough: "Passthrough · tal cual lo manda OBS (sin re-encode)",
@@ -115,8 +115,6 @@ const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   hd720: "HD 720p · 3000k (pico 3600k) + AAC 128k",
   normal: "Normal · 720p CBR 2000k + AAC 128k",
   normalpro: "Normal Mejorado Pro · 720p CBR 2000k + AAC 128k (fast)",
-  mid576: "Intermedio 576p · 1800k (pico 2000k) + AAC 128k",
-  sd480: "SD 480p · 1500k (pico 2100k) + AAC 96k",
 };
 const OUTPUT_PROFILE_SHORT_LABELS: Record<OutputProfile, string> = {
   passthrough: "COPY",
@@ -124,11 +122,9 @@ const OUTPUT_PROFILE_SHORT_LABELS: Record<OutputProfile, string> = {
   hd720: "HD 720",
   normal: "NORMAL",
   normalpro: "NORMAL PRO",
-  mid576: "INTERMEDIO",
-  sd480: "SD 480",
 };
 const VALID_OUTPUT_PROFILES = new Set<string>([
-  "passthrough", "highquality", "hd720", "normal", "normalpro", "mid576", "sd480",
+  "passthrough", "highquality", "hd720", "normal", "normalpro",
 ]);
 // IDs SRT ingest: arrancan por defecto en Passthrough (sin re-encode).
 const SRT_INGEST_INDEXES = new Set<number>([16, 18, 20, 21, 22, 23]);
