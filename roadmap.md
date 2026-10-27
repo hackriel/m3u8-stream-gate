@@ -10,3 +10,4 @@
 - [x] Probar captura, comparación y estados de la pantalla con señal local de prueba.
 - [ ] Ejecutar con FUTV/FOX reales: requiere actualizar el VPS con el nuevo módulo.
 - [x] Incluir dos salidas deportivas experimentales y comparar las cuatro sobre la misma muestra local de prueba antes del despliegue.
+- [x] Añadir y validar con muestra local prueba no HD de 1000 kbps sin reintroducir los perfiles SD/Intermedio retirados en producción.

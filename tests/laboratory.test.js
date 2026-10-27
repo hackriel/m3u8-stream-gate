@@ -8,11 +8,24 @@ import { spawnSync } from 'node:child_process';
 import { LAB_LIMITS, LAB_PROFILES, laboratoryArgs, snapshotPlaylist, createLaboratory } from '../laboratory.js';
 
 test('All laboratory outputs keep video at 2000k with a 2000k ceiling and 128k audio', () => {
-  for (const profile of Object.keys(LAB_PROFILES)) {
+  for (const profile of ['normal','normalpro','sportsdetail','sportsclean']) {
     const args = laboratoryArgs('input', 'output', profile);
     for (const flag of ['-b:v', '-minrate', '-maxrate']) assert.equal(args[args.indexOf(flag) + 1], '2000k');
     assert.equal(args[args.indexOf('-b:a') + 1], '128k');
   }
+});
+test('Classic uses 1000k video with a 1000k ceiling, 2000k buffer and unchanged 128k audio', () => {
+  const args = laboratoryArgs('input', 'output', 'classic1000');
+  for (const flag of ['-b:v','-minrate','-maxrate']) assert.equal(args[args.indexOf(flag)+1], '1000k');
+  assert.equal(args[args.indexOf('-bufsize')+1], '2000k');
+  assert.equal(args[args.indexOf('-b:a')+1], '128k');
+});
+test('Classic is non-HD 480p H264 without color reduction, temporal denoising or FPS conversion', () => {
+  const args = laboratoryArgs('input', 'output', 'classic1000');
+  assert.equal(args[args.indexOf('-vf')+1], 'scale=-2:480,hqdn3d=1.0:1.0:0:0');
+  assert.equal(args[args.indexOf('-c:v')+1], 'libx264');
+  assert.equal(args.includes('-r'), false);
+  assert.equal(LAB_PROFILES.classic1000.experimental, true);
 });
 test('Sports candidates remain experimental H264 720p with no FPS conversion or slow preset', () => {
   for (const profile of ['sportsdetail', 'sportsclean']) {
@@ -39,7 +52,7 @@ test('Snapshot retains at most 30 seconds and never modifies live segments', asy
     await assert.rejects(snapshotPlaylist(live, path.join(root, 'unsafe')));
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
-test('Real local capture, four encodes and persisted results complete without scraping', async () => {
+test('Real local capture, five encodes and persisted results complete without scraping', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lab-flow-'));
   const live = path.join(root, 'live', 'futv'); await fs.mkdir(live, { recursive: true });
   const generated = spawnSync('ffmpeg', ['-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=30','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-preset','ultrafast','-g','30','-c:a','aac','-f','hls','-hls_time','1','-hls_list_size','0',path.join(live,'playlist.m3u8')]);
@@ -56,8 +69,8 @@ test('Real local capture, four encodes and persisted results complete without sc
     let state;
     for(let i=0;i<150;i++) { state=await (await fetch(base,{headers})).json(); if(!state.active) break; await new Promise(r=>setTimeout(r,200)); }
     assert.equal(state.history[0]?.status,'completed',JSON.stringify(state.history[0]));
-    assert.deepEqual(state.history[0].results.map(r => r.profile), ['normal','normalpro','sportsdetail','sportsclean']);
-    assert.equal(state.history[0].profiles.filter(p => p.experimental).length,2);
+    assert.deepEqual(state.history[0].results.map(r => r.profile), ['normal','normalpro','sportsdetail','sportsclean','classic1000']);
+    assert.equal(state.history[0].profiles.filter(p => p.experimental).length,3);
     assert.ok(state.history[0].results.every(r=>r.videoKbps>0 && r.speed>0));
     assert.equal(JSON.parse(await fs.readFile(path.join(root,'data','laboratory-results.json'),'utf8'))[0].channel,'futv');
     assert.ok((await fs.readdir(live)).includes('playlist.m3u8'));

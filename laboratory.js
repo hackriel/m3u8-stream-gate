@@ -12,14 +12,16 @@ export const LAB_PROFILES = {
   normalpro: { label: 'Normal Mejorado Pro', preset: 'fast', params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=3:aq-strength=1.1:me=umh:subme=8', denoise: 'hqdn3d=1.5:1.5:6:6', purpose: 'Referencia de compresión mejorada', experimental: false },
   sportsdetail: { label: 'Deportes Detalle 2000', preset: 'faster', params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=6', purpose: 'Sin filtro de ruido; prueba de detalle y menor esfuerzo', experimental: true },
   sportsclean: { label: 'Deportes Limpio 2000', preset: 'fast', params: 'rc-lookahead=30:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=7', denoise: 'hqdn3d=0.7:0.7:0:0', purpose: 'Filtro espacial leve, sin suavizado temporal; prueba para fuentes con ruido', experimental: true },
+  classic1000: { label: 'Clásico 480p · 1000', preset: 'fast', params: 'rc-lookahead=30:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=7', denoise: 'hqdn3d=1.0:1.0:0:0', videoKbps: 1000, height: 480, purpose: 'No HD; menor detalle y filtro espacial leve, sin reducir los colores. Prueba de bajo consumo', experimental: true },
 };
-export const laboratoryProfiles = () => Object.entries(LAB_PROFILES).map(([id, p]) => ({ id, label: p.label, purpose: p.purpose, experimental: p.experimental, videoKbps: 2000, audioKbps: 128, height: 720 }));
+export const laboratoryProfiles = () => Object.entries(LAB_PROFILES).map(([id, p]) => ({ id, label: p.label, purpose: p.purpose, experimental: p.experimental, videoKbps: p.videoKbps || 2000, audioKbps: 128, height: p.height || 720 }));
 export function laboratoryArgs(input, output, profile) {
   const config = Object.hasOwn(LAB_PROFILES, profile) ? LAB_PROFILES[profile] : null;
   if (!config) throw new Error('Salida de laboratorio no permitida.');
+  const bitrate = config.videoKbps || 2000;
   return ['-hide_banner', '-nostdin', '-y', '-threads', '2', '-i', input, '-t', '30', '-map', '0:v:0', '-map', '0:a:0?',
-    '-vf', `scale=-2:720${config.denoise ? `,${config.denoise}` : ''}`, '-c:v', 'libx264', '-preset', config.preset,
-    '-threads', '2', '-b:v', '2000k', '-minrate', '2000k', '-maxrate', '2000k', '-bufsize', '4000k',
+    '-vf', `scale=-2:${config.height || 720}${config.denoise ? `,${config.denoise}` : ''}`, '-c:v', 'libx264', '-preset', config.preset,
+    '-threads', '2', '-b:v', `${bitrate}k`, '-minrate', `${bitrate}k`, '-maxrate', `${bitrate}k`, '-bufsize', `${bitrate * 2}k`,
     '-pix_fmt', 'yuv420p', '-force_key_frames', 'expr:gte(t,n_forced*2)',
     '-x264-params', `nal-hrd=cbr:force-cfr=0:scenecut=0${config.params ? `:${config.params}` : ''}`,
     '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2', '-af', 'aresample=async=1:min_hard_comp=0.100:first_pts=0',
