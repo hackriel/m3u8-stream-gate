@@ -44,12 +44,12 @@ export async function snapshotPlaylist(source, destination, { collect = false, s
       for (const line of text.split('\n')) {
         if (line.startsWith('#EXTINF:')) duration = Number(line.slice(8).split(',')[0]);
         else if (line.endsWith('.ts') && !seen.has(line)) {
-          if (sample.seconds + duration > target) continue;
           const bytes = await fs.readFile(path.join(batchDir, line));
           if (sample.bytes + bytes.length > LAB_LIMITS.bytes) throw new Error('La muestra excede el límite de tamaño.');
           await fs.appendFile(path.join(destination, 'sample.ts'), bytes);
-          seen.add(line); sample.seconds += duration; sample.bytes += bytes.length; sample.segments++;
+          seen.add(line); sample.seconds = Math.min(target, sample.seconds + duration); sample.bytes += bytes.length; sample.segments++;
           onProgress({ ...sample });
+          if (sample.seconds >= target) break;
         }
       }
       if (sample.seconds >= target - 0.1) break;

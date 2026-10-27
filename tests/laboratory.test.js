@@ -100,3 +100,20 @@ test('Real local capture, five encodes and persisted results complete without sc
     assert.ok((await fs.readdir(live)).includes('playlist.m3u8'));
   } finally { await lab.stop(); await new Promise(r=>server.close(r)); await fs.rm(root,{recursive:true,force:true}); }
 });
+test('Rolling capture collects fresh segments and handles a boundary crossing the target', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lab-rolling-'));
+  try {
+    const live = path.join(root, 'live'); await fs.mkdir(live);
+    await fs.writeFile(path.join(live, 'one.ts'), 'first');
+    await fs.writeFile(path.join(live, 'playlist.m3u8'), '#EXTM3U\n#EXTINF:2,\none.ts\n');
+    const timer = setTimeout(async () => {
+      await fs.writeFile(path.join(live, 'two.ts'), 'second');
+      await fs.writeFile(path.join(live, 'playlist.m3u8'), '#EXTM3U\n#EXTINF:2,\ntwo.ts\n');
+    }, 100);
+    const result = await snapshotPlaylist(live, path.join(root, 'sample'), { collect: true, seconds: 3 });
+    clearTimeout(timer);
+    assert.equal(result.seconds, 3);
+    assert.equal(result.segments, 2);
+    assert.equal(await fs.readFile(path.join(root, 'sample', 'sample.ts'), 'utf8'), 'firstsecond');
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
