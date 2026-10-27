@@ -5,6 +5,7 @@
 - [x] Verificar sintaxis y flujo completo.
 - [x] Evitar que overrides antiguos reemplacen las credenciales Telecable nuevas.
 - [x] Corregir la validación HTTP posterior al login.
-- [ ] Añadir tab Laboratorio con FUTV y FOX y comparaciones aisladas.
-- [ ] Guardar resultados y límites de seguridad sin cambiar emisiones.
-- [ ] Probar captura, comparación y estados de la pantalla.
+- [x] Añadir tab Laboratorio con FUTV y FOX y comparaciones aisladas.
+- [x] Guardar resultados y límites de seguridad sin cambiar emisiones.
+- [x] Probar captura, comparación y estados de la pantalla con señal local de prueba.
+- [ ] Ejecutar con FUTV/FOX reales: requiere actualizar el VPS con el nuevo módulo.

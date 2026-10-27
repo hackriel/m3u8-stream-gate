@@ -52,6 +52,7 @@ export async function snapshotPlaylist(source, destination) {
     bytes += info.size;
     if (bytes > LAB_LIMITS.bytes) throw new Error('La muestra excede el límite de tamaño.');
     await fs.copyFile(file, path.join(destination, segment.name));
+    await fs.appendFile(path.join(destination, 'sample.ts'), await fs.readFile(path.join(destination, segment.name)));
   }
   await fs.writeFile(path.join(destination, 'sample.m3u8'), '#EXTM3U\n#EXT-X-TARGETDURATION:30\n' + selected.map(s => `${s.discontinuity ? '#EXT-X-DISCONTINUITY\n' : ''}#EXTINF:${s.duration},\n${s.name}\n`).join('') + '#EXT-X-ENDLIST\n');
   return { seconds, bytes, segments: selected.length };
@@ -63,7 +64,7 @@ export function createLaboratory({ liveDir, dataDir, getSource, canRun = () => o
   let active = null;
   let child = null;
   let history = [];
-  const ready = fs.readFile(historyFile, 'utf8').then(text => { history = JSON.parse(text); }).catch(() => {});
+  const ready = fs.readFile(historyFile, 'utf8').then(text => { const saved = JSON.parse(text); history = Array.isArray(saved) ? saved : []; }).catch(() => {});
   const prune = () => { history = history.filter(j => Date.now() - Date.parse(j.startedAt) < LAB_LIMITS.retentionMs).slice(0, 30); };
   const persist = async () => { prune(); await fs.mkdir(dataDir, { recursive: true }); await fs.writeFile(`${historyFile}.tmp`, JSON.stringify(history)); await fs.rename(`${historyFile}.tmp`, historyFile); };
   const run = (command, args, job, timeout = 120000) => new Promise((resolve, reject) => {
@@ -74,11 +75,13 @@ export function createLaboratory({ liveDir, dataDir, getSource, canRun = () => o
     let stdout = '';
     current.stdout.on('data', data => { stdout = (stdout + data.toString()).slice(-16384); });
     current.stderr.on('data', () => {}); // Never expose source details/credentials.
+    let overloaded = false;
+    const monitor = setInterval(() => { if (!canRun()) { overloaded = true; current.kill('SIGKILL'); } }, 5000);
     const timer = setTimeout(() => { current.kill('SIGKILL'); }, timeout);
-    current.once('error', () => { clearTimeout(timer); if (child === current) child = null; reject(new Error('No se pudo iniciar FFmpeg/FFprobe.')); });
+    current.once('error', () => { clearInterval(monitor); clearTimeout(timer); if (child === current) child = null; reject(new Error('No se pudo iniciar FFmpeg/FFprobe.')); });
     current.once('close', code => {
-      clearTimeout(timer); if (child === current) child = null;
-      if (code !== 0 || job.cancelled) reject(new Error(job.cancelled ? 'Prueba cancelada.' : 'La prueba no pudo completarse dentro del límite.'));
+      clearInterval(monitor); clearTimeout(timer); if (child === current) child = null;
+      if (code !== 0 || job.cancelled) reject(new Error(job.cancelled ? 'Prueba cancelada.' : overloaded ? 'Prueba detenida para priorizar las emisiones: aumentó la carga del servidor.' : 'La prueba no pudo completarse dentro del límite.'));
       else resolve({ stdout, elapsed: (Date.now() - started) / 1000 });
     });
   });
@@ -98,7 +101,8 @@ export function createLaboratory({ liveDir, dataDir, getSource, canRun = () => o
     try {
       temp = await fs.mkdtemp(path.join(os.tmpdir(), 'stream-lab-'));
       job.sample = await snapshotPlaylist(path.join(liveDir, job.channel), temp);
-      const input = path.join(temp, 'sample.m3u8');
+      // Completed local TS file, not a live HLS input; no -re pacing needed.
+      const input = path.join(temp, 'sample.ts');
       const probe = await run('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,crypto,data', '-show_streams', '-of', 'json', input], job, 15000);
       const video = JSON.parse(probe.stdout).streams.find(s => s.codec_type === 'video');
       job.reference = video ? { width: video.width, height: video.height, codec: video.codec_name } : null;
@@ -123,7 +127,7 @@ export function createLaboratory({ liveDir, dataDir, getSource, canRun = () => o
         : 'Normal Pro tuvo poco margen de procesamiento en esta muestra. Conserva el perfil actual; esta prueba no justifica aumentar la exigencia en producción.';
     } catch (error) {
       job.status = job.cancelled ? 'cancelled' : 'failed';
-      job.error = error.message;
+      job.error = error.code ? 'No se pudo copiar la muestra. La señal pudo cambiar o detenerse; vuelve a intentarlo.' : error.message;
     } finally {
       job.finishedAt = new Date().toISOString();
       if (temp) await fs.rm(temp, { recursive: true, force: true }).catch(() => {});
@@ -132,6 +136,8 @@ export function createLaboratory({ liveDir, dataDir, getSource, canRun = () => o
       active = null;
     }
   };
+  const retentionTimer = setInterval(() => { if (!active) void ready.then(persist).catch(() => {}); }, 3600000);
+  retentionTimer.unref();
   router.use((req, res, next) => {
     // Same simple dashboard gate, no separate account or JWT.
     if (req.get('X-Dashboard-Auth') !== 'Qm9hbmVyZ2VzMTIq') return res.status(403).json({ error: 'Abre el panel con tu contraseña para consultar Laboratorio.' });
