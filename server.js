@@ -17,6 +17,7 @@ import { request as undiciRequest, ProxyAgent } from 'undici';
 
 // FOX/FOX+ URL filler (pantalla "RECONECTANDO" mientras se re-scrape)
 import diagnosticsRouter from './diagnostics.js';
+import { createLaboratory } from './laboratory.js';
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
 
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
@@ -8256,6 +8257,22 @@ app.get('/api/channel-life', (req, res) => {
 });
 
 
+const laboratory = createLaboratory({
+  liveDir: HLS_OUTPUT_DIR,
+  dataDir: path.join(__dirname, 'laboratory-data'),
+  getSource: (slug) => {
+    const pid = Object.keys(HLS_SLUG_MAP).find(id => HLS_SLUG_MAP[id] === slug && emissionStatuses.get(id) === 'running');
+    const proc = pid ? ffmpegProcesses.get(pid)?.process : null;
+    const running = !!proc && proc.exitCode === null && !proc.killed;
+    return {
+      running,
+      provider: pid === '18' || pid === '23' ? 'SRT' : pid === '17' ? 'URL manual' : pid && telecableSourceMode.get(pid) === 'telecable' ? 'Telecable' : 'TDMax',
+      profile: pid ? outputProfileState[pid] || 'normal' : null,
+    };
+  },
+});
+app.use('/api/laboratory', laboratory.router);
+
 app.get('/api/status', (req, res) => {
   const { process_id } = req.query;
 
@@ -8579,7 +8596,8 @@ app.use((req, res, next) => {
 });
 
 // Manejo de cierre limpio
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
+  await laboratory.stop();
   sendLog('system', 'warn', 'Cerrando servidor...');
   ffmpegProcesses.forEach((processData, processId) => {
     if (processData.process && !processData.process.killed) {
@@ -8590,7 +8608,8 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
+  await laboratory.stop();
   sendLog('system', 'warn', 'Recibida señal SIGTERM, cerrando servidor...');
   ffmpegProcesses.forEach((processData, processId) => {
     if (processData.process && !processData.process.killed) {

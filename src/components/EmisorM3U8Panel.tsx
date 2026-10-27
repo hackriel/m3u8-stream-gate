@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { Eye, Bot } from "lucide-react";
+import { Eye, Bot, FlaskConical } from "lucide-react";
+import { LaboratoryPanel } from "@/components/LaboratoryPanel";
 import { ChannelLifeDialog } from "@/components/ChannelLifeDialog";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -3389,6 +3390,9 @@ export default function EmisorM3U8Panel() {
                   </TabsTrigger>
                 );
               })()}
+              <TabsTrigger value="laboratory" className="px-3 py-2 sm:py-2.5 rounded-xl gap-2 text-xs sm:text-sm">
+                <FlaskConical className="h-4 w-4" /> Laboratorio
+              </TabsTrigger>
               {VISIBLE_PROCESSES.map((i) => {
                 const color = getProcessColor(i);
                 const process = processes[i];
@@ -3440,6 +3444,8 @@ export default function EmisorM3U8Panel() {
               {renderProcessTab(i)}
             </TabsContent>
           ))}
+
+          <TabsContent value="laboratory"><LaboratoryPanel /></TabsContent>
 
           {/* Contenido tab UPTIME — grid responsive de señales activas */}
           <TabsContent key="uptime" value="uptime">
