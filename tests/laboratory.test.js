@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import express from 'express';
 import { spawnSync } from 'node:child_process';
-import { LAB_LIMITS, LAB_PROFILES, laboratoryArgs, snapshotPlaylist, createLaboratory, assessLaboratoryResult } from '../laboratory.js';
+import { LAB_LIMITS, LAB_PROFILES, laboratoryArgs, snapshotPlaylist, createLaboratory, assessLaboratoryResult, mayAutoTest } from '../laboratory.js';
 
 test('All laboratory outputs keep video at 2000k with a 2000k ceiling and 128k audio', () => {
   for (const profile of ['normal','normalpro','sportsdetail','sportsclean']) {
@@ -39,6 +39,13 @@ test('Sports candidates remain experimental H264 720p with no FPS conversion or 
   assert.throws(() => laboratoryArgs('input', 'output', 'sd480'));
 });
 test('History retention is 48 hours', () => assert.equal(LAB_LIMITS.retentionMs, 48 * 3600000));
+test('Automation requires opt-in, three observations and six-hour cooldown', () => {
+  const state = { enabled: true, running: true, suggested: true, observations: 3, lastAttempt: 0, now: 6 * 3600000 };
+  assert.equal(mayAutoTest(state), true);
+  assert.equal(mayAutoTest({ ...state, enabled: false }), false);
+  assert.equal(mayAutoTest({ ...state, observations: 2 }), false);
+  assert.equal(mayAutoTest({ ...state, now: state.now - 1 }), false);
+});
 test('Laboratory duration is 120 seconds in capture and encoding', () => {
   assert.equal(LAB_LIMITS.seconds, 120);
   const args = laboratoryArgs('input', 'output', 'normal');

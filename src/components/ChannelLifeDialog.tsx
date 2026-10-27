@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Bot, RefreshCw } from "lucide-react";
+import { Bot, RefreshCw, FlaskConical } from "lucide-react";
+import { Button } from '@/components/ui/button';
 import { apiUrl } from "@/lib/apiUrl";
 
 type Finding = { level: "ok" | "info" | "warn" | "alert"; title: string; detail: string };
@@ -23,27 +24,42 @@ type ChannelLife = {
   };
   findings: Finding[];
   updated_at: string;
+  lab_suggestion?: { channel: string; reason: string; seconds: number } | null;
 };
 
 const LEVEL_STYLES: Record<Finding["level"], string> = {
-  ok: "border-emerald-500/40 bg-emerald-500/10 text-emerald-200",
-  info: "border-sky-500/40 bg-sky-500/10 text-sky-200",
-  warn: "border-amber-500/40 bg-amber-500/10 text-amber-200",
-  alert: "border-red-500/40 bg-red-500/10 text-red-200",
+  ok: "border-success/40 bg-success/10 text-foreground",
+  info: "border-primary/40 bg-primary/10 text-foreground",
+  warn: "border-warning/40 bg-warning/10 text-foreground",
+  alert: "border-destructive/40 bg-destructive/10 text-foreground",
 };
 
 export function ChannelLifeDialog({
   pid,
   name,
   onOpenChange,
+  onLaboratory,
 }: {
   pid: number | null;
   name: string;
   onOpenChange: (open: boolean) => void;
+  onLaboratory?: () => void;
 }) {
   const [data, setData] = useState<ChannelLife | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const runSuggested = async () => {
+    if (!data?.lab_suggestion) return;
+    setTesting(true);
+    try {
+      const response = await fetch(apiUrl('/api/laboratory/start'), { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Dashboard-Auth': sessionStorage.getItem('m3u8_dashboard_auth') || '' }, body: JSON.stringify({ channel: data.lab_suggestion.channel }), signal: AbortSignal.timeout(12000) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'No se pudo iniciar la prueba.');
+      onOpenChange(false); onLaboratory?.();
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo iniciar la prueba.'); }
+    finally { setTesting(false); }
+  };
 
   const load = async (id: number) => {
     setLoading(true);
@@ -80,24 +96,24 @@ export function ChannelLifeDialog({
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Bot className="h-5 w-5 text-violet-300" />
+            <Bot className="h-5 w-5 text-primary" />
             Vida del canal · {name}
           </DialogTitle>
         </DialogHeader>
 
         <p className="text-xs text-muted-foreground -mt-2">
-          Conclusiones del servidor sobre las últimas 48 horas de este canal. Es solo información: nada de
-          esto cambia la emisión. El historial se borra solo cada 2 días.
+          Observaciones técnicas de las últimas 48 horas; no son una evaluación visual ni una medición del cliente.
+          Las recomendaciones no cambian la emisión. Solo se conservan los últimos 2 días.
         </p>
 
         {loading && <div className="text-sm text-muted-foreground py-6 text-center">Analizando…</div>}
-        {error && <div className="text-sm text-red-300 py-4">{error}</div>}
+        {error && <div role="alert" className="text-sm text-destructive py-4">{error}</div>}
 
         {s && !loading && (
           <>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
               <Stat label="Emitido" value={`${s.hours_on} h`} />
-              <Stat label="Salida" value={s.profile_label} />
+              <Stat label="Salida actual" value={s.profile_label} />
               <Stat label="FPS medio" value={s.fps_avg != null ? s.fps_avg.toFixed(1) : "—"} />
               <Stat label="Speed medio" value={s.speed_avg != null ? `${s.speed_avg.toFixed(2)}x` : "—"} />
               <Stat label="Q medio" value={s.q_avg != null ? s.q_avg.toFixed(1) : "—"} />
@@ -107,7 +123,7 @@ export function ChannelLifeDialog({
             </div>
 
             <div className="space-y-2 mt-4">
-              {data!.findings.map((f) => (
+              {data?.findings.map((f) => (
                 <div key={f.title} className={`rounded-lg border p-3 ${LEVEL_STYLES[f.level]}`}>
                   <div className="text-sm font-semibold">{f.title}</div>
                   <div className="text-xs mt-1 leading-relaxed opacity-90">{f.detail}</div>
@@ -115,13 +131,13 @@ export function ChannelLifeDialog({
               ))}
             </div>
 
-            <button
-              type="button"
+            {data?.lab_suggestion && <div className="border-t border-border pt-4 mt-4 space-y-2"><p className="text-sm">{data.lab_suggestion.reason}</p><p className="text-xs text-muted-foreground">Muestra reciente de hasta {data.lab_suggestion.seconds} s. No recupera el video de franjas antiguas ni identifica si hay fútbol.</p><Button variant="outline" disabled={testing} onClick={() => void runSuggested()}><FlaskConical className="h-4 w-4" />{testing ? 'Iniciando…' : 'Probar muestra reciente'}</Button></div>}
+            <Button variant="ghost" size="sm"
               onClick={() => pid != null && load(pid)}
-              className="mt-4 inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded border border-border/60 hover:bg-muted/40 transition-colors"
+              className="mt-4"
             >
               <RefreshCw className="h-3 w-3" /> Volver a analizar
-            </button>
+            </Button>
           </>
         )}
       </DialogContent>

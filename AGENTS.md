@@ -4,3 +4,6 @@
 - Laboratory measurements describe re-encoding of the current delivered output, not pristine upstream quality or end-client buffering; never present processing metrics as proof of perceptual improvement.
 - Keep the laboratory candidate catalog separate from production profiles and return its metadata from the API; each run snapshots the catalog and processes every candidate sequentially against the same sample, so experiments cannot change live profile selections.
 - Bulk emission telemetry derives its process range from the HLS channel map so newly added channel tabs receive live statistics without another hardcoded range update.
+- Channel-life advice is regenerated from VPS observations and the active profile catalog; historical quality/processing values never certify source reception or client playback.
+- Telecable HLS retries transport and server errors but never completed-segment EOF or streamed byte offsets, so segment boundaries remain the HLS demuxer's responsibility.
+- Autonomous laboratory jobs require a persisted dashboard-authorized opt-in, sustained eligible observations and a global cooldown; they share the manual-job lock and resource guards and never change production output.

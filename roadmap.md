@@ -1,5 +1,11 @@
 # Roadmap
 
+- [x] Actualizar Vida del canal: perfiles vigentes, conclusiones prudentes y recomendaciones de Laboratorio.
+- [x] Ocultar FOX+ Alterno sin alterar emisiones existentes.
+- [x] Diagnosticar logs Disney 8, corregir reconexión EOF Telecable y comprobar DNS/TCP del destino RTMP.
+- [ ] Verificar Disney 8 sostenido con M3U real y Telecable: requiere despliegue VPS y fuente real; no publicar una prueba encima del destino del cliente.
+- [x] Validar 18 pruebas y pantalla con recomendaciones de ejemplo; autonomía desactivada por defecto.
+
 - [x] Corregir consulta de métricas de Canal 13, Canal 8 y Canal 2; verificación real tras despliegue pendiente.
 - [x] Ampliar captura compartida del Laboratorio a 120 segundos acumulando segmentos nuevos.
 - [x] Añadir diagnóstico de frames/errores y descargas protegidas de cada salida con almacenamiento limitado.

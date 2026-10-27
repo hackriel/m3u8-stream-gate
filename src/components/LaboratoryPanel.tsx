@@ -4,12 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { apiUrl } from '@/lib/apiUrl';
 import { downloadBlob } from '@/lib/download';
+import { Switch } from '@/components/ui/switch';
 
 type Result = { profile: string; speed?: number; videoKbps?: number; sizeMB?: number; elapsed?: number; frames?: number; dropped?: number; duplicated?: number; downloadUntil?: string; assessment?: { status: string; summary: string } };
 type Profile = { id: string; label: string; purpose: string; experimental: boolean; videoKbps: number; audioKbps: number; height: number };
 type Job = { id: string; channel: string; status: string; stage: string; startedAt: string; profiles?: Profile[]; results?: Result[]; conclusion?: string; error?: string; sample?: { seconds: number }; reference?: { width: number; height: number; codec: string } };
 type Channel = { id: string; name: string; running: boolean; provider?: string; profile?: string };
-type LabData = { channels: Channel[]; active: Job | null; history: Job[]; profiles?: Profile[] };
+type LabData = { channels: Channel[]; active: Job | null; history: Job[]; profiles?: Profile[]; automation?: { enabled: boolean } };
 const names: Record<string, string> = { normal: 'Normal', normalpro: 'Normal Mejorado Pro', sportsdetail: 'Deportes Detalle 2000', sportsclean: 'Deportes Limpio 2000', classic1000: 'Clásico 480p · 1000' };
 const plannedProfiles: Profile[] = [
   { id: 'normal', label: names.normal, purpose: 'Referencia actual', experimental: false, videoKbps: 2000, audioKbps: 128, height: 720 },
@@ -63,6 +64,12 @@ export function LaboratoryPanel() {
     finally { setPending(false); }
   };
   const selected = data?.channels.find(c => c.id === channel);
+  const toggleAutomation = async (enabled: boolean) => {
+    setPending(true);
+    try { await request('/automation', { enabled }); await refresh(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'No se pudo guardar.'); }
+    finally { setPending(false); }
+  };
   const latest = data?.history[0];
   const profiles = data?.profiles || plannedProfiles;
   const steps = ['capture', ...(data?.active?.profiles || profiles).map(p => p.id)];
@@ -84,6 +91,7 @@ export function LaboratoryPanel() {
         <p className="text-xs text-muted-foreground">Referencia: fragmentos de la salida actual, ya procesados. No es la fuente original ni una medición de XUI.</p>
       </div>
       <div className="space-y-4 md:border-l md:border-border md:pl-8">
+        <div className="border-b border-border pb-4 space-y-2"><label className="flex items-center justify-between gap-3 text-sm font-medium"><span>Pruebas automáticas del robot</span><Switch aria-label="Pruebas automáticas del robot" checked={data?.automation?.enabled || false} disabled={!data?.automation || pending} onCheckedChange={enabled => void toggleAutomation(enabled)} /></label><p className="text-xs text-muted-foreground">Solo FUTV y FOX · tres observaciones consecutivas · máximo una prueba cada 6 horas · se detiene por carga. No identifica fútbol ni cambia salidas.</p></div>
         <h3 className="font-semibold">Prueba en curso</h3>
         {data?.active ? <div className="space-y-5"><div className="flex gap-2 items-center text-primary"><RefreshCw className="h-4 w-4 animate-spin motion-reduce:animate-none" />{data.active.stage === 'capture' ? `Recogiendo muestra · ${Math.round(data.active.sample?.seconds || 0)} / 120 s` : `Procesando ${names[data.active.stage] || data.active.stage}`}</div><p className="text-sm">{data.active.channel.toUpperCase()} · {time(data.active.startedAt)}</p><div className="flex gap-1" aria-label="Progreso de prueba">{steps.map((step, i) => <span key={step} className={`h-1.5 flex-1 rounded-sm ${i <= steps.indexOf(data.active?.stage || '') ? 'bg-primary' : 'bg-muted'}`} />)}</div><Button variant="outline" disabled={pending} onClick={() => void action('/cancel')}><Square />Cancelar prueba</Button></div>
         : <div className="py-8 text-muted-foreground flex items-center gap-3"><Clock className="h-6 w-6" /><span className="text-sm">{loading ? 'Consultando laboratorio…' : 'Sin pruebas en curso'}</span></div>}
