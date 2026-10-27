@@ -19,6 +19,7 @@ import { request as undiciRequest, ProxyAgent } from 'undici';
 import diagnosticsRouter from './diagnostics.js';
 import { createLaboratory } from './laboratory.js';
 import { trackedProcessIds } from './process-telemetry.js';
+import { compressionFinding, labSuggestion, normalizeHistoricalProfile } from './channel-life-rules.js';
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
 
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
@@ -8109,7 +8110,8 @@ function clAnalyze(pid) {
   const buckets = (st?.buckets || []).filter((b) => now - b.ts <= CL_RETENTION_MS);
   const events = (st?.events || []).filter((e) => now - e.ts <= CL_RETENTION_MS);
   const samples = buckets.reduce((s, b) => s + (b.n || 0), 0);
-  const profile = buckets.length ? buckets[buckets.length - 1].profile : null;
+  const lastProfile = buckets.length ? buckets[buckets.length - 1].profile : null;
+  const profile = normalizeHistoricalProfile(getStoredOutputProfile(pid) || lastProfile, OUTPUT_PROFILES, LEGACY_PROFILE_ALIASES);
   const profileCfg = OUTPUT_PROFILES[profile] || null;
 
   const flat = (pick) => buckets.flatMap((b) => (Array.isArray(b[pick]) ? b[pick] : [])).filter((v) => v != null);
@@ -8157,19 +8159,13 @@ function clAnalyze(pid) {
   const target = profileCfg?.videoBitrate ? parseInt(profileCfg.videoBitrate, 10) : null;
 
   // 1) Presión de compresión
-  if (qAvg != null) {
-    if (qAvg >= 32) add('alert', 'Compresión al límite',
-      `La compresión promedio (Q ${qAvg}) está muy alta para el perfil ${stats.profile_label}. El bitrate asignado no alcanza para el movimiento de este canal: subí un escalón (por ejemplo a HD 720p 3000k) o bajá la resolución a Intermedio 576p, que rinde mejor cada kbps.`);
-    else if (qAvg >= 29) add('warn', 'Compresión ajustada',
-      `Q promedio ${qAvg}: se ve bien pero sin margen. En partidos o escenas con mucho movimiento puede notarse bloqueo. Intermedio 576p o HD 720p le darían aire.`);
-    else if (qAvg <= 22 && profile && ['hd720', 'highquality'].includes(profile))
-      add('info', 'Sobra bitrate', `Q promedio ${qAvg} con ${stats.profile_label}: este canal no necesita tanto. Bajando a Intermedio 576p ahorrás ~35% de red sin que se note en TV.`);
-  }
+  const compression = compressionFinding(qAvg, stats.profile_label);
+  if (compression) add(compression.level, compression.title, compression.detail);
 
   // 2) Velocidad de proceso (fuente / CPU)
   if (spAvg != null) {
-    if (spAvg < 0.95) add('alert', 'La señal llega lenta',
-      `Velocidad promedio ${spAvg}x (mínimo ${stats.speed_min}x). Cuando baja de 1.00x el canal se atrasa y los clientes ven congelones. Suele ser la fuente que entrega lento o CPU justa: probá un perfil más liviano (SD 480p) o revisá el origen.`);
+    if (spAvg < 0.95) add('alert', 'Procesamiento atrasado',
+      `Velocidad promedio ${spAvg}x (mínimo ${stats.speed_min}x). Puede deberse a recepción, CPU o entrega al destino; esta métrica no distingue la causa. Revisa los errores coincidentes y compara contra Normal, sin modificar la emisión automáticamente.`);
     else if (spAvg > 1.08) add('warn', 'Lectura acelerada',
       `Velocidad promedio ${spAvg}x: se está leyendo más rápido que el tiempo real, algo típico al reconectar. Si se mantiene, puede provocar saltos de audio/video.`);
   }
@@ -8182,7 +8178,7 @@ function clAnalyze(pid) {
   if (restarts >= 6) add('alert', 'Fuente inestable',
     `${restarts} arranques y ${errors} caídas en 48 h. Este canal se está recuperando demasiado seguido: conviene tener una URL de respaldo o cambiar de fuente.`);
   else if (restarts >= 3) add('warn', 'Algunas reconexiones',
-    `${restarts} arranques en 48 h. No es grave, pero cada reconexión le cuesta unos segundos de negro a quien está viendo.`);
+    `${restarts} arranques y ${errors} errores registrados en 48 h. Incluye inicios manuales y reinicios del servicio; no todos son caídas ni prueban segundos de negro en el cliente.`);
 
   // 5) Drops
   if (totalDrop > 500) add('warn', 'Frames descartados',
@@ -8190,12 +8186,12 @@ function clAnalyze(pid) {
 
   // 6) Perfil vs audiencia
   if (viewersPeak >= 50 && target && target >= 3000) add('info', 'Mucha audiencia con perfil pesado',
-    `Pico de ${viewersPeak} visores con ${stats.profile_label} (~${target}k por persona). Bajar a Intermedio 576p recortaría cerca del 40% del ancho de banda total sin un cambio fuerte en pantalla.`);
+    `Pico de ${viewersPeak} visores con ${stats.profile_label}. Normal y Normal Mejorado Pro usan 2000 kbps de video; compara la imagen antes de reducir consumo. Los visores del origen no equivalen necesariamente a todos los clientes de XUI.`);
 
   // 7) Bitrate real vs objetivo
   if (stats.bitrate_avg != null && target && stats.bitrate_avg < target * 0.7)
     add('warn', 'Bitrate real por debajo del objetivo',
-      `Está saliendo a ~${stats.bitrate_avg}k cuando el perfil pide ${target}k. Suele significar que la fuente ya viene comprimida: subir de perfil no mejoraría la imagen, conviene quedarse en uno más liviano.`);
+      `Medición aproximada de salida ~${stats.bitrate_avg}k frente a ${target}k de video configurado. Incluye audio y transporte y puede variar por el muestreo; no demuestra que el origen ya esté demasiado comprimido.`);
 
   // 8) Ventanas horarias con mala señal (franjas de 15 min agrupadas)
   const clHour = (ts) => {
@@ -8229,20 +8225,22 @@ function clAnalyze(pid) {
       const slow = uniq.some((u) => u.includes('velocidad'));
       const heavy = uniq.some((u) => u.includes('compresión'));
       const tip = slow
-        ? 'En esa franja la fuente entregó lento: si se repite a la misma hora (suele ser hora pico del proveedor), conviene una URL de respaldo o un perfil más liviano como SD 480p en ese horario.'
+        ? 'Hubo retraso de procesamiento; revisa recepción, carga y destino antes de atribuirlo al proveedor.'
         : heavy
-          ? 'En esa franja la compresión se fue al límite, normalmente por contenido con mucho movimiento: un escalón más de bitrate (Intermedio 576p o HD 720p) lo cubriría.'
+          ? 'Hubo presión de compresión, no prueba de mala recepción. Compara Normal y Normal Mejorado Pro sin subir bitrate.'
           : 'En esa franja la cadencia se desordenó; si coincide con quejas, probá el perfil Normal (cadencia natural) en ese horario.';
-      add('warn', `Mala señal ${from}–${to}`,
-        `Entre las ${from} y las ${to} (hora de Costa Rica) el canal no llegó bien: ${[...new Set(r.reasons)].slice(0, 3).join(', ')}. ${tip}`);
+      add('warn', `Observación ${from}–${to}`,
+        `Entre las ${from} y las ${to} (hora de Costa Rica) se registró: ${[...new Set(r.reasons)].slice(0, 3).join(', ')}. ${tip} Son datos históricos; esos videos no se conservaron.`);
     }
   }
 
 
   if (!findings.length) add('ok', 'Canal sano',
-    `${stats.hours_on} h de emisión con velocidad ${spAvg ?? '—'}x, ${fAvg ?? '—'} fps y Q ${qAvg ?? '—'}. La configuración actual (${stats.profile_label}) le queda bien; no tocaría nada.`);
+    `${stats.hours_on} h muestreadas con velocidad ${spAvg ?? '—'}x, ${fAvg ?? '—'} fps y Q ${qAvg ?? '—'}. Sin alertas técnicas sostenidas en estos datos; no certifica imagen, recepción ni experiencia de cada cliente.`);
 
-  return { pid: String(pid), window_hours: 48, stats, findings, updated_at: new Date().toISOString() };
+  const live = getLiveStats(pid);
+  const suggestion = labSuggestion({ slug: HLS_SLUG_MAP[String(pid)], running: emissionStatuses.get(String(pid)) === 'running', q: live?.q, speed: live?.speed });
+  return { pid: String(pid), window_hours: 48, stats, findings, lab_suggestion: suggestion, updated_at: new Date().toISOString() };
 }
 
 clLoad();
