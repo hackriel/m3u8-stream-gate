@@ -108,15 +108,25 @@ export function assessLaboratoryResult({ seconds, expectedSeconds, frames, decod
   if (speed < 1.2) issues.push('Poco margen de procesamiento en esta prueba.');
   return { status: issues.length ? 'review' : 'ok', summary: issues.length ? issues.join(' ') : 'Archivo completo y decodificable; sin errores técnicos detectados. Imagen pendiente de revisión visual.' };
 }
+export function mayAutoTest({ enabled, running, suggested, observations, lastAttempt, now }) {
+  return enabled === true && running === true && suggested === true && observations >= 3 && now - lastAttempt >= 6 * 3600000;
+}
 
 export function createLaboratory({ liveDir, dataDir, getSource, captureSeconds = LAB_LIMITS.seconds, canRun = () => os.loadavg()[0] / os.cpus().length < 0.7 }) {
   const router = Router();
   const historyFile = path.join(dataDir, 'laboratory-results.json');
   const mediaDir = path.join(dataDir, 'laboratory-media');
+  const settingsFile = path.join(dataDir, 'laboratory-settings.json');
+  let automation = { enabled: false, lastAttempt: 0 };
+  const observations = new Map();
   let active = null;
   let child = null;
   let history = [];
-  const ready = fs.readFile(historyFile, 'utf8').then(text => { const saved = JSON.parse(text); history = Array.isArray(saved) ? saved : []; }).catch(() => {});
+  const ready = Promise.all([
+    fs.readFile(historyFile, 'utf8').then(text => { const saved = JSON.parse(text); history = Array.isArray(saved) ? saved : []; }).catch(() => {}),
+    fs.readFile(settingsFile, 'utf8').then(text => { const saved = JSON.parse(text); automation = { enabled: saved.enabled === true, lastAttempt: Number(saved.lastAttempt) || 0 }; }).catch(() => {}),
+  ]);
+  const saveSettings = async () => { await fs.mkdir(dataDir, { recursive: true }); await fs.writeFile(`${settingsFile}.tmp`, JSON.stringify(automation)); await fs.rename(`${settingsFile}.tmp`, settingsFile); };
   const prune = () => { history = history.filter(j => Date.now() - Date.parse(j.startedAt) < LAB_LIMITS.retentionMs).slice(0, 30); };
   const pruneMedia = async () => {
     await fs.mkdir(mediaDir, { recursive: true });
@@ -224,6 +234,23 @@ export function createLaboratory({ liveDir, dataDir, getSource, captureSeconds =
   };
   const retentionTimer = setInterval(() => { if (!active) void ready.then(persist).catch(() => {}); }, 60000);
   retentionTimer.unref();
+  const autoTimer = setInterval(() => {
+    void ready.then(async () => {
+      if (!automation.enabled || active || !canRun()) return;
+      for (const channel of Object.keys(LAB_CHANNELS)) {
+        const source = getSource(channel);
+        const count = source.suggested && source.running ? (observations.get(channel) || 0) + 1 : 0;
+        observations.set(channel, count);
+        if (!mayAutoTest({ enabled: automation.enabled, running: source.running, suggested: source.suggested, observations: count, lastAttempt: automation.lastAttempt, now: Date.now() })) continue;
+        automation.lastAttempt = Date.now();
+        try { await saveSettings(); } catch { automation.enabled = false; return; }
+        if (active || !automation.enabled) return;
+        active = { id: crypto.randomUUID(), channel, source, profiles: laboratoryProfiles(), status: 'running', stage: 'capture', origin: 'automatic', startedAt: new Date().toISOString() };
+        observations.clear(); void execute(active); break;
+      }
+    }).catch(() => {});
+  }, 60000);
+  autoTimer.unref();
   router.use((req, res, next) => {
     // Same simple dashboard gate, no separate account or JWT.
     if (req.get('X-Dashboard-Auth') !== 'Qm9hbmVyZ2VzMTIq') return res.status(403).json({ error: 'Abre el panel con tu contraseña para consultar Laboratorio.' });
@@ -232,7 +259,16 @@ export function createLaboratory({ liveDir, dataDir, getSource, captureSeconds =
   router.get('/', async (_req, res) => {
     await ready; prune();
     const channels = Object.entries(LAB_CHANNELS).map(([id, name]) => ({ id, name, ...getSource(id) }));
-    res.json({ channels, active, history, limits: LAB_LIMITS, profiles: laboratoryProfiles() });
+    res.json({ channels, active, history, automation, limits: LAB_LIMITS, profiles: laboratoryProfiles() });
+  });
+  router.post('/automation', async (req, res) => {
+    await ready;
+    if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({ error: 'Indica si las pruebas automáticas están activas.' });
+    const previous = automation.enabled;
+    automation.enabled = req.body.enabled;
+    try { await saveSettings(); } catch { automation.enabled = previous; return res.status(500).json({ error: 'No se pudo guardar la preferencia.' }); }
+    observations.clear();
+    res.json({ automation });
   });
   router.get('/:jobId/:profile/download', async (req, res) => {
     await ready;

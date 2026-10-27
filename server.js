@@ -8281,6 +8281,7 @@ const laboratory = createLaboratory({
       running,
       provider: pid === '18' || pid === '23' ? 'SRT' : pid === '17' ? 'URL manual' : pid && telecableSourceMode.get(pid) === 'telecable' ? 'Telecable' : 'TDMax',
       profile: pid ? outputProfileState[pid] || 'normal' : null,
+      suggested: !!labSuggestion({ slug, running, q: pid ? getLiveStats(pid)?.q : null, speed: pid ? getLiveStats(pid)?.speed : null }),
     };
   },
 });
