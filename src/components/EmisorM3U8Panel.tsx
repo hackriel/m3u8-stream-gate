@@ -3896,6 +3896,7 @@ export default function EmisorM3U8Panel() {
         pid={lifeDialog?.pid ?? null}
         name={lifeDialog?.name ?? ''}
         onOpenChange={(o) => { if (!o) setLifeDialog(null); }}
+        onLaboratory={() => setActiveTab('laboratory')}
       />
     </div>
   );

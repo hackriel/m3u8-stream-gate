@@ -5482,8 +5482,11 @@ app.post('/api/emit', async (req, res) => {
       // Guardar en buffer circular para diagnóstico
       const lines = output.split(/[\r\n]+/).filter(l => l.trim());
       for (const line of lines) {
-        stderrBuffer.push(line.trim());
-        if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
+        // Keep useful causes, not progress/encoder summaries that erase them at exit.
+        if (!/frame=|fps=|\[libx264 @|\[aac @/.test(line)) {
+          stderrBuffer.push(line.trim().replace(/(?:https?|rtmps?):\/\/[^\s'"<>]+/gi, '[URL ocultada]'));
+          if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
+        }
         updateLiveStats(process_id, line);
 
         if (sdAudit) {
@@ -5867,6 +5870,11 @@ app.post('/api/emit', async (req, res) => {
       const rawDiagnosticLines = stderrBuffer
         .filter(l => !l.includes('frame=') && !l.includes('fps='))
         .slice(-8);
+      if (!isManualStop && code !== 0) {
+        const kind = classifyStreamFailure(rawDiagnosticLines.join('\n'));
+        const labels = { input: 'recepción/segmentos del origen', output: 'escritura al destino RTMP', timestamps: 'tiempos de audio/video', unknown: 'causa no determinada; Conversion failed no identifica origen ni destino' };
+        sendLog(process_id, 'warn', `🔎 Diagnóstico de cierre: ${labels[kind]}`);
+      }
 
       const diagnosticLines = rawDiagnosticLines
         .filter(l =>
