@@ -20,6 +20,7 @@ import diagnosticsRouter from './diagnostics.js';
 import { createLaboratory } from './laboratory.js';
 import { trackedProcessIds } from './process-telemetry.js';
 import { compressionFinding, labSuggestion, normalizeHistoricalProfile } from './channel-life-rules.js';
+import { telecableInputArgs, classifyStreamFailure } from './streaming-transport.js';
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
 
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
@@ -4367,8 +4368,8 @@ app.post('/api/emit', async (req, res) => {
       // Telecable: mismo perfil que Canal 8/2 — HLS_INPUT_RESILIENCE_ARGS estándar.
       // -reconnect_at_eof / byte-offset reconnect rompen el demuxer HLS de Telecable
       // (loop infinito de "Will reconnect at <offset>"), por eso usamos solo 5xx.
-      effectiveResilienceArgs = HLS_INPUT_RESILIENCE_ARGS;
-      sendLog(process_id, 'info', `🔧 Telecable: resiliencia HLS estándar (sin reconnect at byte-offset)`);
+      effectiveResilienceArgs = telecableInputArgs();
+      sendLog(process_id, 'info', `🔧 Telecable: HLS sin reconexión EOF/byte-offset; tolerancia de lectura 15s`);
     } else if (isManualProcess) {
       effectiveResilienceArgs = [
         '-rw_timeout', '15000000',
@@ -5479,7 +5480,7 @@ app.post('/api/emit', async (req, res) => {
       const output = data.toString();
       
       // Guardar en buffer circular para diagnóstico
-      const lines = output.split('\n').filter(l => l.trim());
+      const lines = output.split(/[\r\n]+/).filter(l => l.trim());
       for (const line of lines) {
         stderrBuffer.push(line.trim());
         if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
