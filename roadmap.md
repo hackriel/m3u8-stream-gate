@@ -1,5 +1,10 @@
 # Roadmap
 
+- [ ] Actualizar Vida del canal: perfiles vigentes, conclusiones prudentes y recomendaciones de Laboratorio.
+- [ ] Ocultar FOX+ Alterno sin alterar emisiones existentes.
+- [ ] Diagnosticar logs y probar RTMP Disney 8; corregir causas comprobables.
+- [ ] Validar pruebas, avisos y límites de autonomía.
+
 - [x] Corregir consulta de métricas de Canal 13, Canal 8 y Canal 2; verificación real tras despliegue pendiente.
 - [x] Ampliar captura compartida del Laboratorio a 120 segundos acumulando segmentos nuevos.
 - [x] Añadir diagnóstico de frames/errores y descargas protegidas de cada salida con almacenamiento limitado.
