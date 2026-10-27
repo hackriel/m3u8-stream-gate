@@ -1,9 +1,9 @@
 # Roadmap
 
-- [ ] Corregir métricas ausentes en Canal 13 y revisar los canales equivalentes.
-- [ ] Ampliar captura compartida del Laboratorio a 120 segundos reales.
-- [ ] Añadir diagnóstico de frames/errores y descargas protegidas de cada salida con almacenamiento limitado.
-- [ ] Verificar pruebas y pantalla del Laboratorio.
+- [x] Corregir consulta de métricas de Canal 13, Canal 8 y Canal 2; verificación real tras despliegue pendiente.
+- [x] Ampliar captura compartida del Laboratorio a 120 segundos acumulando segmentos nuevos.
+- [x] Añadir diagnóstico de frames/errores y descargas protegidas de cada salida con almacenamiento limitado.
+- [x] Verificar 13 pruebas, pantalla y descarga MP4 con muestra sintética; sin evaluación visual de fútbol real.
 
 - [x] Añadir actualización integral del VPS con configuración segura y validaciones.
 - [x] Añadir prueba backend de extracción real de un canal Telecable.
