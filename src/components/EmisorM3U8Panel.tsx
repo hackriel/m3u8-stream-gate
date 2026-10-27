@@ -108,7 +108,7 @@ const FOXMAS_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9005?streamid=foxmas&la
 const FOX_SRT_OBS_INGEST_URL = `srt://${getVpsHost()}:9006?streamid=fox&latency=2000000`;
 const SRT_INTERNAL_SOURCE_URL = "srt://obs";
 
-type OutputProfile = "passthrough" | "highquality" | "hd720" | "normal" | "normalpro" | "classic1000";
+type OutputProfile = "passthrough" | "highquality" | "hd720" | "normal" | "normalpro" | "classic1000" | "classic1000plus";
 const DEFAULT_OUTPUT_PROFILE: OutputProfile = "normal";
 const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   passthrough: "Passthrough · tal cual lo manda OBS (sin re-encode)",
@@ -117,6 +117,7 @@ const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   normal: "Normal · 720p CBR 2000k + AAC 128k",
   normalpro: "Normal Mejorado Pro · 720p CBR 2000k + AAC 128k (fast)",
   classic1000: "Clásico · 480p CBR 1000k + AAC 128k (ahorro de red)",
+  classic1000plus: "Clásico Plus · 480p CBR 1000k + AAC 128k (medium, más detalle)",
 };
 const OUTPUT_PROFILE_SHORT_LABELS: Record<OutputProfile, string> = {
   passthrough: "COPY",
@@ -125,9 +126,10 @@ const OUTPUT_PROFILE_SHORT_LABELS: Record<OutputProfile, string> = {
   normal: "NORMAL",
   normalpro: "NORMAL PRO",
   classic1000: "CLÁSICO 480",
+  classic1000plus: "CLÁSICO PLUS",
 };
 const VALID_OUTPUT_PROFILES = new Set<string>([
-  "passthrough", "highquality", "hd720", "normal", "normalpro", "classic1000",
+  "passthrough", "highquality", "hd720", "normal", "normalpro", "classic1000", "classic1000plus",
 ]);
 // IDs SRT ingest: arrancan por defecto en Passthrough (sin re-encode).
 const SRT_INGEST_INDEXES = new Set<number>([16, 18, 20, 21, 22, 23]);
@@ -2911,6 +2913,7 @@ export default function EmisorM3U8Panel() {
                 <option value="normal">{OUTPUT_PROFILE_LABELS.normal}</option>
                 <option value="normalpro">{OUTPUT_PROFILE_LABELS.normalpro}</option>
                 <option value="classic1000">{OUTPUT_PROFILE_LABELS.classic1000}</option>
+                <option value="classic1000plus">{OUTPUT_PROFILE_LABELS.classic1000plus}</option>
               </select>
               <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                 {outputProfile === 'passthrough'
@@ -2919,6 +2922,8 @@ export default function EmisorM3U8Panel() {
                   ? 'Máxima nitidez (720p · CBR 4000k · AAC 192k · preset faster · GOP 2s · main profile). Ideal para deportes y fuentes que llegan a 3-4 Mbps (SRT/OBS, FOX+, FOX, Teletica, Canal 6, Disney 8). Consume ~2x CPU y ~2x ancho de banda que Normal; si la fuente llega por debajo de 2 Mbps no vas a ganar detalle.'
                   : outputProfile === 'hd720'
                   ? 'HD 720p (3000k promedio, picos a 3600k · buffer 2s · preset faster · 6 hilos · AAC 128k · cadencia natural). Es el mismo bitrate que recomienda YouTube para 720p30 y el escalón 720p de la escalera Netflix. Nitidez HD real con ~25% menos datos que Alta Calidad y sin riesgo de congelones (mismo preset rápido que Normal).'
+                  : outputProfile === 'classic1000plus'
+                  ? 'Clásico Plus 480p (CBR 1000k fijo · AAC 128k 48 kHz · compresión medium). Misma red que Clásico, más CPU para sacar más detalle en movimiento. Experimental: confírmalo en Laboratorio durante un partido.'
                   : outputProfile === 'classic1000'
                   ? 'Clásico 480p (CBR 1000k fijo, sin picos · AAC 128k 48 kHz · filtro anti-ruido leve, sin reducir color). La mitad de red que Normal. No es HD: en jugadas muy rápidas puede perder detalle. Probado en Laboratorio con FUTV sin cuadros perdidos.'
                   : outputProfile === 'normalpro'

@@ -1063,6 +1063,8 @@ const OUTPUT_PROFILES = {
   // Clásico 480p · 1000 — validado en Laboratorio (FUTV, 120s: 1.65x, 0 descartados).
   // CBR fijo 1000k sin picos, filtro espacial leve, sin reducir color.
   classic1000:{ key: 'classic1000',label: 'Clásico 480p · 1000', width: '480', videoBitrate: '1000k', bufsize: '2000k', audioBitrate: '128k', audioRate: '48000', preset: 'fast', x264Params: 'rc-lookahead=30:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=7:scenecut=0', denoise: 'hqdn3d=1.0:1.0:0:0', threads: 4 },
+  // Clásico Plus — mismo 1000k/480p, preset medium (más CPU, más detalle, misma red).
+  classic1000plus:{ key: 'classic1000plus',label: 'Clásico 480p · 1000 Plus', width: '480', videoBitrate: '1000k', bufsize: '2000k', audioBitrate: '128k', audioRate: '48000', preset: 'medium', x264Params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=2:aq-strength=1.0:me=umh:subme=8:scenecut=0', denoise: 'hqdn3d=1.0:1.0:0:0', threads: 6 },
   hd720:      { key: 'hd720',      label: 'HD 720p (3000k)', width: '720', videoBitrate: '3000k', maxrate: '3600k', bufsize: '6000k', audioBitrate: '128k', preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 6 },
 };
 // Perfiles retirados → se remapean al equivalente más cercano de la escalera nueva.
@@ -4678,7 +4680,7 @@ app.post('/api/emit', async (req, res) => {
     //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
     //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
     const isStandardProfile = !outputProfile.forceCfr
-      && (outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'normalpro' || outputProfile.key === 'classic1000' || outputProfile.key === 'hd720');
+      && (outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'normalpro' || outputProfile.key === 'classic1000' || outputProfile.key === 'classic1000plus' || outputProfile.key === 'hd720');
     const isNaturalCadence = isStandardProfile
       && !isPassthroughBlock
       && !isSrtIngest
