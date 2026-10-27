@@ -239,6 +239,7 @@ export function createLaboratory({ liveDir, dataDir, getSource, captureSeconds =
     if (!job || !Object.hasOwn(LAB_PROFILES, req.params.profile) || !result?.downloadUntil || Date.now() >= Date.parse(result.downloadUntil)) return res.status(410).json({ error: 'Este video ya no está disponible. Inicia otra prueba.' });
     const file = path.join(mediaDir, job.id, `${result.profile}.mp4`);
     try { await fs.access(file); } catch { return res.status(410).json({ error: 'El video se eliminó por el límite de almacenamiento. Inicia otra prueba.' }); }
+    res.type('video/mp4');
     res.download(file, `${job.channel}-${result.profile}.mp4`);
   });
   router.post('/start', async (req, res) => {
