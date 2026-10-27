@@ -18,6 +18,7 @@ import { request as undiciRequest, ProxyAgent } from 'undici';
 // FOX/FOX+ URL filler (pantalla "RECONECTANDO" mientras se re-scrape)
 import diagnosticsRouter from './diagnostics.js';
 import { createLaboratory } from './laboratory.js';
+import { trackedProcessIds } from './process-telemetry.js';
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
 
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
@@ -1480,7 +1481,12 @@ const measuredOutBitrate = new Map(); // pid -> { kbps, updatedAt }
 const getLiveStats = (process_id) => {
   const key = String(process_id);
   const s = liveStats.get(key);
-  if (!s) return null;
+  if (!s) {
+    const measured = measuredOutBitrate.get(key);
+    return measured && Date.now() - measured.updatedAt < 30000
+      ? { bitrateKbps: measured.kbps, bitrateMeasured: true, updatedAt: measured.updatedAt }
+      : null;
+  }
   // Considerar stale si no se actualiza en >30s (proceso terminado o congelado)
   if (Date.now() - (s.updatedAt || 0) > 30000) return null;
   if (s.bitrateKbps == null) {
@@ -8293,8 +8299,7 @@ app.get('/api/status', (req, res) => {
     // (usado por el frontend para sincronizar el toggle tras un fallback automático).
     // Estado de todos los procesos
     const allStatuses = {};
-    for (let i = 0; i <= 26; i++) {
-      const id = i.toString();
+    for (const id of trackedProcessIds(HLS_SLUG_MAP)) {
       const processData = ffmpegProcesses.get(id) ?? ffmpegProcesses.get(String(id));
       allStatuses[id] = {
         status: emissionStatuses.get(id) || 'idle',
