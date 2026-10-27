@@ -1,9 +1,10 @@
 ---
-name: Perfil Intermedio 576p auditado (1800k)
-description: mid576 pasa de 2350k a 1800k con el mismo tratamiento anti-freeze del sd480 (VBV contenido, audio 48kHz nativo, CFR, aresample)
+name: Perfil Intermedio 576p — RETIRADO
+description: mid576 eliminado en Oct 2026; el usuario reportó que se pegaba en producción
 type: feature
 ---
-mid576 vigente: 576p, 1800k promedio, maxrate 2000k (+11%), bufsize 3600k (2s), AAC 128k a 48000 nativo, preset faster, threads 5.
-x264Params: rc-lookahead=30:ref=4:bframes=3:aq-mode=3:aq-strength=1.1:scenecut=0:vbv-init=0.9.
-forceCfr: true → excluido de isNaturalCadence (isStandardProfile ahora exige !forceCfr) y usa `-af aresample=async=1:...` en vez de `-async 1`.
-Motivo: replicar la corrección que eliminó el micro-freeze en sd480, bajando consumo de red frente a hd720 (~40% menos).
+RETIRADO (Oct 2026). mid576 (576p 1800k, VBV 3600k, audio 48kHz, CFR, preset faster) fue eliminado junto con sd480 porque el usuario reportó que "se pegaban" en producción y no fueron efectivos.
+
+Remapeo: LEGACY_PROFILE_ALIASES mid576→normalpro (sharp1800/balanced también→normalpro). Constraint DB ya no incluye mid576.
+
+Lección: los perfiles por debajo de 720p no convencieron al usuario; la escalera vigente es toda 720p (normal 2000k / normalpro 2000k / hd720 3000k / highquality 4000k) + passthrough.

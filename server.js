@@ -1057,30 +1057,20 @@ const OUTPUT_PROFILES = {
   // HD 720p — equivalente al 720p30 de YouTube live (3000k) y al escalón
   // 720p de la escalera Netflix. VBV 2x para picos de movimiento.
   hd720:      { key: 'hd720',      label: 'HD 720p (3000k)', width: '720', videoBitrate: '3000k', maxrate: '3600k', bufsize: '6000k', audioBitrate: '128k', preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 6 },
-  // Intermedio 576p — escalón 2350k de la escalera Netflix. Es el punto dulce
-  // calidad/ancho de banda: casi HD en TV, ~20% menos datos que HD 720p.
-  // Intermedio 576p — AUDITADO igual que SD: 1800k promedio (escalón medio
-  // Netflix/YouTube 576p), VBV contenido (pico +11%, buffer 2s), audio 48kHz
-  // nativo sin resampleo y cadencia CFR real al fps detectado. Herramientas de
-  // compresión más finas (ref=4, lookahead 30, aq 1.1) para exprimir los 1800k.
-  mid576:     { key: 'mid576',     label: 'Intermedio 576p (1800k)', width: '576', videoBitrate: '1800k', maxrate: '2000k', bufsize: '3600k', audioBitrate: '128k', audioRate: '48000', forceCfr: true, preset: 'faster', x264Params: 'rc-lookahead=30:ref=4:bframes=3:aq-mode=3:aq-strength=1.1:scenecut=0:vbv-init=0.9', threads: 5 },
-  // SD 480p — escalón 1750k/1500k SD de Netflix y mínimo 480p de YouTube.
-  // Para eventos masivos o clientes con internet flojo.
-  // SD 480p — AUDITADO para deportes: VBV contenido (maxrate 1700k = +13%,
-  // no +40%), audio 48kHz nativo (sin resampleo 48k→44.1k, que provocaba
-  // microcorrecciones periódicas de A/V ≈ cada minuto) y cadencia CFR real
-  // al fps detectado de la fuente (sin conversión de framerate).
-  sd480:      { key: 'sd480',      label: 'SD 480p (1500k)', width: '480', videoBitrate: '1500k', maxrate: '1700k', bufsize: '3400k', audioBitrate: '96k',  audioRate: '48000', forceCfr: true, preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:scenecut=0:vbv-init=0.9', threads: 4 },
 };
 // Perfiles retirados → se remapean al equivalente más cercano de la escalera nueva.
+// sd480/mid576 retirados (Oct 2026): el usuario reportó que "se pegaban" en
+// producción; todo lo que los usaba pasa a Normal / Normal Mejorado Pro.
 const LEGACY_PROFILE_ALIASES = {
   sportspro: 'hd720',
-  sharp1800: 'mid576',
-  balanced: 'mid576',
-  eco1100: 'sd480',
-  optimized: 'sd480',
-  sports1500: 'sd480',
+  sharp1800: 'normalpro',
+  balanced: 'normalpro',
+  eco1100: 'normal',
+  optimized: 'normal',
+  sports1500: 'normal',
   sports1800: 'hd720',
+  sd480: 'normal',
+  mid576: 'normalpro',
 };
 let outputProfileState = {};
 try {
@@ -4676,7 +4666,7 @@ app.post('/api/emit', async (req, res) => {
     //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
     //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
     const isStandardProfile = !outputProfile.forceCfr
-      && (outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'hd720' || outputProfile.key === 'mid576');
+      && (outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'normalpro' || outputProfile.key === 'hd720');
     const isNaturalCadence = isStandardProfile
       && !isPassthroughBlock
       && !isSrtIngest
