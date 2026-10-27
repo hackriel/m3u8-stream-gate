@@ -121,16 +121,17 @@ export function createLaboratory({ liveDir, dataDir, getSource, captureSeconds =
   const pruneMedia = async () => {
     await fs.mkdir(mediaDir, { recursive: true });
     const entries = [];
+    let activeBytes = 0;
     for (const name of await fs.readdir(mediaDir)) {
-      if (name === active?.id) continue;
       const folder = path.join(mediaDir, name);
       const stat = await fs.stat(folder);
       let size = 0;
       for (const file of await fs.readdir(folder)) size += (await fs.stat(path.join(folder, file))).size;
+      if (name === active?.id) { activeBytes += size; continue; }
       entries.push({ folder, time: stat.mtimeMs, size });
     }
     entries.sort((a, b) => b.time - a.time);
-    let retained = 0;
+    let retained = activeBytes;
     for (const entry of entries) {
       retained += entry.size;
       if (Date.now() - entry.time > LAB_LIMITS.mediaRetentionMs || retained > LAB_LIMITS.mediaBytes) await fs.rm(entry.folder, { recursive: true, force: true });
@@ -198,6 +199,7 @@ export function createLaboratory({ liveDir, dataDir, getSource, captureSeconds =
         const result = { profile, seconds, elapsed: encoded.elapsed, speed: seconds / encoded.elapsed, sizeMB: Number(data.format.size) / 1048576, videoKbps: Number(stream?.bit_rate || 0) / 1000, frames, dropped, duplicated, decodeErrors: measured.decodeErrors + encoded.decodeErrors, timestampWarnings: measured.timestampWarnings + encoded.timestampWarnings };
         result.assessment = assessLaboratoryResult({ ...result, expectedSeconds: job.sample.seconds });
         await fs.rename(output, path.join(jobDir, `${profile}.mp4`));
+        await pruneMedia();
         result.downloadUntil = new Date(Date.now() + LAB_LIMITS.mediaRetentionMs).toISOString();
         job.results.push(result);
         } catch (error) {
