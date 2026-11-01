@@ -6368,7 +6368,8 @@ app.post('/api/emit', async (req, res) => {
           
           // Disney 7 (TUDN): recovery DIRECTO sin pre-checks (fuente super estable)
           // Canal 6 y Disney 8: mantienen pre-check con failover
-          const isDirectRecovery = String(process_id) === '0' || AUTO_INGEST_PROCESSES.has(String(process_id));
+          const isDirectRecovery = String(process_id) === '0' || AUTO_INGEST_PROCESSES.has(String(process_id))
+            || (isYouTubeOutput && (failureType?.type === 'rtmp' || classifyStreamFailure(rawDiagnosticLines.join('\n')) === 'output'));
           
           if (isDirectRecovery) {
             sendLog(process_id, 'warn', `🔄 ${procLabel} caído (código ${code})${failureInfo} - Recovery directo...`);
