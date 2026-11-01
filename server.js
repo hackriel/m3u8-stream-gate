@@ -21,6 +21,7 @@ import { createLaboratory } from './laboratory.js';
 import { trackedProcessIds } from './process-telemetry.js';
 import { compressionFinding, labSuggestion, normalizeHistoricalProfile } from './channel-life-rules.js';
 import { telecableInputArgs, classifyStreamFailure } from './streaming-transport.js';
+import { isYouTubeDestination, validateYouTubeOutput, youtubeEncodingArgs, redactRtmpSecrets } from './youtube-output.js';
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
 
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
@@ -156,6 +157,8 @@ async function saveLogSnapshot(processId, reason) {
 
 // Función para enviar logs a todos los clientes conectados
 const sendLog = (processId, level, message, details = null) => {
+  message = redactRtmpSecrets(message);
+  details = redactRtmpSecrets(details);
   const logData = {
     id: Date.now() + Math.random().toString(),
     timestamp: Date.now(),
@@ -3704,6 +3707,9 @@ app.post('/api/emit', async (req, res) => {
     const outputProfile = getOutputProfileConfig(outputProfileKey);
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
+    const isYouTubeOutput = !isHlsOutput && isYouTubeDestination(target_rtmp);
+    const youtubeError = !isHlsOutput ? validateYouTubeOutput(target_rtmp, outputProfile, isPassthroughBlock) : null;
+    if (youtubeError) return res.status(400).json({ error: youtubeError });
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
 
     // ── TELETICA URL (13): persistir modo enviado por el frontend y, si es
@@ -4982,6 +4988,10 @@ app.post('/api/emit', async (req, res) => {
       );
       sendLog(process_id, 'success', `📺 HLS Output → /live/${hlsSlug}/playlist.m3u8 (10s×8, estable)`);
     } else {
+      if (isYouTubeOutput) {
+        ffmpegArgs = youtubeEncodingArgs(ffmpegArgs, outputProfile);
+        sendLog(process_id, 'success', `YouTube: H.264 ${outputProfile.width}p/30 CFR, CBR ${outputProfile.videoBitrate}, cuadros clave cada 2s, AAC estéreo 128k/44.1kHz. Recepción pendiente de confirmar en YouTube Studio.`);
+      }
       ffmpegArgs.push(
         '-f', 'flv',
         '-flvflags', 'no_duration_filesize',
