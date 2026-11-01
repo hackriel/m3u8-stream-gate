@@ -1215,7 +1215,7 @@ const wrapFfmpegSpawn = (pid, ffmpegArgs) => {
 // TODOS los canales TDMax usan la cuenta info@media.cr (la cuenta vieja arlopfa
 // quedó descartada por vencimiento). Se mantiene el mapeo por si en el futuro
 // se requiere repartir devices entre dos cuentas.
-const PI_ACCOUNT_PROCESSES = new Set(['4', '11', '14', '15', '17', '24', '25', '26']); // cuenta TDMax info@media.cr: TELETICA, FUTV URL, TDMAS 1 URL, CANAL 6 URL, FUTV ALTERNO, FOX+ URL, FOX URL, FOX+ ALTERNO
+const PI_ACCOUNT_PROCESSES = new Set(['4', '10', '11', '14', '15', '17', '24', '25', '26']); // cuenta TDMax info@media.cr, incluido Disney 8
 const accountForProcess = (pid) => (PI_ACCOUNT_PROCESSES.has(String(pid)) ? 'pi' : 'default');
 const getTdmaxCreds = (account) => {
   if (account === 'pi') {
