@@ -1,5 +1,8 @@
 # Roadmap
 
+- [ ] Contrastar Disney 8 con los requisitos oficiales de YouTube y corregir incompatibilidades de envío RTMP/RTMPS.
+- [ ] Validar argumentos y salida audiovisual de YouTube sin publicar encima de una emisión; recepción real requiere destino autorizado.
+
 - [x] Actualizar Vida del canal: perfiles vigentes, conclusiones prudentes y recomendaciones de Laboratorio.
 - [x] Ocultar FOX+ Alterno sin alterar emisiones existentes.
 - [x] Diagnosticar logs Disney 8, corregir reconexión EOF Telecable y comprobar DNS/TCP del destino RTMP.
