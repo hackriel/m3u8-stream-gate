@@ -4,6 +4,7 @@ import { LaboratoryPanel } from "@/components/LaboratoryPanel";
 import { ChannelLifeDialog } from "@/components/ChannelLifeDialog";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
@@ -960,12 +961,13 @@ export default function EmisorM3U8Panel() {
     try { localStorage.setItem('canal13_29_telecable_content_id', canal13ContentId); } catch {}
   }, [canal13ContentId]);
 
-  // ── Disney 8 (pid 10): sub-tabs "Oficial m3u pegado | Telecable dropdown".
+  // ── Disney 8 (pid 10): M3U, Telecable y extracción TDMax manual.
   //    Réplica de Disney 7 pero la salida es el RTMP manual pegado por el usuario.
-  type Disney8Mode = 'official' | 'telecable';
+  type Disney8Mode = 'official' | 'telecable' | 'tdmax';
   const [disney8Mode, setDisney8Mode] = useState<Disney8Mode>(() => {
     try {
-      return localStorage.getItem('disney8_10_source_mode') === 'telecable' ? 'telecable' : 'official';
+      const mode = localStorage.getItem('disney8_10_source_mode');
+      return mode === 'telecable' || mode === 'tdmax' ? mode : 'official';
     } catch { return 'official'; }
   });
   useEffect(() => {
@@ -1005,8 +1007,10 @@ export default function EmisorM3U8Panel() {
         }
         if (r10.ok) {
           const j = await r10.json();
-          if (j.mode === 'telecable' || j.mode === 'telecable_vlc') setDisney8Mode('telecable');
-          else if (j.mode === 'scraping') setDisney8Mode('official');
+          if (j.mode === 'telecable' || j.mode === 'telecable_vlc') {
+            setDisney8Mode(prev => prev === 'tdmax' && !processesRef.current[DISNEY8_INDEX]?.isEmitiendo ? prev : 'telecable');
+          }
+          else if (j.mode === 'scraping') setDisney8Mode(prev => prev === 'tdmax' ? 'tdmax' : 'official');
         }
       } catch {}
     })();
@@ -1241,8 +1245,14 @@ export default function EmisorM3U8Panel() {
       const data = await scrapeChannelWithFallback(channelId, processIndex, pasted);
       if (!data?.success) throw new Error(data?.error || 'Error desconocido');
       const streamUrl = data.url;
-      updateProcess(processIndex, { m3u8: streamUrl, rtmp: 'hls-local' });
-      toast.success(`✅ URL alterna extraída (${channelId.substring(0, 8)}…) — player URL guardada para auto-recovery`);
+      if (!streamUrl) throw new Error('La respuesta no contiene una URL de señal');
+      updateProcess(processIndex, {
+        m3u8: streamUrl,
+        rtmp: processIndex === DISNEY8_INDEX ? processesRef.current[processIndex].rtmp : 'hls-local',
+      });
+      toast.success(processIndex === DISNEY8_INDEX
+        ? 'URL TDMax extraída correctamente'
+        : `✅ URL alterna extraída (${channelId.substring(0, 8)}…) — player URL guardada para auto-recovery`);
     } catch (error: unknown) {
       const message = getErrorMessage(error, 'Error desconocido');
       toast.error(`Error obteniendo URL alterna: ${message}`);
@@ -1701,7 +1711,8 @@ export default function EmisorM3U8Panel() {
     const isDisney8Telecable = processIndex === DISNEY8_INDEX && disney8Mode === 'telecable';
     const isCanal13Telecable = processIndex === CANAL13_INDEX;
     const isTelecableDropdown = isDisney7Telecable || isDisney8Telecable || isCanal13Telecable;
-    const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex) && !isTelecableDropdown;
+    const isM3uFileProcess = M3U_FILE_PROCESSES.has(processIndex) && !isTelecableDropdown
+      && !(processIndex === DISNEY8_INDEX && disney8Mode === 'tdmax');
     const m3uPayload = isM3uFileProcess ? m3uPayloads[processIndex] : null;
 
     // Disney 7 Telecable: validar que el usuario eligió un canal del dropdown
@@ -1995,20 +2006,20 @@ export default function EmisorM3U8Panel() {
   function switchDisneyMode(
     e: React.MouseEvent<HTMLButtonElement>,
     processIndex: number,
-    next: 'official' | 'telecable' | 'telecable_vlc',
+    next: 'official' | 'telecable' | 'telecable_vlc' | 'tdmax',
   ) {
     e.preventDefault();
     e.stopPropagation();
     const p = processes[processIndex];
-    if (p?.isEmitiendo || p?.emitStatus === 'starting' || p?.emitStatus === 'stopping') {
+    if (p?.isEmitiendo || p?.emitStatus === 'starting' || p?.emitStatus === 'stopping' || fetchingChannel === processIndex) {
       toast.info('Detené la emisión antes de cambiar de modo.');
       return;
     }
     const current = processIndex === DISNEY8_INDEX ? disney8Mode : disney7Mode;
     if (current === next) return;
     clearTelecableResolved(processIndex);
-    if (processIndex === DISNEY8_INDEX) setDisney8Mode(next === 'official' ? 'official' : 'telecable');
-    else setDisney7Mode(next);
+    if (processIndex === DISNEY8_INDEX) setDisney8Mode(next === 'tdmax' ? 'tdmax' : next === 'official' ? 'official' : 'telecable');
+    else if (next !== 'tdmax') setDisney7Mode(next);
   }
 
 
@@ -2231,6 +2242,7 @@ export default function EmisorM3U8Panel() {
     const isDisney7Tab = processIndex === 0;
     const isDisney7TelecableActive = isDisney7Tab && (disney7Mode === 'telecable' || disney7Mode === 'telecable_vlc');
     const isDisney8Tab = processIndex === DISNEY8_INDEX;
+    const isDisney8TdmaxActive = isDisney8Tab && disney8Mode === 'tdmax';
     const isDisney8TelecableActive = isDisney8Tab && disney8Mode === 'telecable';
     // Cualquier tab con dropdown de canales Telecable (Disney 7 / Disney 8).
     const isCanal13Tab = processIndex === CANAL13_INDEX;
@@ -2372,38 +2384,44 @@ export default function EmisorM3U8Panel() {
                       Modo Disney 8
                     </label>
                     <div className="flex gap-2 flex-wrap">
-                      <button
+                      <Button
                         type="button"
                         onClick={(e) => switchDisneyMode(e, DISNEY8_INDEX, 'official')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          disney8Mode === 'official'
-                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                            : 'bg-background border-border text-muted-foreground hover:border-emerald-500/40'
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping' || fetchingChannel === processIndex}
+                        variant={disney8Mode === 'official' ? 'default' : 'outline'}
+                        aria-pressed={disney8Mode === 'official'}
+                        className="flex-1 h-auto min-h-10 whitespace-normal"
                         title="Pegá un archivo M3U con headers (flujo histórico)"
                       >
                         🏛️ Oficial m3u pegado
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
                         onClick={(e) => switchDisneyMode(e, DISNEY8_INDEX, 'telecable')}
-                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border-2 ${
-                          disney8Mode === 'telecable'
-                            ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                            : 'bg-background border-border text-muted-foreground hover:border-amber-500/40'
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping' || fetchingChannel === processIndex}
+                        variant={disney8Mode === 'telecable' ? 'default' : 'outline'}
+                        aria-pressed={disney8Mode === 'telecable'}
+                        className="flex-1 h-auto min-h-10 whitespace-normal"
                         title="Elegí cualquier canal de la playlist Telecable y emitilo al RTMP que pegues abajo"
                       >
                         📡 Telecable dropdown
-                      </button>
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={(e) => switchDisneyMode(e, DISNEY8_INDEX, 'tdmax')}
+                        disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping' || fetchingChannel === processIndex}
+                        variant={disney8Mode === 'tdmax' ? 'default' : 'outline'}
+                        aria-pressed={disney8Mode === 'tdmax'}
+                        className="flex-1 h-auto min-h-10 whitespace-normal"
+                      >
+                        TDMax
+                      </Button>
                     </div>
-                    <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                    {disney8Mode !== 'tdmax' && <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
                       {disney8Mode === 'telecable'
                         ? 'Elegí un canal de la lista Telecable. El VPS resuelve la URL firmada y emite al RTMP destino que pegues abajo.'
                         : 'Pegá el archivo M3U con headers (flujo de siempre). La salida es el RTMP destino que pegues abajo.'}
-                    </p>
+                    </p>}
                   </div>
                 )}
                 {isTelecableDropdownActive && (
@@ -2478,6 +2496,8 @@ export default function EmisorM3U8Panel() {
                     ? 'URL HLS Telecable resuelta'
                     : isTelecableOnlyTab
                       ? 'URL HLS Telecable resuelta'
+                      : isDisney8TdmaxActive
+                    ? 'URL del player TDMax'
                       : M3U_FILE_PROCESSES.has(processIndex)
                     ? 'Archivo M3U (con headers)'
                     : OBS_INGEST_PROCESSES.has(processIndex)
@@ -2486,7 +2506,30 @@ export default function EmisorM3U8Panel() {
                       ? 'URL del player TDMax (pega aquí)'
                       : 'URL M3U8 (fuente)'}
                 </label>
-                {M3U_FILE_PROCESSES.has(processIndex) && !isTelecableDropdownActive && (
+                {isDisney8TdmaxActive && (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <input
+                      type="url"
+                      aria-label="URL del player TDMax"
+                      placeholder="https://www.app.tdmax.com/player?id=XXXXX&type=channel"
+                      value={pasteUrls[processIndex] || ''}
+                      onChange={(e) => {
+                        setPasteUrls(prev => ({ ...prev, [processIndex]: e.target.value }));
+                        if (process.m3u8) clearTelecableResolved(processIndex);
+                      }}
+                      disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping' || fetchingChannel === processIndex}
+                      className="min-w-0 flex-1 basis-64 bg-card border border-border rounded-md px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+                    />
+                    <Button
+                      type="button"
+                      onClick={() => fetchPastedChannelUrl(processIndex)}
+                      disabled={fetchingChannel !== null || !extractTdmaxChannelId(pasteUrls[processIndex] || '') || process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
+                    >
+                      {fetchingChannel === processIndex ? 'Extrayendo…' : 'Extraer TDMax'}
+                    </Button>
+                  </div>
+                )}
+                {M3U_FILE_PROCESSES.has(processIndex) && !isTelecableDropdownActive && !isDisney8TdmaxActive && (
                   <div className="mb-3">
                     <textarea
                       placeholder={"#EXTM3U\n#EXTVLCOPT:http-referrer=https://...\n#EXTVLCOPT:http-user-agent=Mozilla/5.0 ...\n#EXTINF:-1,Canal\nhttps://servidor.com/stream.m3u8"}
@@ -2823,7 +2866,7 @@ export default function EmisorM3U8Panel() {
                     }
                     value={process.m3u8}
                     onChange={(e) => updateProcess(processIndex, { m3u8: e.target.value })}
-                    readOnly={hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc'))}
+                    readOnly={isDisney8TdmaxActive || hideM3u8Input || PASTE_URL_PROCESSES.has(processIndex) || (TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc'))}
                     className={`flex-1 bg-card border-2 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 ${
                       processIndex === 5 && process.isEmitiendo && process.sourceUrl && process.m3u8
                         && (process.sourceUrl === process.m3u8 || process.sourceUrl.startsWith(process.m3u8))

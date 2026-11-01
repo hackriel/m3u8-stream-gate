@@ -8,3 +8,4 @@
 - Telecable HLS retries transport and server errors but never completed-segment EOF or streamed byte offsets, so segment boundaries remain the HLS demuxer's responsibility.
 - Autonomous laboratory jobs require a persisted dashboard-authorized opt-in, sustained eligible observations and a global cooldown; they share the manual-job lock and resource guards and never change production output.
 - YouTube ingest validation and final encoding overrides live in a destination-specific module; preserve selected bitrates, reject unverifiable copy modes, redact RTMP keys in logs, and leave IPTV output unchanged.
+- Disney 8 TDMax extraction reuses the local scraping endpoint without changing its manual RTMP destination or attaching M3U-file headers; its source selector stays separate because the API shares the scraping mode with manual M3U input.
