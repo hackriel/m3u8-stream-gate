@@ -1007,7 +1007,9 @@ export default function EmisorM3U8Panel() {
         }
         if (r10.ok) {
           const j = await r10.json();
-          if (j.mode === 'telecable' || j.mode === 'telecable_vlc') setDisney8Mode('telecable');
+          if (j.mode === 'telecable' || j.mode === 'telecable_vlc') {
+            setDisney8Mode(prev => prev === 'tdmax' && !processesRef.current[DISNEY8_INDEX]?.isEmitiendo ? prev : 'telecable');
+          }
           else if (j.mode === 'scraping') setDisney8Mode(prev => prev === 'tdmax' ? 'tdmax' : 'official');
         }
       } catch {}
