@@ -52,7 +52,7 @@ const CANAL13_DEFAULT_CONTENT_ID = 'SINART13';
 
 // Procesos que usan la cuenta TDMax 'pi' (info@media.cr) en vez de la principal.
 // Debe coincidir con PI_ACCOUNT_PROCESSES en server.js.
-const PI_ACCOUNT_PROCESSES = new Set<number>([15, 24, 25, 26]);
+const PI_ACCOUNT_PROCESSES = new Set<number>([4, 10, 11, 14, 15, 17, 24, 25, 26]);
 
 // Scraping con fallback: intenta /api/local-scrape (VPS, token con IP correcta).
 // Si no responde JSON (preview de Lovable, dev, o VPS caído), cae a la
