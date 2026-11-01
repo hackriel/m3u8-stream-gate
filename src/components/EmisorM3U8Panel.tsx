@@ -3067,8 +3067,8 @@ export default function EmisorM3U8Panel() {
             })() : (
               // RTMP normal
               <>
-                <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP</h2>
-                <label className="block text-sm mb-2 text-muted-foreground">RTMP (app/stream)</label>
+                <h2 className="text-lg font-medium mb-3 text-accent">Destino RTMP / RTMPS</h2>
+                <label className="block text-sm mb-2 text-muted-foreground">URL completa de emisión (servidor + clave)</label>
                 <input
                   type="text"
                   placeholder="rtmp://fluestabiliz.giize.com/costaSTAR007"

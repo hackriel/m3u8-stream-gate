@@ -7,3 +7,4 @@
 - Channel-life advice is regenerated from VPS observations and the active profile catalog; historical quality/processing values never certify source reception or client playback.
 - Telecable HLS retries transport and server errors but never completed-segment EOF or streamed byte offsets, so segment boundaries remain the HLS demuxer's responsibility.
 - Autonomous laboratory jobs require a persisted dashboard-authorized opt-in, sustained eligible observations and a global cooldown; they share the manual-job lock and resource guards and never change production output.
+- YouTube ingest validation and final encoding overrides live in a destination-specific module; preserve selected bitrates, reject unverifiable copy modes, redact RTMP keys in logs, and leave IPTV output unchanged.
