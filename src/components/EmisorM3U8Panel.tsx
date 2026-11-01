@@ -2507,12 +2507,20 @@ export default function EmisorM3U8Panel() {
                 </label>
                 {isDisney8TdmaxActive && (
                   <div className="flex flex-wrap gap-2 mb-3">
+                    <input
+                      type="url"
+                      aria-label="URL FUTV extraída"
+                      value={process.m3u8 || ''}
+                      readOnly
+                      placeholder="URL M3U8 extraída de FUTV"
+                      className="min-w-0 flex-1 basis-64 bg-card border border-border rounded-md px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
                     <Button
                       type="button"
                       onClick={() => fetchChannelUrl(processIndex)}
                       disabled={fetchingChannel !== null || process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                     >
-                      {fetchingChannel === processIndex ? 'Extrayendo…' : 'Obtener URL FUTV'}
+                      {fetchingChannel === processIndex ? 'Extrayendo…' : process.m3u8 ? 'Actualizar URL FUTV' : 'Obtener URL FUTV'}
                     </Button>
                     <span className="self-center text-xs text-muted-foreground">info@media.cr</span>
                   </div>
