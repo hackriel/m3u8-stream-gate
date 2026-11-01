@@ -1,6 +1,7 @@
 # Roadmap
 
-- [ ] Agregar TDMax a Disney 8 y comprobar la carga y selección de sus opciones sin alterar emisiones activas.
+- [x] Agregar TDMax a Disney 8; comprobar pantalla, selección persistente y 10 pruebas sin alterar emisiones activas.
+- [ ] Confirmar extracción FUTV en Disney 8: TDMax responde que el canal probado no está incluido en los servicios activos de la cuenta del VPS.
 
 - [x] Contrastar Disney 8 con los requisitos oficiales de YouTube y corregir incompatibilidades de envío RTMP/RTMPS.
 - [x] Validar argumentos y salida audiovisual de YouTube: 10 pruebas, tres muestras FLV decodificables y acceso al campo Disney 8.
