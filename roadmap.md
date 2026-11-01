@@ -1,5 +1,7 @@
 # Roadmap
 
+- [ ] Agregar TDMax a Disney 8 y comprobar la carga y selección de sus opciones sin alterar emisiones activas.
+
 - [x] Contrastar Disney 8 con los requisitos oficiales de YouTube y corregir incompatibilidades de envío RTMP/RTMPS.
 - [x] Validar argumentos y salida audiovisual de YouTube: 10 pruebas, tres muestras FLV decodificables y acceso al campo Disney 8.
 - [ ] Confirmar recepción y estabilidad prolongada en YouTube: requiere desplegar VPS y una emisión de prueba autorizada con clave introducida en el panel.
