@@ -1248,11 +1248,9 @@ export default function EmisorM3U8Panel() {
       if (!streamUrl) throw new Error('La respuesta no contiene una URL de señal');
       updateProcess(processIndex, {
         m3u8: streamUrl,
-        rtmp: processIndex === DISNEY8_INDEX ? processesRef.current[processIndex].rtmp : 'hls-local',
+        rtmp: 'hls-local',
       });
-      toast.success(processIndex === DISNEY8_INDEX
-        ? 'URL TDMax extraída correctamente'
-        : `✅ URL alterna extraída (${channelId.substring(0, 8)}…) — player URL guardada para auto-recovery`);
+      toast.success(`✅ URL alterna extraída (${channelId.substring(0, 8)}…) — player URL guardada para auto-recovery`);
     } catch (error: unknown) {
       const message = getErrorMessage(error, 'Error desconocido');
       toast.error(`Error obteniendo URL alterna: ${message}`);
@@ -1264,7 +1262,7 @@ export default function EmisorM3U8Panel() {
   // Función genérica para obtener URL de un canal automáticamente
   // Usa scraping LOCAL del VPS para que el token se genere con la IP correcta
   const fetchChannelUrl = useCallback(async (processIndex: number) => {
-    const config = CHANNEL_CONFIGS[processIndex];
+    const config = CHANNEL_CONFIGS[processIndex === DISNEY8_INDEX ? FUTV_URL_INDEX : processIndex];
     if (!config.scrapeFn) return;
     
     const channelId = config.channelId;
@@ -1278,6 +1276,7 @@ export default function EmisorM3U8Panel() {
       if (!data?.success) throw new Error(data?.error || 'Error desconocido');
 
       const streamUrl = data.url;
+      if (!streamUrl) throw new Error('La respuesta no contiene una URL de señal');
       updateProcess(processIndex, { 
         m3u8: streamUrl,
         rtmp: processesRef.current[processIndex].rtmp || ''
@@ -2497,7 +2496,7 @@ export default function EmisorM3U8Panel() {
                     : isTelecableOnlyTab
                       ? 'URL HLS Telecable resuelta'
                       : isDisney8TdmaxActive
-                    ? 'URL del player TDMax'
+                    ? 'URL FUTV · TDMax'
                       : M3U_FILE_PROCESSES.has(processIndex)
                     ? 'Archivo M3U (con headers)'
                     : OBS_INGEST_PROCESSES.has(processIndex)
@@ -2508,25 +2507,14 @@ export default function EmisorM3U8Panel() {
                 </label>
                 {isDisney8TdmaxActive && (
                   <div className="flex flex-wrap gap-2 mb-3">
-                    <input
-                      type="url"
-                      aria-label="URL del player TDMax"
-                      placeholder="https://www.app.tdmax.com/player?id=XXXXX&type=channel"
-                      value={pasteUrls[processIndex] || ''}
-                      onChange={(e) => {
-                        setPasteUrls(prev => ({ ...prev, [processIndex]: e.target.value }));
-                        if (process.m3u8) clearTelecableResolved(processIndex);
-                      }}
-                      disabled={process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping' || fetchingChannel === processIndex}
-                      className="min-w-0 flex-1 basis-64 bg-card border border-border rounded-md px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
-                    />
                     <Button
                       type="button"
-                      onClick={() => fetchPastedChannelUrl(processIndex)}
-                      disabled={fetchingChannel !== null || !extractTdmaxChannelId(pasteUrls[processIndex] || '') || process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
+                      onClick={() => fetchChannelUrl(processIndex)}
+                      disabled={fetchingChannel !== null || process.isEmitiendo || process.emitStatus === 'starting' || process.emitStatus === 'stopping'}
                     >
-                      {fetchingChannel === processIndex ? 'Extrayendo…' : 'Extraer TDMax'}
+                      {fetchingChannel === processIndex ? 'Extrayendo…' : 'Obtener URL FUTV'}
                     </Button>
+                    <span className="self-center text-xs text-muted-foreground">info@media.cr</span>
                   </div>
                 )}
                 {M3U_FILE_PROCESSES.has(processIndex) && !isTelecableDropdownActive && !isDisney8TdmaxActive && (
