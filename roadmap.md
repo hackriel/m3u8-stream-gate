@@ -1,5 +1,6 @@
 # Roadmap
 
+- [ ] Mostrar la URL extraída en Disney 8 TDMax y distinguir obtener de actualizar.
 - [x] Cambiar Disney 8 TDMax a extracción directa de FUTV, sin URL de player; pantalla verificada y tres pruebas aprobadas conservando destino RTMP.
 - [x] Agregar TDMax a Disney 8; comprobar pantalla, selección persistente y 10 pruebas sin alterar emisiones activas.
 - [x] Asignar explícitamente Disney 8 a la cuenta TDMax info en VPS y en la extracción alternativa; probar ambas asignaciones.
