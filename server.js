@@ -19,6 +19,7 @@ import { request as undiciRequest, ProxyAgent } from 'undici';
 import diagnosticsRouter from './diagnostics.js';
 import { createLaboratory } from './laboratory.js';
 import { trackedProcessIds } from './process-telemetry.js';
+import { playlistOutputKbps } from './output-bitrate.js';
 import { compressionFinding, labSuggestion, normalizeHistoricalProfile } from './channel-life-rules.js';
 import { telecableInputArgs, classifyStreamFailure } from './streaming-transport.js';
 import { isYouTubeDestination, validateYouTubeOutput, youtubeEncodingArgs, redactRtmpSecrets } from './youtube-output.js';
@@ -1484,8 +1485,7 @@ const clearLiveStats = (process_id) => {
 
 // Bitrate REAL de salida medido sobre los segmentos HLS escritos en disco.
 // Con el muxer HLS, FFmpeg imprime "bitrate=N/A" (no conoce el tamaño final),
-// por eso la tarjeta mostraba "—". Lo calculamos nosotros midiendo cuántos
-// bytes nuevos se escriben en /live/<slug> por segundo.
+// por eso usamos bytes de segmentos completos / duración de medios EXTINF.
 const measuredOutBitrate = new Map(); // pid -> { kbps, updatedAt }
 
 const getLiveStats = (process_id) => {
@@ -7961,9 +7961,9 @@ app.get('/api/health-history', (req, res) => {
 // ─────────────────────────────────────────────────────────────────────
 // BITRATE REAL DE SALIDA (medido en disco)
 // FFmpeg con muxer HLS reporta "bitrate=N/A". Medimos los bytes nuevos
-// escritos en /live/<slug> cada 5s y los convertimos a kbps.
+// de segmentos completos listados en la playlist / su duración EXTINF.
+// No dividir por los 5s del muestreo: un segmento puede durar 10s.
 // ─────────────────────────────────────────────────────────────────────
-const obState = new Map(); // pid -> { files: Map(name->size), ts }
 
 function obTick() {
   const now = Date.now();
@@ -7971,34 +7971,15 @@ function obTick() {
     const pid = String(i);
     const slug = (HLS_SLUG_MAP || {})[pid];
     const status = emissionStatuses.get(pid) || 'idle';
-    if (!slug || status !== 'running') { obState.delete(pid); measuredOutBitrate.delete(pid); continue; }
+    if (!slug || status !== 'running') { measuredOutBitrate.delete(pid); continue; }
     const dir = path.join(HLS_OUTPUT_DIR, slug);
-    let files;
     try {
-      files = new Map();
-      for (const f of fs.readdirSync(dir)) {
-        if (!f.endsWith('.ts') && !f.endsWith('.m4s')) continue;
-        try { files.set(f, fs.statSync(path.join(dir, f)).size); } catch (_) {}
-      }
-    } catch (_) { continue; }
-    const prev = obState.get(pid);
-    if (prev && prev.ts) {
-      let bytes = 0;
-      for (const [name, size] of files.entries()) {
-        const old = prev.files.get(name);
-        if (old == null) bytes += size;
-        else if (size > old) bytes += size - old;
-      }
-      const secs = (now - prev.ts) / 1000;
-      if (secs >= 2 && bytes > 0) {
-        const kbps = Math.round((bytes * 8) / secs / 1000);
-        const last = measuredOutBitrate.get(pid);
-        // Suavizado simple para que el número no salte entre segmentos.
-        const smooth = last && now - last.updatedAt < 30000 ? Math.round(last.kbps * 0.6 + kbps * 0.4) : kbps;
-        measuredOutBitrate.set(pid, { kbps: smooth, updatedAt: now });
-      }
-    }
-    obState.set(pid, { files, ts: now });
+      const playlistPath = path.join(dir, 'playlist.m3u8');
+      if (now - fs.statSync(playlistPath).mtimeMs > 30000) { measuredOutBitrate.delete(pid); continue; }
+      const kbps = playlistOutputKbps(fs.readFileSync(playlistPath, 'utf8'), name => fs.statSync(path.join(dir, name)).size);
+      if (kbps != null) measuredOutBitrate.set(pid, { kbps, updatedAt: now });
+      else measuredOutBitrate.delete(pid);
+    } catch (_) { measuredOutBitrate.delete(pid); }
   }
 }
 setInterval(obTick, 5000);

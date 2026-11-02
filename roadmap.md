@@ -1,5 +1,7 @@
 # Roadmap
 
+- [x] Revisar bitrate visible: mide salida; corregir sesgo del muestreo usando duración de fragmentos completos. 15 pruebas y HLS real 2182 kbps aprobados; aplicar requiere actualizar VPS. RTMP Disney 8 conserva destino manual y protecciones; recepción sostenida sigue sin verificar.
+
 - [x] Mostrar la URL extraída en Disney 8 TDMax y distinguir obtener de actualizar; comprobado con respuesta controlada, sin alterar emisiones.
 - [x] Cambiar Disney 8 TDMax a extracción directa de FUTV, sin URL de player; pantalla verificada y tres pruebas aprobadas conservando destino RTMP.
 - [x] Agregar TDMax a Disney 8; comprobar pantalla, selección persistente y 10 pruebas sin alterar emisiones activas.
