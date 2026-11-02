@@ -1,12 +1,14 @@
 # Roadmap
 
+- [x] Aplicar compatibilidad específica Disney 8 RTMP tras cierres de escritura a los 4s: CFR nativo, GOP entero, sin B-frames y tiempos normalizados; 18 pruebas y envío RTMP local de 8s con audio/video decodificables, DTS monotónicos y GOP 2.002s aprobados. Recepción remota pendiente de despliegue y prueba del usuario; no se publicó sobre el destino activo.
+
 - [x] Revisar bitrate visible: mide salida; corregir sesgo del muestreo usando duración de fragmentos completos. 15 pruebas y HLS real 2182 kbps aprobados; aplicar requiere actualizar VPS. RTMP Disney 8 conserva destino manual y protecciones; recepción sostenida sigue sin verificar.
 
 - [x] Mostrar la URL extraída en Disney 8 TDMax y distinguir obtener de actualizar; comprobado con respuesta controlada, sin alterar emisiones.
 - [x] Cambiar Disney 8 TDMax a extracción directa de FUTV, sin URL de player; pantalla verificada y tres pruebas aprobadas conservando destino RTMP.
 - [x] Agregar TDMax a Disney 8; comprobar pantalla, selección persistente y 10 pruebas sin alterar emisiones activas.
 - [x] Asignar explícitamente Disney 8 a la cuenta TDMax info en VPS y en la extracción alternativa; probar ambas asignaciones.
-- [ ] Confirmar extracción FUTV en Disney 8 con info: requiere desplegar la nueva asignación en el VPS y repetir la extracción.
+- [x] Confirmar extracción FUTV en Disney 8 con info: registro del usuario del 2 de noviembre confirma cuenta info, URL obtenida y entrada HLS abierta con video/audio.
 
 - [x] Contrastar Disney 8 con los requisitos oficiales de YouTube y corregir incompatibilidades de envío RTMP/RTMPS.
 - [x] Validar argumentos y salida audiovisual de YouTube: 10 pruebas, tres muestras FLV decodificables y acceso al campo Disney 8.
