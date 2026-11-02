@@ -23,6 +23,7 @@ import { playlistOutputKbps } from './output-bitrate.js';
 import { compressionFinding, labSuggestion, normalizeHistoricalProfile } from './channel-life-rules.js';
 import { telecableInputArgs, classifyStreamFailure } from './streaming-transport.js';
 import { isYouTubeDestination, validateYouTubeOutput, youtubeEncodingArgs, redactRtmpSecrets } from './youtube-output.js';
+import { disney8EncodingArgs } from './disney8-output.js';
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
 
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
@@ -3708,6 +3709,7 @@ app.post('/api/emit', async (req, res) => {
     let effectiveSourceM3u8 = source_m3u8;
     const isHlsOutput = HLS_OUTPUT_PROCESSES.has(process_id);
     const isYouTubeOutput = !isHlsOutput && isYouTubeDestination(target_rtmp);
+    const isDisney8RtmpCompatibility = process_id === '10' && !isHlsOutput && !isYouTubeOutput && !outputProfile.passthrough && !isPassthroughBlock;
     const youtubeError = !isHlsOutput ? validateYouTubeOutput(target_rtmp, outputProfile, isPassthroughBlock) : null;
     if (youtubeError) return res.status(400).json({ error: youtubeError });
     const isTigoHdmiProcess = process_id === '12' && TIGO_USE_HDMI;
@@ -4688,6 +4690,7 @@ app.post('/api/emit', async (req, res) => {
     const isStandardProfile = !outputProfile.forceCfr
       && (outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'normalpro' || outputProfile.key === 'classic1000' || outputProfile.key === 'classic1000plus' || outputProfile.key === 'hd720');
     const isNaturalCadence = isStandardProfile
+      && !isDisney8RtmpCompatibility
       && !isPassthroughBlock
       && !isSrtIngest
       && !isRtmpInputSource
@@ -4991,6 +4994,10 @@ app.post('/api/emit', async (req, res) => {
       if (isYouTubeOutput) {
         ffmpegArgs = youtubeEncodingArgs(ffmpegArgs, outputProfile);
         sendLog(process_id, 'success', `YouTube: H.264 ${outputProfile.width}p/30 CFR, CBR ${outputProfile.videoBitrate}, cuadros clave cada 2s, AAC estéreo 128k/44.1kHz. Recepción pendiente de confirmar en YouTube Studio.`);
+      }
+      if (isDisney8RtmpCompatibility) {
+        ffmpegArgs = disney8EncodingArgs(ffmpegArgs, outputProfile, outputFps);
+        sendLog(process_id, 'info', `🛡️ Disney 8 RTMP: CFR ${outputFps}fps, GOP entero de 2s, sin B-frames, píxel cuadrado y tiempos de salida normalizados; conserva ${outputProfile.videoBitrate}. La aceptación sostenida del receptor no está confirmada.`);
       }
       ffmpegArgs.push(
         '-f', 'flv',
@@ -6499,7 +6506,9 @@ app.post('/api/emit', async (req, res) => {
               });
               
               if (emitResp.ok) {
-                sendLog(procId, 'success', `✅ AUTO-RECOVERY ${procLabel} completado: Emisión reiniciada${finalUrl !== sourceUrl ? ' (con URL respaldo)' : ''}`);
+                sendLog(procId, String(process_id) === '10' ? 'info' : 'success', String(process_id) === '10'
+                  ? `🔄 AUTO-RECOVERY ${procLabel}: relanzamiento solicitado; esperando frames. Esto no confirma recepción RTMP sostenida.`
+                  : `✅ AUTO-RECOVERY ${procLabel} completado: Emisión reiniciada${finalUrl !== sourceUrl ? ' (con URL respaldo)' : ''}`);
                 if (supabase) {
                   const { error: rpcErr } = await supabase.rpc('increment_recovery_count', { process_id: procId });
                   if (rpcErr) {
