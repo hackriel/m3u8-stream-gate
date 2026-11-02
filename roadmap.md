@@ -1,5 +1,7 @@
 # Roadmap
 
+- [ ] Corregir compatibilidad de Disney 8 RTMP tras cierres de escritura a los 4s; probar salida y recuperación sin publicar sobre el destino activo.
+
 - [x] Revisar bitrate visible: mide salida; corregir sesgo del muestreo usando duración de fragmentos completos. 15 pruebas y HLS real 2182 kbps aprobados; aplicar requiere actualizar VPS. RTMP Disney 8 conserva destino manual y protecciones; recepción sostenida sigue sin verificar.
 
 - [x] Mostrar la URL extraída en Disney 8 TDMax y distinguir obtener de actualizar; comprobado con respuesta controlada, sin alterar emisiones.
