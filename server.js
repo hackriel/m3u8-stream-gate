@@ -7798,42 +7798,8 @@ app.post('/api/fox/refresh-telecable', async (req, res) => {
 // usuario `croute` (debe ser CR). Cachea resultado 10s para no martillar
 // api.ipify.org desde el dashboard.
 const crTunnelHealthState = { wg_up: false, cr_ip: null, last_check: 0, checking: false };
-const refreshCrTunnelHealth = async () => {
-  if (crTunnelHealthState.checking) return crTunnelHealthState;
-  const now = Date.now();
-  if (now - crTunnelHealthState.last_check < 10000) return crTunnelHealthState;
-  crTunnelHealthState.checking = true;
-  try {
-    // 1) ¿wg0 levantado y con peer?
-    let wgUp = false;
-    try {
-      const { stdout: out } = await execFileAsync('wg', ['show', 'wg0', 'latest-handshakes'], { encoding: 'utf8', timeout: 2000 });
-      // Línea: "<pubkey>\t<unix_ts>". Handshake reciente (<180s) = peer vivo.
-      const ts = parseInt((out.trim().split(/\s+/)[1] || '0'), 10);
-      wgUp = ts > 0 && (Math.floor(Date.now() / 1000) - ts) < 180;
-    } catch { wgUp = false; }
-
-    // 2) IP pública vista por croute (si está wg_up).
-    let crIp = null;
-    if (wgUp) {
-      try {
-        const { stdout } = await execFileAsync(
-          'sudo', ['-n', '-u', CR_TUNNEL_USER, 'curl', '-fsS', '--max-time', '5', 'https://api.ipify.org'],
-          { encoding: 'utf8', timeout: 7000 }
-        );
-        const ip = stdout.trim();
-        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) crIp = ip;
-      } catch (_) { /* keep null */ }
-    }
-
-    crTunnelHealthState.wg_up = wgUp;
-    crTunnelHealthState.cr_ip = crIp;
-    crTunnelHealthState.last_check = now;
-  } finally {
-    crTunnelHealthState.checking = false;
-  }
-  return crTunnelHealthState;
-};
+// Túnel Pi5 retirado: ya no se ejecutan comandos; responde estado fijo sin bloquear.
+const refreshCrTunnelHealth = async () => crTunnelHealthState;
 
 app.get('/api/cr-tunnel/health', async (req, res) => {
   try {

@@ -870,26 +870,6 @@ export default function EmisorM3U8Panel() {
   // ── Salida CR vía Pi5 (WireGuard) — set + poll de health del túnel.
   // Canal 6 (15) salió del túnel CR: ahora usa Telecable directo desde VPS,
   // mismo flujo limpio que Canal 8 (27) / Canal 2 (28).
-  const CR_TUNNEL_CHANNELS = useMemo(() => new Set<number>([24, 25]), []);
-  const [crTunnelHealth, setCrTunnelHealth] = useState<{ wg_up: boolean; cr_ip: string | null }>({
-    wg_up: false,
-    cr_ip: null,
-  });
-  useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const r = await fetch(apiUrl('/api/cr-tunnel/health'));
-        if (!r.ok) return;
-        const j = await r.json();
-        if (cancelled) return;
-        setCrTunnelHealth({ wg_up: !!j.wg_up, cr_ip: typeof j.cr_ip === 'string' ? j.cr_ip : null });
-      } catch {}
-    };
-    tick();
-    const interval = setInterval(tick, 15000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, []);
   const [outputProfiles, setOutputProfiles] = useState<Record<number, OutputProfile>>(() => {
     try {
       const parsed = JSON.parse(sessionStorage.getItem("emisor-output-profiles") || "{}");
@@ -2260,27 +2240,6 @@ export default function EmisorM3U8Panel() {
             <h2 className="text-lg font-medium mb-4 text-accent">
               {processIndex === FILE_UPLOAD_INDEX ? "Archivos Locales" : "Fuente y Cabeceras"} - {channelConfig.name}
             </h2>
-            {CR_TUNNEL_CHANNELS.has(processIndex) && !(TELECABLE_PIDS.has(processIndex) && (telecableModes[processIndex] === 'telecable' || telecableModes[processIndex] === 'telecable_vlc')) && (
-              <div className="mb-4 -mt-2">
-                {crTunnelHealth.wg_up && crTunnelHealth.cr_ip ? (
-                  <span
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
-                    title={`Este canal sale al CDN desde Costa Rica vía Pi5 (10.77.0.1). IP pública vista: ${crTunnelHealth.cr_ip}`}
-                  >
-                    🇨🇷 IP CR · <span className="font-mono">{crTunnelHealth.cr_ip}</span>
-                    {process.isEmitiendo && <span className="ml-1 opacity-80">• EMITIENDO</span>}
-                  </span>
-                ) : (
-                  <span
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border bg-amber-500/15 border-amber-500/40 text-amber-300"
-                    title="El túnel WireGuard al Pi5 (CR) no está activo. Este canal va a fallar al arrancar hasta que el túnel se restablezca."
-                  >
-                    ⚠️ Túnel CR caído
-                  </span>
-                )}
-              </div>
-            )}
-
             {processIndex === FILE_UPLOAD_INDEX ? (
               // Proceso Subida: Upload de archivos
               <>
