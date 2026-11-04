@@ -5482,7 +5482,9 @@ app.post('/api/emit', async (req, res) => {
       windowStart: Date.now(),
       restartTriggered: false,
     };
-    const FOX_URL_404_WINDOW_MS = 5_000;
+    // 12s: FFmpeg reintenta la playlist cada ~5s; con 5s exactos la ventana se
+    // reiniciaba entre fallos y el corte tardaba ~50s en detectarse (04-nov 03:04 CR).
+    const FOX_URL_404_WINDOW_MS = 12_000;
     const FOX_URL_404_THRESHOLD = 2;
     const TDMAX_FAST_404_PROCESSES = new Set(['11', '13', '14', '24', '25']);
     const isFoxUrlScrapedStream = TDMAX_FAST_404_PROCESSES.has(String(process_id));
@@ -5590,7 +5592,31 @@ app.post('/api/emit', async (req, res) => {
           foxUrlFast404State.count += reloadFails;
           if (foxUrlFast404State.count >= FOX_URL_404_THRESHOLD) {
             foxUrlFast404State.restartTriggered = true;
-            sendLog(process_id, 'error', `⚡ TDMax: 404 de playlist (${foxUrlFast404State.count} fails en ${Math.round((now - foxUrlFast404State.windowStart)/1000)}s) → fast-kill para scrape inmediato`);
+            const srcLabel = isTelecableMode(process_id) ? 'Telecable' : 'TDMax';
+            sendLog(process_id, 'error', `⚡ ${srcLabel}: fallo de playlist (${foxUrlFast404State.count} fails en ${Math.round((now - foxUrlFast404State.windowStart)/1000)}s) → fast-kill para URL fresca`);
+            // Red de seguridad: si 90s después del fast-kill el canal no volvió
+            // y nadie lo está recuperando, forzar recovery (antes podía quedar muerto).
+            const killedProc = ffmpegProcess;
+            setTimeout(async () => {
+              try {
+                const pid = String(process_id);
+                if (manualStopProcesses.has(pid) || manualStopProcesses.has(Number(pid))) return;
+                if (autoRecoveryInProgress.get(pid)) return;
+                const live = ffmpegProcesses.get(pid) || ffmpegProcesses.get(Number(pid));
+                if (live?.process && live.process !== killedProc && !live.process.killed) return;
+                try { killedProc.kill('SIGKILL'); } catch (_) {}
+                sendLog(pid, 'warn', '🛟 Fast-kill sin relanzamiento tras 90s → forzando recovery con URL fresca');
+                try { failureTimestamps.delete(pid); } catch (_) {}
+                if (isTelecableMode(pid)) {
+                  await autoRecoverChannel(pid, null, `TELECABLE ${pid}`);
+                } else if (CHANNEL_MAP[pid]) {
+                  const { channelId, channelName } = CHANNEL_MAP[pid];
+                  await autoRecoverChannel(pid, channelId, channelName);
+                }
+              } catch (e) {
+                sendLog(process_id, 'error', `❌ Red de seguridad post fast-kill falló: ${e.message}`);
+              }
+            }, 90_000);
             try {
               scrapeSessionCache.delete(process_id);
               // Invalidar lastKnownStreamState para que la recovery NO use Quick
