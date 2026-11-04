@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
-import { spawn, execSync } from 'child_process';
+import { spawn, execSync, execFile } from 'child_process';
+import { promisify } from 'util';
+const execFileAsync = promisify(execFile);
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
@@ -7805,7 +7807,7 @@ const refreshCrTunnelHealth = async () => {
     // 1) ¿wg0 levantado y con peer?
     let wgUp = false;
     try {
-      const out = execSync('wg show wg0 latest-handshakes 2>/dev/null', { encoding: 'utf8', timeout: 2000 });
+      const { stdout: out } = await execFileAsync('wg', ['show', 'wg0', 'latest-handshakes'], { encoding: 'utf8', timeout: 2000 });
       // Línea: "<pubkey>\t<unix_ts>". Handshake reciente (<180s) = peer vivo.
       const ts = parseInt((out.trim().split(/\s+/)[1] || '0'), 10);
       wgUp = ts > 0 && (Math.floor(Date.now() / 1000) - ts) < 180;
@@ -7815,10 +7817,11 @@ const refreshCrTunnelHealth = async () => {
     let crIp = null;
     if (wgUp) {
       try {
-        const ip = execSync(
-          `sudo -n -u ${CR_TUNNEL_USER} curl -fsS --max-time 5 https://api.ipify.org`,
+        const { stdout } = await execFileAsync(
+          'sudo', ['-n', '-u', CR_TUNNEL_USER, 'curl', '-fsS', '--max-time', '5', 'https://api.ipify.org'],
           { encoding: 'utf8', timeout: 7000 }
-        ).trim();
+        );
+        const ip = stdout.trim();
         if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) crIp = ip;
       } catch (_) { /* keep null */ }
     }
