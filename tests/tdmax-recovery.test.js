@@ -2,7 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { hasProcessExited, positiveVideoFrame, tdmaxProbeSettings, terminateForRecovery } from '../tdmax-recovery.js';
+import { hasProcessExited, recoveryWorkExists, positiveVideoFrame, tdmaxProbeSettings, terminateForRecovery } from '../tdmax-recovery.js';
+
+test('failed scraping without a child or pending work allows the next always-on attempt', () => {
+  assert.equal(recoveryWorkExists(undefined, false, false), false);
+  assert.equal(recoveryWorkExists({ exitCode: null, signalCode: null }, false, false), true);
+  assert.equal(recoveryWorkExists(undefined, true, false), true);
+  assert.equal(recoveryWorkExists(undefined, false, true), true);
+});
 
 test('a sent SIGTERM must not hide a still-alive process from the watchdog', () => {
   assert.equal(hasProcessExited({ killed: true, exitCode: null, signalCode: null }), false);

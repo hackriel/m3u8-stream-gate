@@ -3,6 +3,10 @@ export function hasProcessExited(child) {
   return !child || child.exitCode != null || child.signalCode != null;
 }
 
+export function recoveryWorkExists(child, active, queued) {
+  return Boolean((child && !hasProcessExited(child)) || active || queued);
+}
+
 export function positiveVideoFrame(output) {
   const frames = Array.from(output.matchAll(/frame=\s*(\d+)/g), match => Number(match[1]));
   return frames.length ? Math.max(...frames) : 0;

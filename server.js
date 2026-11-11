@@ -26,7 +26,7 @@ import { compressionFinding, labSuggestion, normalizeHistoricalProfile } from '.
 import { telecableInputArgs, classifyStreamFailure } from './streaming-transport.js';
 import { isYouTubeDestination, validateYouTubeOutput, youtubeEncodingArgs, redactRtmpSecrets } from './youtube-output.js';
 import { disney8EncodingArgs } from './disney8-output.js';
-import { hasProcessExited, positiveVideoFrame, tdmaxProbeSettings, terminateForRecovery } from './tdmax-recovery.js';
+import { hasProcessExited, recoveryWorkExists, positiveVideoFrame, tdmaxProbeSettings, terminateForRecovery } from './tdmax-recovery.js';
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
 
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
@@ -9295,8 +9295,7 @@ server.listen(PORT, () => {
     // Persisted optimistic flags can outlive a failed scrape. Only an actual
     // child, active recovery or queued job proves this server is attempting it.
     const currentChild = ffmpegProcesses.get(PID)?.process || ffmpegProcesses.get(PID_NUM)?.process;
-    if (currentChild && !hasProcessExited(currentChild)) return;
-    if (autoRecoveryInProgress.get(PID) || recoveryQueue.some(job => job.processId === String(PID))) return;
+    if (recoveryWorkExists(currentChild, autoRecoveryInProgress.get(PID), recoveryQueue.some(job => job.processId === String(PID)))) return;
 
     // El bloqueo horario 1-5 AM solo aplica a canales con descanso nocturno.
     // Antes bloqueaba a TODOS, así que si el refresh de las 3 AM fallaba nadie
