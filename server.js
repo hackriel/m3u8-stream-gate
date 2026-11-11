@@ -26,6 +26,7 @@ import { compressionFinding, labSuggestion, normalizeHistoricalProfile } from '.
 import { telecableInputArgs, classifyStreamFailure } from './streaming-transport.js';
 import { isYouTubeDestination, validateYouTubeOutput, youtubeEncodingArgs, redactRtmpSecrets } from './youtube-output.js';
 import { disney8EncodingArgs } from './disney8-output.js';
+import { hasProcessExited, recoveryWorkExists, positiveVideoFrame, tdmaxProbeSettings, terminateForRecovery } from './tdmax-recovery.js';
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
 
 // Tigo (ID 12) descartado. Se mantienen solo compat-shims mínimos para no romper cleanup legado.
@@ -2389,7 +2390,7 @@ const HLS_INPUT_RESILIENCE_ARGS = [
 // Watchdog interval: detecta procesos FFmpeg colgados, tanto en arranque como en ejecución
 setInterval(() => {
   for (const [processId, processData] of ffmpegProcesses.entries()) {
-    if (!processData.process || processData.process.killed) continue;
+    if (hasProcessExited(processData.process)) continue;
     
     const lastFrame = lastFrameTime.get(processId);
     const status = emissionStatuses.get(processId);
@@ -3111,7 +3112,7 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
     
     // CRÍTICO: Asegurarse de que el proceso anterior esté COMPLETAMENTE muerto antes de reiniciar
     const existingProc = ffmpegProcesses.get(process_id);
-    if (existingProc && existingProc.process && !existingProc.process.killed) {
+    if (existingProc?.process && !hasProcessExited(existingProc.process)) {
       sendLog(process_id, 'info', '🔪 Terminando proceso anterior antes de reiniciar...');
       existingProc.process.kill('SIGKILL'); // SIGKILL directo para máxima velocidad
       await waitForProcessDeath(existingProc.process, 1500);
@@ -3169,7 +3170,7 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
       const errText = await emitResp.text().catch(() => '');
       sendLog(process_id, 'error', `❌ AUTO-RECOVERY: El endpoint /api/emit respondió ${emitResp.status}: ${errText.substring(0, 100)}`);
     } else {
-      sendLog(process_id, 'success', '✅ AUTO-RECOVERY completado: Emisión reiniciada correctamente');
+      sendLog(process_id, 'info', '⏳ AUTO-RECOVERY: relanzamiento aceptado; esperando primer frame de video');
       // Incrementar contador de recovery en la base de datos
       if (supabase) {
         try {
@@ -3996,7 +3997,7 @@ app.post('/api/emit', async (req, res) => {
 
     // Si ya hay un proceso corriendo para este ID, detenerlo primero
     const existingProcess = ffmpegProcesses.get(process_id);
-    if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
+    if (existingProcess?.process && !hasProcessExited(existingProcess.process)) {
       sendLog(process_id, 'warn', `Deteniendo proceso ffmpeg existente para reinicio`);
       // Marcar como manual temporalmente para que el close handler del VIEJO proceso no dispare recovery
       manualStopProcesses.add(String(process_id));
@@ -4081,8 +4082,7 @@ app.post('/api/emit', async (req, res) => {
     const isRecovery = Boolean(is_recovery);
     const isStableSource = STABLE_SOURCE_PROCESSES.has(String(process_id));
     // Univision tiene 5 programas + subtítulos EIA-608 = manifiesto pesado, necesita más análisis
-    const analyzeDuration = isStableSource ? '3000000' : (isRecovery ? '1500000' : '3000000');
-    const probeSize      = isStableSource ? '2000000' : (isRecovery ? '500000'  : '1500000');
+    const { analyzeDuration, probeSize } = tdmaxProbeSettings(effectiveSourceM3u8, isRecovery, isStableSource);
 
     // Detectar cabeceras HTTP según dominio fuente y canal para mayor compatibilidad
     // Nota: para procesos OBS-ingest (SRT) el spawn real ocurre en `startSrtIngest`,
@@ -5605,15 +5605,15 @@ app.post('/api/emit', async (req, res) => {
                 if (manualStopProcesses.has(pid) || manualStopProcesses.has(Number(pid))) return;
                 if (autoRecoveryInProgress.get(pid)) return;
                 const live = ffmpegProcesses.get(pid) || ffmpegProcesses.get(Number(pid));
-                if (live?.process && live.process !== killedProc && !live.process.killed) return;
+                if (live?.process && live.process !== killedProc && !hasProcessExited(live.process)) return;
                 try { killedProc.kill('SIGKILL'); } catch (_) {}
                 sendLog(pid, 'warn', '🛟 Fast-kill sin relanzamiento tras 90s → forzando recovery con URL fresca');
                 try { failureTimestamps.delete(pid); } catch (_) {}
                 if (isTelecableMode(pid)) {
-                  await autoRecoverChannel(pid, null, `TELECABLE ${pid}`);
+                  enqueueRecovery(pid, () => autoRecoverChannel(pid, null, `TELECABLE ${pid}`));
                 } else if (CHANNEL_MAP[pid]) {
                   const { channelId, channelName } = CHANNEL_MAP[pid];
-                  await autoRecoverChannel(pid, channelId, channelName);
+                  enqueueRecovery(pid, () => autoRecoverChannel(pid, channelId, channelName));
                 }
               } catch (e) {
                 sendLog(process_id, 'error', `❌ Red de seguridad post fast-kill falló: ${e.message}`);
@@ -5626,10 +5626,9 @@ app.post('/api/emit', async (req, res) => {
               try { lastKnownStreamState.delete(String(process_id)); } catch (_) {}
               try { quickRetryState.set(process_id, Date.now()); } catch (_) {}
               if (typeof ffmpegProcess.kill === 'function') {
-                ffmpegProcess.kill('SIGTERM');
-                setTimeout(() => {
-                  try { ffmpegProcess.kill('SIGKILL'); } catch (_) {}
-                }, 2000);
+                terminateForRecovery(ffmpegProcess, waitForProcessDeath).then(exited => {
+                  if (!exited) sendLog(process_id, 'error', '⚠️ FFmpeg aún no confirmó cierre; watchdog mantiene supervisión');
+                }).catch(error => sendLog(process_id, 'error', `Error cerrando FFmpeg para recovery: ${error.message}`));
               }
             } catch (e) {
               console.error('Error en FOX URL fast-kill:', e);
@@ -5712,15 +5711,14 @@ app.post('/api/emit', async (req, res) => {
         // FFmpeg sigue imprimiendo "frame=N fps=X" con N congelado cuando el input
         // se queda sin data (bitrate=N/A). Sin esto el watchdog cree que todo va
         // bien y el canal queda "colgado vivo" hasta reinicio manual.
-        const _frameNumMatch = output.match(/frame=\s*(\d+)/);
-        const _currentFrameNum = _frameNumMatch ? parseInt(_frameNumMatch[1], 10) : null;
+        const _currentFrameNum = positiveVideoFrame(output);
         const _prevFrameNum = lastFrameNumber.get(process_id);
-        if (_currentFrameNum === null || _prevFrameNum === undefined || _currentFrameNum > _prevFrameNum) {
+        if (_currentFrameNum > 0 && (_prevFrameNum === undefined || _currentFrameNum > _prevFrameNum)) {
           lastFrameTime.set(process_id, Date.now());
-          if (_currentFrameNum !== null) lastFrameNumber.set(process_id, _currentFrameNum);
+          lastFrameNumber.set(process_id, _currentFrameNum);
         }
         const currentStatus = emissionStatuses.get(process_id);
-        if (currentStatus === 'starting') {
+        if (currentStatus === 'starting' && _currentFrameNum > 0) {
           emissionStatuses.set(process_id, 'running');
           sendLog(process_id, 'success', `Emisión iniciada exitosamente`);
           
@@ -9284,7 +9282,7 @@ server.listen(PORT, () => {
 
     // Si ya hay un FFmpeg vivo o un recovery en curso, no tocar
     const procData = ffmpegProcesses.get(PID) || ffmpegProcesses.get(PID_NUM);
-    if (procData?.process && !procData.process.killed) return;
+    if (procData?.process && !hasProcessExited(procData.process)) return;
     if (autoRecoveryInProgress.get(PID)) return;
 
     const { data: row } = await supabase
@@ -9294,7 +9292,10 @@ server.listen(PORT, () => {
       .single();
 
     if (!row || !row.always_on) return;
-    if (row.is_emitting) return; // ya está emitiendo (o intentándolo)
+    // Persisted optimistic flags can outlive a failed scrape. Only an actual
+    // child, active recovery or queued job proves this server is attempting it.
+    const currentChild = ffmpegProcesses.get(PID)?.process || ffmpegProcesses.get(PID_NUM)?.process;
+    if (recoveryWorkExists(currentChild, autoRecoveryInProgress.get(PID), recoveryQueue.some(job => job.processId === String(PID)))) return;
 
     // El bloqueo horario 1-5 AM solo aplica a canales con descanso nocturno.
     // Antes bloqueaba a TODOS, así que si el refresh de las 3 AM fallaba nadie
@@ -9334,15 +9335,8 @@ server.listen(PORT, () => {
       sendLog(PID, 'warn', `🔁 Watchdog always-on: ${channelName} caído con switch activo. Re-scrapeando URL fresca...`);
       try { failureTimestamps.delete(PID); } catch (_) {}
       recoveryAttempts.set(String(PID), 0);
-      await supabase.from('emission_processes').update({
-        emit_status: 'starting',
-        is_emitting: true,
-        is_active: true,
-        failure_reason: null,
-        failure_details: null,
-      }).eq('id', PID_NUM);
       try {
-        await autoRecoverChannel(String(PID), channelId, channelName);
+        enqueueRecovery(String(PID), () => autoRecoverChannel(String(PID), channelId, channelName));
       } catch (e) {
         sendLog(PID, 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
       }
@@ -9365,15 +9359,8 @@ server.listen(PORT, () => {
       sendLog(PID, 'warn', `🔁 Watchdog always-on: ${ALT_LABEL} caído. Re-scrapeando con player_url...`);
       try { failureTimestamps.delete(PID); } catch (_) {}
       recoveryAttempts.set(String(PID), 0);
-      await supabase.from('emission_processes').update({
-        emit_status: 'starting',
-        is_emitting: true,
-        is_active: true,
-        failure_reason: null,
-        failure_details: null,
-      }).eq('id', PID_NUM);
       try {
-        await autoRecoverChannel(String(PID), channelId, ALT_LABEL);
+        enqueueRecovery(String(PID), () => autoRecoverChannel(String(PID), channelId, ALT_LABEL));
       } catch (e) {
         sendLog(PID, 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
       }
