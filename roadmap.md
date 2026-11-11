@@ -1,6 +1,6 @@
 # Roadmap
 
-- [ ] Analizar incidente TDMax TDMAS 1 del 11 de noviembre y reforzar terminación/recuperación tras fallos repetidos sin sondear fuentes sanas.
+- [x] Analizar incidente TDMax TDMAS 1 del 11 de noviembre (05:01:16 CR, nuevo fallo 05:01:42): corregir supervisión tras SIGTERM, exigir frame positivo, conservar probing 3s/2MB y evitar bloqueo por flags optimistas en always-on; 17 pruebas aprobadas, incluido cierre de proceso real. Estabilidad VPS pendiente de despliegue; el registro termina en el segundo fallo.
 
 - [x] Aplicar compatibilidad específica Disney 8 RTMP tras cierres de escritura a los 4s: CFR nativo, GOP entero, sin B-frames y tiempos normalizados; 18 pruebas y envío RTMP local de 8s con audio/video decodificables, DTS monotónicos y GOP 2.002s aprobados. Recepción remota pendiente de despliegue y prueba del usuario; no se publicó sobre el destino activo.
 
