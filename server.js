@@ -3112,7 +3112,7 @@ const autoRecoverChannel = async (process_id, channelId, channelName = 'Canal') 
     
     // CRÍTICO: Asegurarse de que el proceso anterior esté COMPLETAMENTE muerto antes de reiniciar
     const existingProc = ffmpegProcesses.get(process_id);
-    if (existingProc && existingProc.process && !existingProc.process.killed) {
+    if (existingProc?.process && !hasProcessExited(existingProc.process)) {
       sendLog(process_id, 'info', '🔪 Terminando proceso anterior antes de reiniciar...');
       existingProc.process.kill('SIGKILL'); // SIGKILL directo para máxima velocidad
       await waitForProcessDeath(existingProc.process, 1500);
@@ -3997,7 +3997,7 @@ app.post('/api/emit', async (req, res) => {
 
     // Si ya hay un proceso corriendo para este ID, detenerlo primero
     const existingProcess = ffmpegProcesses.get(process_id);
-    if (existingProcess && existingProcess.process && !existingProcess.process.killed) {
+    if (existingProcess?.process && !hasProcessExited(existingProcess.process)) {
       sendLog(process_id, 'warn', `Deteniendo proceso ffmpeg existente para reinicio`);
       // Marcar como manual temporalmente para que el close handler del VIEJO proceso no dispare recovery
       manualStopProcesses.add(String(process_id));
@@ -9282,7 +9282,7 @@ server.listen(PORT, () => {
 
     // Si ya hay un FFmpeg vivo o un recovery en curso, no tocar
     const procData = ffmpegProcesses.get(PID) || ffmpegProcesses.get(PID_NUM);
-    if (procData?.process && !procData.process.killed) return;
+    if (procData?.process && !hasProcessExited(procData.process)) return;
     if (autoRecoveryInProgress.get(PID)) return;
 
     const { data: row } = await supabase
@@ -9292,7 +9292,11 @@ server.listen(PORT, () => {
       .single();
 
     if (!row || !row.always_on) return;
-    if (row.is_emitting) return; // ya está emitiendo (o intentándolo)
+    // Persisted optimistic flags can outlive a failed scrape. Only an actual
+    // child, active recovery or queued job proves this server is attempting it.
+    const currentChild = ffmpegProcesses.get(PID)?.process || ffmpegProcesses.get(PID_NUM)?.process;
+    if (currentChild && !hasProcessExited(currentChild)) return;
+    if (autoRecoveryInProgress.get(PID) || recoveryQueue.some(job => job.processId === String(PID))) return;
 
     // El bloqueo horario 1-5 AM solo aplica a canales con descanso nocturno.
     // Antes bloqueaba a TODOS, así que si el refresh de las 3 AM fallaba nadie
@@ -9332,15 +9336,8 @@ server.listen(PORT, () => {
       sendLog(PID, 'warn', `🔁 Watchdog always-on: ${channelName} caído con switch activo. Re-scrapeando URL fresca...`);
       try { failureTimestamps.delete(PID); } catch (_) {}
       recoveryAttempts.set(String(PID), 0);
-      await supabase.from('emission_processes').update({
-        emit_status: 'starting',
-        is_emitting: true,
-        is_active: true,
-        failure_reason: null,
-        failure_details: null,
-      }).eq('id', PID_NUM);
       try {
-        await autoRecoverChannel(String(PID), channelId, channelName);
+        enqueueRecovery(String(PID), () => autoRecoverChannel(String(PID), channelId, channelName));
       } catch (e) {
         sendLog(PID, 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
       }
@@ -9363,15 +9360,8 @@ server.listen(PORT, () => {
       sendLog(PID, 'warn', `🔁 Watchdog always-on: ${ALT_LABEL} caído. Re-scrapeando con player_url...`);
       try { failureTimestamps.delete(PID); } catch (_) {}
       recoveryAttempts.set(String(PID), 0);
-      await supabase.from('emission_processes').update({
-        emit_status: 'starting',
-        is_emitting: true,
-        is_active: true,
-        failure_reason: null,
-        failure_details: null,
-      }).eq('id', PID_NUM);
       try {
-        await autoRecoverChannel(String(PID), channelId, ALT_LABEL);
+        enqueueRecovery(String(PID), () => autoRecoverChannel(String(PID), channelId, ALT_LABEL));
       } catch (e) {
         sendLog(PID, 'error', `❌ Watchdog always-on: error en autoRecoverChannel: ${e.message}`);
       }

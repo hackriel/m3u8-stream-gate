@@ -1,5 +1,6 @@
 # Architecture rules
 - TDMax recovery helpers keep live-edge H264 probing at the normal budget and distinguish signal delivery from process exit; watchdogs require positive video frames and recovery fallbacks share the queue to avoid hidden stalls and concurrency bypasses.
+- Always-on retry eligibility relies on local child liveness and active/queued work rather than optimistic persisted emitting flags, so failed scraping cannot latch a channel out of subsequent retries.
 - Delivered HLS bitrate uses completed playlist segment bytes divided by EXTINF media duration, never the polling interval, to avoid counting segment bursts as sustained output rate.
 - The laboratory lives in a separate VPS module mounted by the existing emitter; it snapshots local completed HLS segments and never scrapes, changes output profiles, or registers children as emission processes, to keep experiments separate from production.
 - Laboratory comparisons use a single sequential low-priority job, bounded local files and execution time, and only dashboard-authorized requests; delete scratch media immediately and retain downloadable outputs under separate time and total-size caps to bound resource use.
