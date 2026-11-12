@@ -26,6 +26,7 @@ import { compressionFinding, labSuggestion, normalizeHistoricalProfile } from '.
 import { telecableInputArgs, classifyStreamFailure } from './streaming-transport.js';
 import { isYouTubeDestination, validateYouTubeOutput, youtubeEncodingArgs, redactRtmpSecrets } from './youtube-output.js';
 import { disney8EncodingArgs } from './disney8-output.js';
+import { splitJitterBufferArgs, startJitterBufferedEncoder } from './hls-jitter-buffer.js';
 import { hasProcessExited, recoveryWorkExists, positiveVideoFrame, tdmaxProbeSettings, terminateForRecovery } from './tdmax-recovery.js';
 import { startFiller as foxStartFiller, stopFillerAndWait as foxStopFillerAndWait, isFillerActive as foxIsFillerActive, isFillerSupported as foxIsFillerSupported } from './fox-filler.js';
 
@@ -5082,6 +5083,12 @@ app.post('/api/emit', async (req, res) => {
     sendLog(process_id, 'info', `Comando ejecutado: ${commandStr.substring(0, 120)}...`);
 
     // Si no es modo HDMI, spawneamos aquí. En modo HDMI ya quedó spawneado arriba.
+    const jitterSplit = !ffmpegProcess && isDisney8RtmpCompatibility && spawnCmd === 'ffmpeg'
+      ? splitJitterBufferArgs(spawnArgs) : null;
+    if (jitterSplit) {
+      ffmpegProcess = startJitterBufferedEncoder(jitterSplit, { onLog: (level, msg) => sendLog(process_id, level, msg) });
+      sendLog(process_id, 'info', '🧰 Disney 8 RTMP: lector HLS separado con colchón en memoria; el codificador mantiene -re y envía a ritmo constante aunque un segmento tarde en descargar.');
+    }
     if (!ffmpegProcess) {
       ffmpegProcess = spawn(spawnCmd, spawnArgs);
     }
