@@ -38,3 +38,5 @@
 - [ ] Ejecutar con FUTV/FOX reales: requiere actualizar el VPS con el nuevo módulo.
 - [x] Incluir dos salidas deportivas experimentales y comparar las cuatro sobre la misma muestra local de prueba antes del despliegue.
 - [x] Añadir y validar con muestra local prueba no HD de 1000 kbps sin reintroducir los perfiles SD/Intermedio retirados en producción.
+- [x] Disney 8 RTMP: colchón de entrada HLS para que descargas lentas no pausen la salida (prueba local: pausa 4.5s → <2s).
+- [ ] Verificar Disney 8 con colchón en el VPS durante horas: requiere actualizar el VPS.
