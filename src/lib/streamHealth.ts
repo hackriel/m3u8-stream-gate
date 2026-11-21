@@ -50,8 +50,9 @@ const SPEED_CRIT_LO = 0.85;
 const SPEED_CRIT_HI = 1.25;
 const SPEED_WARN_LO = 0.92;
 const SPEED_WARN_HI = 1.12;
-const Q_CRIT = 36;
-const Q_WARN = 31;
+// Q solo se informa como nota: indica compresión (escenas detalladas), no
+// continuidad de la señal. Mantener alineado con health-level.js (VPS).
+const Q_HIGH_NOTE = 31;
 
 const WINDOW_MS = 60_000;
 const WARMUP_MS = 25_000;
@@ -223,27 +224,25 @@ function evaluate(args: {
     else if (speed < SPEED_WARN_LO || speed > SPEED_WARN_HI)
       warning.push(`Velocidad ${speed.toFixed(2)}x sostenida (aviso: fuera de ${SPEED_WARN_LO}–${SPEED_WARN_HI})`);
   }
-  if (q != null) {
-    if (q >= Q_CRIT) critical.push(`Q ${q.toFixed(1)} medio (crítico: >= ${Q_CRIT}, compresión al límite)`);
-    else if (q >= Q_WARN) warning.push(`Q ${q.toFixed(1)} medio (aviso: >= ${Q_WARN}, sube el perfil de salida)`);
-  }
   if (recentRecoveries >= 3) critical.push(`${recentRecoveries} recuperaciones en los últimos 10 min`);
   else if (recentRecoveries > 0)
     warning.push(`${recentRecoveries} recuperación${recentRecoveries === 1 ? "" : "es"} reciente${recentRecoveries === 1 ? "" : "s"}`);
 
   let level: HealthLevel = critical.length > 0 ? "critical" : warning.length > 0 ? "warning" : "stable";
   if (warmup && level === "critical") level = "warning"; // arranque: no alarmar
-  const reasons = critical.length > 0 ? critical.concat(warning) : warning;
+  const reasons = critical.length > 0 ? critical.concat(warning) : [...warning];
+  if (q != null && q >= Q_HIGH_NOTE)
+    reasons.push(`Nota: Q ${q.toFixed(1)} = imagen muy detallada, el encoder comprime más (no es falla de señal)`);
   return { level, label: LABELS[level], reasons };
 }
 
 export function healthTooltip(result: HealthResult, passthrough = false): string {
   const criteria =
-    "Criterio (mediana de 60s, no valores instantáneos): FPS (>=22 sano, <15 crítico) · Velocidad (0.92–1.12 sano, fuera de 0.85–1.25 crítico) · Q de compresión (<31 sano, >=36 crítico) · recuperaciones de los últimos 10 min. Un cambio de estado exige ~3 lecturas seguidas; los picos de 1 segundo se ignoran.";
+    "Criterio (mediana de 60s, no valores instantáneos): FPS (>=22 sano, <15 crítico) · Velocidad (0.92–1.12 sano, fuera de 0.85–1.25 crítico) · recuperaciones de los últimos 10 min. Un cambio de estado exige ~3 lecturas seguidas; los picos de 1 segundo se ignoran. Q (compresión) se muestra como nota y no marca INESTABLE.";
   if (result.level === "stable") {
     return passthrough
       ? `Sano — passthrough (-c copy): sin re-encode, no hay FPS/Q que evaluar. ${criteria}`
-      : `Sano — FPS, velocidad y compresión dentro de rango. ${criteria}`;
+      : `Sano — imágenes por segundo, ritmo y recuperaciones dentro de rango.${result.reasons.length ? " " + result.reasons.join(" · ") + "." : ""} ${criteria}`;
   }
   return `${result.label}: ${result.reasons.join(" · ")}. ${criteria}`;
 }

@@ -1,4 +1,5 @@
 import express from 'express';
+import { classifyHealth } from './health-level.js';
 import cors from 'cors';
 import { spawn, execSync, execFile } from 'child_process';
 import { promisify } from 'util';
@@ -7848,17 +7849,8 @@ const hhMedian = (arr) => {
 };
 
 function hhEvaluate({ status, fps, speed, q, warmup }) {
-  let critical = 0, warning = 0;
-  if (status !== 'running') warning++;
-  if (fps != null) { if (fps < 15) critical++; else if (fps < 22) warning++; }
-  if (speed != null) {
-    if (speed < 0.85 || speed > 1.25) critical++;
-    else if (speed < 0.92 || speed > 1.12) warning++;
-  }
-  if (q != null) { if (q >= 36) critical++; else if (q >= 31) warning++; }
-  let level = critical > 0 ? 'critical' : warning > 0 ? 'warning' : 'stable';
-  if (warmup && level === 'critical') level = 'warning';
-  return level;
+  // Q es compresión, no continuidad: no cambia el nivel (ver health-level.js).
+  return classifyHealth({ status, fps, speed, q, warmup }).level;
 }
 
 // Rango de pids monitoreados: se deriva de HLS_SLUG_MAP (+ margen) para que
