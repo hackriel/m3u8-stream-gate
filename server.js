@@ -1,3 +1,4 @@
+import { OUTPUT_PROFILES, profileScaleFilter, profileLevelArgs, srtMaxrate, NATURAL_CADENCE_PROFILES } from './encoding-profiles.js';
 import express from 'express';
 import { classifyHealth } from './health-level.js';
 import cors from 'cors';
@@ -1056,27 +1057,7 @@ const OUTPUT_PROFILE_STATE_FILE = path.join(__dirname, 'output-profiles.json');
 // Threads: 6 por canal transcodificado (8 canales máx → ~48 hilos, holgado
 // en el VPS de 36+ vCPU porque x264 no satura todos los hilos al 100%).
 // ───────────────────────────────────────────────────────────────────────
-const OUTPUT_PROFILES = {
-  passthrough:{ key: 'passthrough',label: 'Passthrough (sin re-encode)', width: '', videoBitrate: '', bufsize: '', audioBitrate: '', preset: '', x264Params: '', passthrough: true },
-  highquality:{ key: 'highquality',label: 'Alta Calidad', width: '720', videoBitrate: '4000k', bufsize: '8000k', audioBitrate: '192k', preset: 'faster',   x264Params: 'rc-lookahead=30:ref=3:bframes=2', threads: 6 },
-  normal:     { key: 'normal',     label: 'Normal',     width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', preset: 'veryfast', x264Params: '' },
-  // Normal Mejorado Pro — MISMO 2000k CBR fijo (sin picos: maxrate = bitrate),
-  // pero exprime cada bit: preset fast (mejor estimación de movimiento que
-  // veryfast), lookahead 40 (~1.3s de anticipación para reservar bits antes
-  // de las panorámicas de fútbol), aq-mode 3 (más bits a zonas complejas),
-  // ref=4/bframes=3/me=umh/subme=8 (predicción de movimiento fina) y denoise
-  // ligero hqdn3d que quita el ruido de la re-compresión previa de la fuente
-  // y libera bits para la imagen real. GOP fijo 2s (scenecut=0) para XUI.
-  normalpro:  { key: 'normalpro',  label: 'Normal Mejorado Pro', width: '720', videoBitrate: '2000k', bufsize: '4000k', audioBitrate: '128k', audioRate: '48000', preset: 'fast', x264Params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=3:aq-strength=1.1:me=umh:subme=8:scenecut=0', denoise: 'hqdn3d=1.5:1.5:6:6', threads: 6 },
-  // HD 720p — equivalente al 720p30 de YouTube live (3000k) y al escalón
-  // 720p de la escalera Netflix. VBV 2x para picos de movimiento.
-  // Clásico 480p · 1000 — validado en Laboratorio (FUTV, 120s: 1.65x, 0 descartados).
-  // CBR fijo 1000k sin picos, filtro espacial leve, sin reducir color.
-  classic1000:{ key: 'classic1000',label: 'Clásico 480p · 1000', width: '480', videoBitrate: '1000k', bufsize: '2000k', audioBitrate: '128k', audioRate: '48000', preset: 'fast', x264Params: 'rc-lookahead=30:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=7:scenecut=0', denoise: 'hqdn3d=1.0:1.0:0:0', threads: 4 },
-  // Clásico Plus — mismo 1000k/480p, preset medium (más CPU, más detalle, misma red).
-  classic1000plus:{ key: 'classic1000plus',label: 'Clásico 480p · 1000 Plus', width: '480', videoBitrate: '1000k', bufsize: '2000k', audioBitrate: '128k', audioRate: '48000', preset: 'medium', x264Params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=2:aq-strength=1.0:me=umh:subme=8:scenecut=0', denoise: 'hqdn3d=1.0:1.0:0:0', threads: 6 },
-  hd720:      { key: 'hd720',      label: 'HD 720p (3000k)', width: '720', videoBitrate: '3000k', maxrate: '3600k', bufsize: '6000k', audioBitrate: '128k', preset: 'faster', x264Params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0', threads: 6 },
-};
+// OUTPUT_PROFILES vive en encoding-profiles.js
 // Perfiles retirados → se remapean al equivalente más cercano de la escalera nueva.
 // sd480/mid576 retirados (Oct 2026): el usuario reportó que "se pegaban" en
 // producción; todo lo que los usaba pasa a Normal / Normal Mejorado Pro.
@@ -1768,12 +1749,13 @@ const startSrtIngest = (process_id) => {
     '-c:v', 'libx264',
     '-preset', vPreset,
     '-profile:v', 'main',
+    ...profileLevelArgs(stageProfile),
     '-threads', '4',
     '-b:v', vBitrate,
-    '-maxrate', vBitrate,
+    '-maxrate', srtMaxrate(stageProfile),
     '-bufsize', vBufsize,
     ...(stageProfile.x264Params ? ['-x264-params', stageProfile.x264Params] : []),
-    '-vf', `scale=-2:${vHeight}${stageProfile.denoise ? ',' + stageProfile.denoise : ''}`,
+    '-vf', `${profileScaleFilter(stageProfile, vHeight)}${stageProfile.denoise ? ',' + stageProfile.denoise : ''}`,
     '-r', srtFps,
     '-vsync', 'cfr',
     '-g', srtGop,
@@ -1782,6 +1764,7 @@ const startSrtIngest = (process_id) => {
     '-c:a', 'aac',
     '-b:a', aBitrate,
     '-ar', '48000',
+    ...(stageProfile.key === 'deportes1200' ? ['-ac', '2'] : []),
     '-max_muxing_queue_size', '1024',
     '-reset_timestamps', '1',
     '-f', 'hls',
@@ -4691,8 +4674,7 @@ app.post('/api/emit', async (req, res) => {
     //     de la fuente: sin -r ni -vsync cfr, evita DUP/DROP cosméticos.
     //   • Deportes 1800 / Ultra Estable 1500 → 30fps forzado (eventos masivos).
     //   • SRT / RTMP / passthrough / Tigo → 30fps forzado (flujo propio).
-    const isStandardProfile = !outputProfile.forceCfr
-      && (outputProfile.key === 'highquality' || outputProfile.key === 'normal' || outputProfile.key === 'normalpro' || outputProfile.key === 'classic1000' || outputProfile.key === 'classic1000plus' || outputProfile.key === 'hd720');
+    const isStandardProfile = !outputProfile.forceCfr && NATURAL_CADENCE_PROFILES.has(outputProfile.key);
     const isNaturalCadence = isStandardProfile
       && !isDisney8RtmpCompatibility
       && !isPassthroughBlock
@@ -4774,12 +4756,13 @@ app.post('/api/emit', async (req, res) => {
         '-c:v', 'libx264',
         '-preset', outputProfile.preset || 'veryfast',
         '-profile:v', 'main',
+        ...profileLevelArgs(outputProfile),
         '-threads', String(outputProfile.threads || 4),
         '-b:v', outputProfile.videoBitrate,
         '-maxrate', outputProfile.maxrate || outputProfile.videoBitrate,
         '-bufsize', outputProfile.bufsize,
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
-        '-vf', ((isCanal6UrlProcess && !isNaturalCadence) ? `scale=-2:${outputProfile.width},fps=30` : `scale=-2:${outputProfile.width}`) + (outputProfile.denoise ? ',' + outputProfile.denoise : ''),
+        '-vf', ((isCanal6UrlProcess && !isNaturalCadence) ? `${profileScaleFilter(outputProfile)},fps=30` : profileScaleFilter(outputProfile)) + (outputProfile.denoise ? ',' + outputProfile.denoise : ''),
         ...(isNaturalCadence ? ['-vsync', 'passthrough'] : ['-r', outputFps]),
         ...(!isNaturalCadence && (isCfrOutput || isCanal6UrlProcess || outputProfile.forceCfr) ? ['-vsync', 'cfr'] : []),
 
@@ -4822,7 +4805,7 @@ app.post('/api/emit', async (req, res) => {
     // 'transcode' → no toca este bloque; usa el perfil estándar de arriba.
     if (isPassthroughBlock) {
       const transcodeFlagsToStrip = new Set([
-        '-c:v', '-preset', '-profile:v', '-threads',
+        '-c:v', '-preset', '-profile:v', '-level:v', '-threads',
         '-b:v', '-maxrate', '-bufsize',
         '-vf', '-r', '-vsync',
         '-g', '-keyint_min', '-sc_threshold',
@@ -5369,12 +5352,13 @@ app.post('/api/emit', async (req, res) => {
             '-c:v', 'libx264',
             '-preset', vPreset,
             '-profile:v', 'main',
+            ...profileLevelArgs(stageProfile),
             '-threads', '4',
             '-b:v', vBitrate,
-            '-maxrate', vBitrate,
+            '-maxrate', srtMaxrate(stageProfile),
             '-bufsize', vBufsize,
             ...(stageProfile.x264Params ? ['-x264-params', stageProfile.x264Params] : []),
-            '-vf', `scale=-2:${vHeight}${stageProfile.denoise ? ',' + stageProfile.denoise : ''}`,
+            '-vf', `${profileScaleFilter(stageProfile, vHeight)}${stageProfile.denoise ? ',' + stageProfile.denoise : ''}`,
             '-r', srtFps,
             '-vsync', 'cfr',
             '-g', srtGop,
@@ -5383,6 +5367,7 @@ app.post('/api/emit', async (req, res) => {
             '-c:a', 'aac',
             '-b:a', aBitrate,
             '-ar', '48000',
+            ...(stageProfile.key === 'deportes1200' ? ['-ac', '2'] : []),
             '-max_muxing_queue_size', '1024',
             '-reset_timestamps', '1',
             '-f', 'hls',
@@ -6778,13 +6763,16 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
       sendLog(process_id, 'info', `📺 Subida: ${srcBitrate || '?'}kbps > 5000 → Re-encode ${outputProfile.label} CBR ${outputProfile.videoBitrate} ${outputProfile.width}p30`);
       videoParams = [
         '-c:v', 'libx264', '-preset', outputProfile.preset || 'veryfast', '-profile:v', 'main',
+        ...profileLevelArgs(outputProfile),
         '-threads', String(outputProfile.threads || 4),
         '-b:v', outputProfile.videoBitrate, '-maxrate', outputProfile.maxrate || outputProfile.videoBitrate, '-bufsize', outputProfile.bufsize,
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
-        '-vf', `scale=-2:${outputProfile.width}${outputProfile.denoise ? ',' + outputProfile.denoise : ''}`,
+        '-vf', `${profileScaleFilter(outputProfile)}${outputProfile.denoise ? ',' + outputProfile.denoise : ''}`,
         '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
       ];
-      audioParams = ['-c:a', 'aac', '-b:a', outputProfile.audioBitrate, '-ar', '44100'];
+      audioParams = outputProfile.key === 'deportes1200'
+        ? ['-c:a', 'aac', '-b:a', outputProfile.audioBitrate, '-ar', '48000', '-ac', '2']
+        : ['-c:a', 'aac', '-b:a', outputProfile.audioBitrate, '-ar', '44100'];
     }
     
     let ffmpegArgs;

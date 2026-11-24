@@ -40,3 +40,4 @@
 - [x] Añadir y validar con muestra local prueba no HD de 1000 kbps sin reintroducir los perfiles SD/Intermedio retirados en producción.
 - [x] Disney 8 RTMP: colchón de entrada HLS para que descargas lentas no pausen la salida (prueba local: pausa 4.5s → <2s).
 - [ ] Verificar Disney 8 con colchón en el VPS durante horas: requiere actualizar el VPS.
+- [ ] Telemetría panel: Q promedio/p95 15min, colores Q, resolución real en tarjeta, bitrate promedio 15min con aviso >1600k (pendiente confirmación)

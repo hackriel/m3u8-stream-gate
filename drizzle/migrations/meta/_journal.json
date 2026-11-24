@@ -43,6 +43,13 @@
       "when": 1795290068228,
       "tag": "0005_lock_pi5_commands",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795540700060,
+      "tag": "0006_add_deportes1200_output_profile",
+      "breakpoints": true
     }
   ]
 }

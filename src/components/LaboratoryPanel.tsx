@@ -11,7 +11,7 @@ type Profile = { id: string; label: string; purpose: string; experimental: boole
 type Job = { id: string; channel: string; status: string; stage: string; startedAt: string; profiles?: Profile[]; results?: Result[]; conclusion?: string; error?: string; sample?: { seconds: number }; reference?: { width: number; height: number; codec: string } };
 type Channel = { id: string; name: string; running: boolean; provider?: string; profile?: string };
 type LabData = { channels: Channel[]; active: Job | null; history: Job[]; profiles?: Profile[]; automation?: { enabled: boolean } };
-const names: Record<string, string> = { normal: 'Normal', normalpro: 'Normal Mejorado Pro', sportsdetail: 'Deportes Detalle 2000', sportsclean: 'Deportes Limpio 2000', classic1000: 'Clásico 480p · 1000', classic1000plus: 'Clásico 480p · 1000 Plus' };
+const names: Record<string, string> = { normal: 'Normal', normalpro: 'Normal Mejorado Pro', sportsdetail: 'Deportes Detalle 2000', sportsclean: 'Deportes Limpio 2000', classic1000: 'Clásico 480p · 1000', classic1000plus: 'Clásico 480p · 1000 Plus', deportes1200: 'Deportes 1200 · 540p' };
 const plannedProfiles: Profile[] = [
   { id: 'normal', label: names.normal, purpose: 'Referencia actual', experimental: false, videoKbps: 2000, audioKbps: 128, height: 720 },
   { id: 'normalpro', label: names.normalpro, purpose: 'Referencia de compresión mejorada', experimental: false, videoKbps: 2000, audioKbps: 128, height: 720 },
@@ -19,6 +19,7 @@ const plannedProfiles: Profile[] = [
   { id: 'sportsclean', label: names.sportsclean, purpose: 'Filtro espacial leve, sin suavizado temporal; prueba para fuentes con ruido', experimental: true, videoKbps: 2000, audioKbps: 128, height: 720 },
   { id: 'classic1000', label: names.classic1000, purpose: 'No HD; menor detalle y filtro espacial leve, sin reducir los colores. Prueba de bajo consumo', experimental: true, videoKbps: 1000, audioKbps: 128, height: 480 },
   { id: 'classic1000plus', label: names.classic1000plus, purpose: 'Mismo Clásico con compresión medium: más CPU para más detalle con la misma red', experimental: true, videoKbps: 1000, audioKbps: 128, height: 480 },
+  { id: 'deportes1200', label: names.deportes1200, purpose: 'VBR con tope 1400k, 540p y audio 96k: menos red y caídas de calidad más suaves en jugadas rápidas', experimental: true, videoKbps: 1100, audioKbps: 96, height: 540 },
 ];
 const time = (value: string) => new Date(value).toLocaleString('es-CR', { timeZone: 'America/Costa_Rica', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
