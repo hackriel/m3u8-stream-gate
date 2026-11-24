@@ -13,7 +13,7 @@ export const LAB_PROFILES = {
   sportsdetail: { label: 'Deportes Detalle 2000', preset: 'faster', params: 'rc-lookahead=25:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=6', purpose: 'Sin filtro de ruido; prueba de detalle y menor esfuerzo', experimental: true },
   sportsclean: { label: 'Deportes Limpio 2000', preset: 'fast', params: 'rc-lookahead=30:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=7', denoise: 'hqdn3d=0.7:0.7:0:0', purpose: 'Filtro espacial leve, sin suavizado temporal; prueba para fuentes con ruido', experimental: true },
   classic1000: { label: 'Clásico 480p · 1000', preset: 'fast', params: 'rc-lookahead=30:ref=3:bframes=2:aq-mode=2:aq-strength=1.0:me=hex:subme=7', denoise: 'hqdn3d=1.0:1.0:0:0', videoKbps: 1000, height: 480, purpose: 'No HD; menor detalle y filtro espacial leve, sin reducir los colores. Prueba de bajo consumo', experimental: true },
-  deportes1200: { label: 'Deportes 1200 · 540p', preset: 'medium', params: 'rc-lookahead=30:bframes=3:b-adapt=2:ref=3:aq-mode=3:aq-strength=0.9:qcomp=0.7:ipratio=1.3:psy-rd=0.8,0:deblock=1,1', scaleFilter: 'scale=-2:540:flags=lanczos,format=yuv420p', videoKbps: 1100, maxKbps: 1400, bufKbps: 2100, audioKbps: 96, level: '3.1', height: 540, purpose: 'VBR con tope 1400k, 540p y audio 96k: menos red y caídas de calidad más suaves en jugadas rápidas', experimental: true },
+  deportes1200: { label: 'Deportes · 540p', preset: 'medium', params: 'rc-lookahead=40:bframes=3:b-adapt=2:ref=3:open-gop=0:aq-mode=3:aq-strength=0.9:qcomp=0.7:psy-rd=0.8,0:deblock=1,1', scaleFilter: 'bwdif=mode=send_frame:parity=auto:deint=interlaced,scale=-2:540:flags=lanczos,format=yuv420p', videoKbps: 1250, maxKbps: 1600, bufKbps: 3200, scenecut: 40, audioKbps: 96, level: '3.1', height: 540, purpose: 'VBR 1250k con tope 1600k, 540p y audio 96k: menos red y caídas de calidad más suaves en jugadas rápidas', experimental: true },
   classic1000plus: { label: 'Clásico 480p · 1000 Plus', preset: 'medium', params: 'rc-lookahead=40:ref=4:bframes=3:aq-mode=2:aq-strength=1.0:me=umh:subme=8', denoise: 'hqdn3d=1.0:1.0:0:0', videoKbps: 1000, height: 480, purpose: 'Mismo Clásico con compresión medium: más CPU para más detalle con la misma red', experimental: true },
 };
 export const laboratoryProfiles = () => Object.entries(LAB_PROFILES).map(([id, p]) => ({ id, label: p.label, purpose: p.purpose, experimental: p.experimental, videoKbps: p.videoKbps || 2000, audioKbps: p.audioKbps || 128, height: p.height || 720 }));
@@ -27,7 +27,7 @@ export function laboratoryArgs(input, output, profile) {
     ...(config.level ? ['-profile:v', 'main', '-level:v', config.level] : []),
     '-threads', '2', '-b:v', `${bitrate}k`, ...(vbr ? [] : ['-minrate', `${bitrate}k`]), '-maxrate', `${config.maxKbps || bitrate}k`, '-bufsize', `${config.bufKbps || bitrate * 2}k`,
     '-pix_fmt', 'yuv420p', '-force_key_frames', 'expr:gte(t,n_forced*2)',
-    '-x264-params', `${vbr ? '' : 'nal-hrd=cbr:'}force-cfr=0:scenecut=0${config.params ? `:${config.params}` : ''}`,
+    '-x264-params', `${vbr ? '' : 'nal-hrd=cbr:'}force-cfr=0:scenecut=${config.scenecut ?? 0}${config.params ? `:${config.params}` : ''}`,
     '-c:a', 'aac', '-b:a', `${config.audioKbps || 128}k`, '-ar', '48000', '-ac', '2', '-af', 'aresample=async=1:min_hard_comp=0.100:first_pts=0',
     '-fs', String(LAB_LIMITS.bytes), '-movflags', '+faststart', output];
 }

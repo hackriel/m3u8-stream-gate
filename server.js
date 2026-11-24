@@ -1,4 +1,4 @@
-import { OUTPUT_PROFILES, profileScaleFilter, profileLevelArgs, srtMaxrate, NATURAL_CADENCE_PROFILES } from './encoding-profiles.js';
+import { OUTPUT_PROFILES, profileScaleFilter, profileLevelArgs, srtMaxrate, NATURAL_CADENCE_PROFILES, profileGopArgs, mergeFflags, profileAudioFilterArgs } from './encoding-profiles.js';
 import express from 'express';
 import { classifyHealth } from './health-level.js';
 import cors from 'cors';
@@ -1740,7 +1740,7 @@ const startSrtIngest = (process_id) => {
     '-hide_banner',
     '-loglevel', 'verbose',
     '-stats',
-    '-fflags', '+genpts+discardcorrupt+nobuffer',
+    '-fflags', mergeFflags('+genpts+discardcorrupt+nobuffer', stageProfile),
     '-analyzeduration', '3000000',
     '-probesize', '2000000',
     '-i', srtInput,
@@ -1758,9 +1758,8 @@ const startSrtIngest = (process_id) => {
     '-vf', `${profileScaleFilter(stageProfile, vHeight)}${stageProfile.denoise ? ',' + stageProfile.denoise : ''}`,
     '-r', srtFps,
     '-vsync', 'cfr',
-    '-g', srtGop,
-    '-keyint_min', srtGop,
-    '-sc_threshold', '0',
+    ...profileGopArgs(stageProfile, srtGop),
+    ...profileAudioFilterArgs(stageProfile),
     '-c:a', 'aac',
     '-b:a', aBitrate,
     '-ar', '48000',
@@ -1786,7 +1785,7 @@ const startSrtIngest = (process_id) => {
     '-hide_banner',
     '-loglevel', 'verbose',
     '-stats',
-    '-fflags', '+genpts+discardcorrupt+nobuffer',
+    '-fflags', mergeFflags('+genpts+discardcorrupt+nobuffer', stageProfile),
     '-analyzeduration', '3000000',
     '-probesize', '2000000',
     '-i', srtInput,
@@ -4728,7 +4727,7 @@ app.post('/api/emit', async (req, res) => {
     ffmpegArgs = [
       ...inputArgs,
       ...hardenedLiveInputArgs,
-      '-fflags', fflags,
+      '-fflags', outputProfile.passthrough ? fflags : mergeFflags(fflags, outputProfile),
       '-analyzeduration', (isUnivisionLikeSource || isAkamaiSource || isProxyScrapedSource) ? '10000000' : analyzeDuration,  // 10s para VLC-like profiles + proxy
       '-probesize', (isUnivisionLikeSource || isAkamaiSource || isProxyScrapedSource) ? '5000000' : probeSize,               // 5MB para VLC-like profiles + proxy
       ...inputSmoothingArgs,
@@ -4766,9 +4765,8 @@ app.post('/api/emit', async (req, res) => {
         ...(isNaturalCadence ? ['-vsync', 'passthrough'] : ['-r', outputFps]),
         ...(!isNaturalCadence && (isCfrOutput || isCanal6UrlProcess || outputProfile.forceCfr) ? ['-vsync', 'cfr'] : []),
 
-        '-g', gopSize,
-        '-keyint_min', gopSize,
-        '-sc_threshold', '0',
+        ...profileGopArgs(outputProfile, gopSize),
+        ...profileAudioFilterArgs(outputProfile),
         '-c:a', 'aac',
         '-b:a', outputProfile.audioBitrate,
         '-ar', outputProfile.audioRate || '44100',
@@ -4782,7 +4780,10 @@ app.post('/api/emit', async (req, res) => {
     // make_zero: si llega un PTS negativo, lo pone en 0 y sigue lineal (nunca retrocede).
     // -async 1: ajusta drift de audio sin pegar saltos audibles.
     if (isHlsTimestampFix) {
-      if (outputProfile.forceCfr && !outputProfile.passthrough) {
+      if (outputProfile.audioFilter && !outputProfile.passthrough) {
+        // El perfil ya trae su propio aresample async; no duplicar -af ni -async.
+        ffmpegArgs.push('-avoid_negative_ts', 'make_zero');
+      } else if (outputProfile.forceCfr && !outputProfile.passthrough) {
         // SD: en vez de `-async 1` (que corrige el drift a saltos, perceptible
         // como micro-freeze periódico), usamos aresample con compensación
         // continua y suave. El video queda CFR puro al fps de la fuente.
@@ -5213,7 +5214,7 @@ app.post('/api/emit', async (req, res) => {
           const outPlaylist = path.join(outDir, 'playlist.m3u8');
           const stage2Args = [
             '-re',
-            '-fflags', '+genpts+discardcorrupt',
+            '-fflags', mergeFflags('+genpts+discardcorrupt', stageProfile),
             '-analyzeduration', '3000000',
             '-probesize', '1500000',
             '-i', TIGO_BUFFER_PLAYLIST,
@@ -5361,9 +5362,8 @@ app.post('/api/emit', async (req, res) => {
             '-vf', `${profileScaleFilter(stageProfile, vHeight)}${stageProfile.denoise ? ',' + stageProfile.denoise : ''}`,
             '-r', srtFps,
             '-vsync', 'cfr',
-            '-g', srtGop,
-            '-keyint_min', srtGop,
-            '-sc_threshold', '0',
+            ...profileGopArgs(stageProfile, srtGop),
+            ...profileAudioFilterArgs(stageProfile),
             '-c:a', 'aac',
             '-b:a', aBitrate,
             '-ar', '48000',
@@ -6768,7 +6768,7 @@ app.post('/api/emit/files', upload.array('files', 10), async (req, res) => {
         '-b:v', outputProfile.videoBitrate, '-maxrate', outputProfile.maxrate || outputProfile.videoBitrate, '-bufsize', outputProfile.bufsize,
         ...(outputProfile.x264Params ? ['-x264-params', outputProfile.x264Params] : []),
         '-vf', `${profileScaleFilter(outputProfile)}${outputProfile.denoise ? ',' + outputProfile.denoise : ''}`,
-        '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'
+        '-r', '30', ...profileGopArgs(outputProfile, '60'), ...profileAudioFilterArgs(outputProfile)
       ];
       audioParams = outputProfile.key === 'deportes1200'
         ? ['-c:a', 'aac', '-b:a', outputProfile.audioBitrate, '-ar', '48000', '-ac', '2']

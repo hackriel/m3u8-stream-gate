@@ -119,7 +119,7 @@ const OUTPUT_PROFILE_LABELS: Record<OutputProfile, string> = {
   normalpro: "Normal Mejorado Pro · 720p CBR 2000k + AAC 128k (fast)",
   classic1000: "Clásico · 480p CBR 1000k + AAC 128k (ahorro de red)",
   classic1000plus: "Clásico Plus · 480p CBR 1000k + AAC 128k (medium, más detalle)",
-  deportes1200: "Deportes 1200 · 540p VBR 1100k (pico 1400k) + AAC 96k",
+  deportes1200: "Deportes · 540p VBR 1250k (pico 1600k) + AAC 96k",
 };
 const OUTPUT_PROFILE_SHORT_LABELS: Record<OutputProfile, string> = {
   passthrough: "COPY",
@@ -2924,7 +2924,7 @@ export default function EmisorM3U8Panel() {
                   : outputProfile === 'hd720'
                   ? 'HD 720p (3000k promedio, picos a 3600k · buffer 2s · preset faster · 6 hilos · AAC 128k · cadencia natural). Es el mismo bitrate que recomienda YouTube para 720p30 y el escalón 720p de la escalera Netflix. Nitidez HD real con ~25% menos datos que Alta Calidad y sin riesgo de congelones (mismo preset rápido que Normal).'
                   : outputProfile === 'deportes1200'
-                  ? 'Deportes 1200 · 540p (VBR 1100k promedio, pico 1400k · compresión medium · AAC 96k 48 kHz · cadencia natural · GOP 2s). Total esperado ~1250-1350 kbps por cliente. Pensado para que las jugadas rápidas se suavicen en vez de ponerse borrosas de golpe. No es HD: confírmalo en Laboratorio durante un partido antes de usarlo en vivo.'
+                  ? 'Deportes · 540p (VBR 1250k promedio, pico 1600k · compresión medium · AAC 96k 48 kHz · cadencia natural · keyframe cada 2s y en cortes · desentrelazado automático). Total esperado ~1400 kbps por cliente. Pensado para que las jugadas rápidas se suavicen en vez de ponerse borrosas de golpe. No es HD: confírmalo en Laboratorio durante un partido antes de usarlo en vivo.'
                   : outputProfile === 'classic1000plus'
                   ? 'Clásico Plus 480p (CBR 1000k fijo · AAC 128k 48 kHz · compresión medium). Misma red que Clásico, más CPU para sacar más detalle en movimiento. Experimental: confírmalo en Laboratorio durante un partido.'
                   : outputProfile === 'classic1000'
