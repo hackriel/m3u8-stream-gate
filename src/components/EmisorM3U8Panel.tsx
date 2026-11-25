@@ -721,6 +721,8 @@ export default function EmisorM3U8Panel() {
         // la selección local del usuario (que vive en localStorage).
         if (lastServerMode === null) {
           lastServerMode = mode;
+          // Si ya está emitiendo, mostrar el modo real del servidor (otro dispositivo pudo elegirlo).
+          if (processesRef.current[TELETICA_URL_INDEX]?.isEmitiendo) setTeleticaMode(prev => (prev !== mode ? mode : prev));
           return;
         }
         // Aplicar solo si el server cambió de valor desde la última lectura
@@ -755,7 +757,11 @@ export default function EmisorM3U8Panel() {
         if (!r.ok) return;
         const { mode } = await r.json();
         if (mode !== 'official' && mode !== 'scraping') return;
-        if (lastServerMode === null) { lastServerMode = mode; return; }
+        if (lastServerMode === null) {
+          lastServerMode = mode;
+          if (processesRef.current[15]?.isEmitiendo) setCanal6Mode(prev => (prev !== mode ? mode : prev));
+          return;
+        }
         if (mode !== lastServerMode) {
           lastServerMode = mode;
           setCanal6Mode(prev => (prev !== mode ? mode : prev));
