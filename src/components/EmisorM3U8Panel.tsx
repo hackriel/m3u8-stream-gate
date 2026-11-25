@@ -853,6 +853,14 @@ export default function EmisorM3U8Panel() {
               });
             }
           }
+          // El canal elegido vive por navegador; si el servidor está emitiendo
+          // con otro, mostrar el real para que todos los dispositivos coincidan.
+          const serverCid = j.telecable?.content_id;
+          if (serverCid && processesRef.current[pid]?.isEmitiendo) {
+            if (pid === 0) setDisney7ContentId(prev => prev === serverCid ? prev : serverCid);
+            else if (pid === DISNEY8_INDEX) setDisney8ContentId(prev => prev === serverCid ? prev : serverCid);
+            else if (pid === CANAL13_INDEX) setCanal13ContentId(prev => prev === serverCid ? prev : serverCid);
+          }
           setTelecableInfos(prev => ({
             ...prev,
             [pid]: {
