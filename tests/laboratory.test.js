@@ -106,6 +106,9 @@ test('Real local capture, seven encodes and persisted results complete without s
     assert.equal(JSON.parse(await fs.readFile(path.join(root,'data','laboratory-results.json'),'utf8'))[0].channel,'futv');
     assert.ok((await fs.readdir(live)).includes('playlist.m3u8'));
   } finally { await lab.stop(); await new Promise(r=>server.close(r)); await fs.rm(root,{recursive:true,force:true}); }
+// Siete codificaciones reales sobre la misma muestra: preset medium + bwdif +
+// deportes1200 superan los 5s por defecto del runner. El proyecto los levanta
+// con `bun run test` (script "test" en package.json).
 });
 test('Rolling capture collects fresh segments and handles a boundary crossing the target', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lab-rolling-'));
